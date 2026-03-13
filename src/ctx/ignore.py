@@ -37,7 +37,7 @@ def load_ignore_patterns(
         3. Combine all pattern lines, filter blanks and comments.
         4. Return pathspec.PathSpec.from_lines("gitwildmatch", combined_lines).
     """
-    default_path = default_patterns_path or (Path(__file__).resolve().parents[2] / ".ctxignore.default")
+    default_path = default_patterns_path or files("ctx").joinpath(".ctxignore.default")
     pattern_lines: list[str] = []
 
     for path in (default_path, target_root / ".ctxignore"):
