@@ -271,21 +271,21 @@ def _file_summary_output_budget(file_count: int) -> int:
 
 
 def _retryable_errors(provider: str) -> tuple[type[Exception], ...]:
-    if provider == "Anthropic":
-        return (
+    retryable_map = {
+        "anthropic": (
             anthropic.APIConnectionError,
             anthropic.APITimeoutError,
             anthropic.RateLimitError,
             anthropic.InternalServerError,
-        )
-    if provider == "OpenAI":
-        return (
+        ),
+        "openai": (
             openai.APIConnectionError,
             openai.APITimeoutError,
             openai.RateLimitError,
             openai.InternalServerError,
-        )
-    return ()
+        ),
+    }
+    return retryable_map.get(provider.lower(), ())
 
 
 def _call_with_retries(provider: str, request: Callable[[], object]) -> object:
