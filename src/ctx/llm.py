@@ -296,8 +296,8 @@ class AnthropicClient:
         if len(summaries) != len(files):
             raise ValueError("Anthropic returned the wrong number of file summaries.")
 
-        input_tokens = int(getattr(getattr(response, "usage", None), "input_tokens", 0) or 0)
-        output_tokens = int(getattr(getattr(response, "usage", None), "output_tokens", 0) or 0)
+        input_tokens = int(getattr(getattr(response, "usage", None), "input_tokens", 0))
+        output_tokens = int(getattr(getattr(response, "usage", None), "output_tokens", 0))
         self.config.tokens_used += input_tokens + output_tokens
         return _build_batch_results(summaries, input_tokens, output_tokens)
 
