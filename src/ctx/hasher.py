@@ -9,9 +9,12 @@ This means a directory hash changes if and only if its contents change.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pathspec
+
+from ctx.ignore import should_ignore
 
 
 def hash_file(path: Path) -> str:
@@ -29,7 +32,15 @@ def hash_file(path: Path) -> str:
         3. Return f"sha256:{digest.hexdigest()}".
         4. On read error (permission, encoding), return "sha256:error".
     """
-    raise NotImplementedError
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(8192), b""):
+                digest.update(chunk)
+    except OSError:
+        return "sha256:error"
+
+    return f"sha256:{digest.hexdigest()}"
 
 
 def hash_directory(
@@ -55,7 +66,25 @@ def hash_directory(
         5. SHA-256 that combined string.
         6. Return f"sha256:{hexdigest}".
     """
-    raise NotImplementedError
+    try:
+        children = sorted(path.iterdir(), key=lambda child: child.name)
+    except OSError:
+        return "sha256:error"
+
+    combined = []
+    for child in children:
+        if should_ignore(child, spec, target_root):
+            continue
+
+        if child.is_dir():
+            child_hash = hash_directory(child, spec, target_root)
+        else:
+            child_hash = hash_file(child)
+
+        combined.append(f"{child.name}:{child_hash}\n")
+
+    digest = hashlib.sha256("".join(combined).encode("utf-8"))
+    return f"sha256:{digest.hexdigest()}"
 
 
 def is_stale(manifest_hash: str, current_hash: str) -> bool:

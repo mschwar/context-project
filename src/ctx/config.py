@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import click
 import yaml
 
 
@@ -68,4 +69,62 @@ def load_config(
            if "openai" read OPENAI_API_KEY. Raise click.UsageError if missing.
         6. Return the Config.
     """
-    raise NotImplementedError
+    config = Config()
+
+    start_dir = target_path if target_path.is_dir() else target_path.parent
+    for directory in (start_dir, *start_dir.parents):
+        config_path = directory / ".ctxconfig"
+        if not config_path.exists():
+            continue
+
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(data, dict):
+            raise click.UsageError(f"Invalid .ctxconfig in {config_path}: expected a YAML mapping.")
+
+        if "provider" in data and data["provider"] is not None:
+            config.provider = str(data["provider"]).strip()
+        if "model" in data and data["model"] is not None:
+            config.model = str(data["model"]).strip()
+        if "max_file_tokens" in data and data["max_file_tokens"] is not None:
+            config.max_file_tokens = int(data["max_file_tokens"])
+        if "max_depth" in data:
+            config.max_depth = None if data["max_depth"] is None else int(data["max_depth"])
+        if "extensions" in data:
+            extensions = data["extensions"]
+            if extensions is None:
+                config.extensions = None
+            elif isinstance(extensions, str):
+                config.extensions = [extensions]
+            elif isinstance(extensions, list) and all(isinstance(item, str) for item in extensions):
+                config.extensions = extensions
+            else:
+                raise click.UsageError(
+                    f"Invalid extensions in {config_path}: expected a string list or null."
+                )
+        break
+
+    env_provider = os.getenv("CTX_PROVIDER")
+    env_model = os.getenv("CTX_MODEL")
+    if env_provider:
+        config.provider = env_provider.strip()
+    if env_model:
+        config.model = env_model.strip()
+
+    if provider is not None:
+        config.provider = provider
+    if model is not None:
+        config.model = model
+    if max_depth is not None:
+        config.max_depth = max_depth
+
+    config.provider = config.provider.strip().lower()
+    if config.provider not in {"anthropic", "openai"}:
+        raise click.UsageError(f"Unsupported provider: {config.provider}")
+
+    api_key_env = "ANTHROPIC_API_KEY" if config.provider == "anthropic" else "OPENAI_API_KEY"
+    api_key = os.getenv(api_key_env, "").strip()
+    if not api_key:
+        raise click.UsageError(f"Missing required environment variable: {api_key_env}")
+
+    config.api_key = api_key
+    return config

@@ -37,7 +37,19 @@ def load_ignore_patterns(
         3. Combine all pattern lines, filter blanks and comments.
         4. Return pathspec.PathSpec.from_lines("gitwildmatch", combined_lines).
     """
-    raise NotImplementedError
+    default_path = default_patterns_path or files("ctx").joinpath(".ctxignore.default")
+    pattern_lines: list[str] = []
+
+    for path in (default_path, target_root / ".ctxignore"):
+        if not path.exists():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            pattern_lines.append(line.rstrip("\r\n"))
+
+    return pathspec.PathSpec.from_lines("gitwildmatch", pattern_lines)
 
 
 def should_ignore(path: Path, spec: pathspec.PathSpec, target_root: Path) -> bool:
@@ -56,4 +68,7 @@ def should_ignore(path: Path, spec: pathspec.PathSpec, target_root: Path) -> boo
         2. For directories, append trailing slash for correct glob matching.
         3. Return spec.match_file(relative_str).
     """
-    raise NotImplementedError
+    relative_str = path.relative_to(target_root).as_posix()
+    if path.is_dir() and relative_str and not relative_str.endswith("/"):
+        relative_str = f"{relative_str}/"
+    return spec.match_file(relative_str)
