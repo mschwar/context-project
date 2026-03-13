@@ -27,7 +27,7 @@ File format:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -74,7 +74,42 @@ def read_manifest(path: Path) -> Optional[Manifest]:
         4. yaml.safe_load the frontmatter into ManifestFrontmatter fields.
         5. Return Manifest(frontmatter, body).
     """
-    raise NotImplementedError
+    manifest_path = path / "CONTEXT.md"
+    if not manifest_path.exists():
+        return None
+
+    text = manifest_path.read_text(encoding="utf-8")
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise ValueError(f"Invalid manifest frontmatter in {manifest_path}")
+
+    closing_index = next((index for index, line in enumerate(lines[1:], start=1) if line.strip() == "---"), None)
+    if closing_index is None:
+        raise ValueError(f"Invalid manifest frontmatter in {manifest_path}")
+
+    frontmatter_data = yaml.safe_load("".join(lines[1:closing_index])) or {}
+    if not isinstance(frontmatter_data, dict):
+        raise ValueError(f"Invalid manifest frontmatter in {manifest_path}")
+
+    generated = frontmatter_data.get("generated", "")
+    if isinstance(generated, datetime):
+        generated = generated.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    elif generated is None:
+        generated = ""
+    else:
+        generated = str(generated)
+
+    frontmatter = ManifestFrontmatter(
+        generated=generated,
+        generator=str(frontmatter_data.get("generator", f"ctx/{__version__}") or ""),
+        model=str(frontmatter_data.get("model", "") or ""),
+        content_hash=str(frontmatter_data.get("content_hash", "") or ""),
+        files=int(frontmatter_data.get("files", 0) or 0),
+        dirs=int(frontmatter_data.get("dirs", 0) or 0),
+        tokens_total=int(frontmatter_data.get("tokens_total", 0) or 0),
+    )
+    body = "".join(lines[closing_index + 1 :])
+    return Manifest(frontmatter=frontmatter, body=body)
 
 
 def write_manifest(
@@ -104,4 +139,14 @@ def write_manifest(
         3. Write: "---\\n" + yaml + "---\\n" + body to path / "CONTEXT.md".
         4. Use UTF-8 encoding.
     """
-    raise NotImplementedError
+    frontmatter = ManifestFrontmatter(
+        generated=datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        model=model,
+        content_hash=content_hash,
+        files=files,
+        dirs=dirs,
+        tokens_total=tokens_total,
+    )
+    yaml_body = yaml.safe_dump(asdict(frontmatter), sort_keys=False, default_flow_style=False)
+    content = f"---\n{yaml_body}---\n{body}"
+    (path / "CONTEXT.md").write_text(content, encoding="utf-8")
