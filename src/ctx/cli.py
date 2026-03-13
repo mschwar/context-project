@@ -8,12 +8,37 @@ Commands:
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import click
 
 from ctx import __version__
+from ctx.config import load_config
+from ctx.generator import GenerateStats, generate_tree, get_status, update_tree
+from ctx.ignore import load_ignore_patterns
+from ctx.llm import create_client
+
+
+def _progress_callback() -> Callable[[Path, int, int], None]:
+    def callback(current_dir: Path, done: int, total: int) -> None:
+        click.echo(f"  [{done}/{total}] Processing {current_dir.name or current_dir}")
+
+    return callback
+
+
+def _echo_generation_errors(stats: GenerateStats) -> None:
+    if not stats.errors:
+        return
+
+    click.echo("Errors:")
+    for error in stats.errors:
+        click.echo(f"  - {error}")
+
+
+def _display_status_path(path: str) -> str:
+    return "." if path == "." else f"./{path}"
 
 
 @click.group()
@@ -40,7 +65,19 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
         6. stats = generate_tree(Path(path), config, client, spec, progress=progress_cb).
         7. Print summary: dirs processed, files processed, tokens used, errors.
     """
-    raise NotImplementedError
+    target_path = Path(path)
+    config = load_config(target_path, provider=provider, model=model, max_depth=max_depth)
+    spec = load_ignore_patterns(target_path)
+    client = create_client(config)
+    progress_cb = _progress_callback()
+
+    click.echo(f"ctx init: generating manifests for {target_path}")
+    stats = generate_tree(target_path, config, client, spec, progress=progress_cb)
+    click.echo(f"Directories processed: {stats.dirs_processed}")
+    click.echo(f"Files processed: {stats.files_processed}")
+    click.echo(f"Tokens used: {stats.tokens_used}")
+    click.echo(f"Errors: {len(stats.errors)}")
+    _echo_generation_errors(stats)
 
 
 @cli.command()
@@ -55,11 +92,23 @@ def update(path: str, provider: Optional[str], model: Optional[str]) -> None:
         2. stats = update_tree(Path(path), config, client, spec, progress=progress_cb).
         3. Print summary: dirs refreshed, dirs skipped (fresh), tokens used.
     """
-    raise NotImplementedError
+    target_path = Path(path)
+    config = load_config(target_path, provider=provider, model=model)
+    spec = load_ignore_patterns(target_path)
+    client = create_client(config)
+    progress_cb = _progress_callback()
+
+    click.echo(f"ctx update: refreshing manifests for {target_path}")
+    stats = update_tree(target_path, config, client, spec, progress=progress_cb)
+    click.echo(f"Directories refreshed: {stats.dirs_processed}")
+    click.echo(f"Directories skipped: {stats.dirs_skipped}")
+    click.echo(f"Tokens used: {stats.tokens_used}")
+    click.echo(f"Errors: {len(stats.errors)}")
+    _echo_generation_errors(stats)
 
 
 @cli.command()
-@click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True), default=".")
+@click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True), default=".", required=False)
 def status(path: str) -> None:
     """Show manifest health across a directory tree.
 
@@ -73,4 +122,16 @@ def status(path: str) -> None:
            missing  ./tests
         4. Print summary counts: N fresh, N stale, N missing.
     """
-    raise NotImplementedError
+    target_path = Path(path)
+    spec = load_ignore_patterns(target_path)
+    results = get_status(target_path, spec, target_path)
+
+    click.echo("STATUS   PATH")
+    for result in results:
+        click.echo(f"{result['status']:<8} {_display_status_path(result['path'])}")
+
+    counts = Counter(result["status"] for result in results)
+    click.echo(
+        f"{counts.get('fresh', 0)} fresh, {counts.get('stale', 0)} stale, "
+        f"{counts.get('missing', 0)} missing"
+    )
