@@ -101,6 +101,19 @@ def _collect_directories(
     return directories
 
 
+def _ordered_directories(
+    root: Path,
+    spec: pathspec.PathSpec,
+    *,
+    max_depth: Optional[int] = None,
+) -> list[Path]:
+    directories = _collect_directories(root, spec, root, max_depth=max_depth)
+    return sorted(
+        directories,
+        key=lambda path: (-len(path.relative_to(root).parts), path.relative_to(root).as_posix()),
+    )
+
+
 def _list_directory_entries(
     path: Path,
     spec: pathspec.PathSpec,
@@ -120,6 +133,47 @@ def _list_directory_entries(
     return files, directories
 
 
+def _binary_file_summary(path: Path) -> FileSummary:
+    return FileSummary(
+        name=path.name,
+        summary=format_binary_info(path),
+        is_binary=True,
+    )
+
+
+def _prepare_file_entry(
+    path: Path,
+    config: Config,
+) -> tuple[FileSummary | tuple[str, str], int]:
+    content: Optional[str] = None
+    if not is_binary_file(path):
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            content = None
+
+    if content is None:
+        return _binary_file_summary(path), 0
+
+    truncated = content[: config.max_file_tokens]
+    return (path.name, truncated), _estimate_tokens(truncated)
+
+
+def _should_regenerate_directory(
+    path: Path,
+    root: Path,
+    spec: pathspec.PathSpec,
+    *,
+    incremental: bool,
+) -> bool:
+    if not incremental:
+        return True
+
+    current_hash = hash_directory(path, spec, root)
+    manifest = read_manifest(path)
+    return manifest is None or is_stale(manifest.frontmatter.content_hash, current_hash)
+
+
 def _generate_directory_manifest(
     path: Path,
     root: Path,
@@ -129,40 +183,21 @@ def _generate_directory_manifest(
 ) -> tuple[int, int, int]:
     files, directories = _list_directory_entries(path, spec, root)
 
-    ordered_entries: list[FileSummary | str] = []
+    ordered_entries: list[FileSummary | tuple[str, str]] = []
     text_inputs: list[tuple[str, str]] = []
     binary_count = 0
     tokens_total = 0
 
     for file_path in files:
-        if is_binary_file(file_path):
+        entry, estimated_tokens = _prepare_file_entry(file_path, config)
+        if isinstance(entry, FileSummary):
             binary_count += 1
-            ordered_entries.append(
-                FileSummary(
-                    name=file_path.name,
-                    summary=format_binary_info(file_path),
-                    is_binary=True,
-                )
-            )
+            ordered_entries.append(entry)
             continue
 
-        try:
-            content = file_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            binary_count += 1
-            ordered_entries.append(
-                FileSummary(
-                    name=file_path.name,
-                    summary=format_binary_info(file_path),
-                    is_binary=True,
-                )
-            )
-            continue
-
-        truncated = content[: config.max_file_tokens]
-        text_inputs.append((file_path.name, truncated))
-        tokens_total += _estimate_tokens(truncated)
-        ordered_entries.append(file_path.name)
+        text_inputs.append(entry)
+        tokens_total += estimated_tokens
+        ordered_entries.append(entry)
 
     text_results = client.summarize_files(path, text_inputs)
     if len(text_results) != len(text_inputs):
@@ -176,7 +211,7 @@ def _generate_directory_manifest(
             continue
 
         result = text_results[text_index]
-        file_summaries.append(FileSummary(name=entry, summary=result.text))
+        file_summaries.append(FileSummary(name=entry[0], summary=result.text))
         text_index += 1
 
     subdir_summaries: list[SubdirSummary] = []
@@ -206,6 +241,45 @@ def _generate_directory_manifest(
     total_tokens_used = sum(result.input_tokens + result.output_tokens for result in text_results)
     total_tokens_used += directory_result.input_tokens + directory_result.output_tokens
     return len(files), binary_count, total_tokens_used
+
+
+def _run_generation(
+    root: Path,
+    config: Config,
+    client: LLMClient,
+    spec: pathspec.PathSpec,
+    *,
+    incremental: bool,
+    progress: Optional[ProgressCallback] = None,
+) -> GenerateStats:
+    stats = GenerateStats()
+    ordered_directories = _ordered_directories(root, spec, max_depth=config.max_depth)
+    total_dirs = len(ordered_directories)
+
+    for index, directory in enumerate(ordered_directories, start=1):
+        try:
+            if not _should_regenerate_directory(directory, root, spec, incremental=incremental):
+                stats.dirs_skipped += 1
+                continue
+
+            file_count, binary_count, tokens_used = _generate_directory_manifest(
+                directory,
+                root,
+                config,
+                client,
+                spec,
+            )
+            stats.dirs_processed += 1
+            stats.files_processed += file_count
+            stats.files_binary += binary_count
+            stats.tokens_used += tokens_used
+        except Exception as exc:
+            stats.errors.append(f"{directory}: {exc}")
+        finally:
+            if progress is not None:
+                progress(directory, index, total_dirs)
+
+    return stats
 
 
 def generate_tree(
@@ -251,34 +325,14 @@ def generate_tree(
            i. Update stats, call progress callback.
         5. Return stats.
     """
-    stats = GenerateStats()
-    directories = _collect_directories(root, spec, root, max_depth=config.max_depth)
-    ordered_directories = sorted(
-        directories,
-        key=lambda path: (-len(path.relative_to(root).parts), path.relative_to(root).as_posix()),
+    return _run_generation(
+        root,
+        config,
+        client,
+        spec,
+        incremental=False,
+        progress=progress,
     )
-    total_dirs = len(ordered_directories)
-
-    for index, directory in enumerate(ordered_directories, start=1):
-        try:
-            file_count, binary_count, tokens_used = _generate_directory_manifest(
-                directory,
-                root,
-                config,
-                client,
-                spec,
-            )
-            stats.dirs_processed += 1
-            stats.files_processed += file_count
-            stats.files_binary += binary_count
-            stats.tokens_used += tokens_used
-        except Exception as exc:
-            stats.errors.append(f"{directory}: {exc}")
-        finally:
-            if progress is not None:
-                progress(directory, index, total_dirs)
-
-    return stats
 
 
 def update_tree(
@@ -311,40 +365,14 @@ def update_tree(
               bottom-up and the parent's hash_directory() will compute a new hash.
         4. Return stats.
     """
-    stats = GenerateStats()
-    directories = _collect_directories(root, spec, root, max_depth=config.max_depth)
-    ordered_directories = sorted(
-        directories,
-        key=lambda path: (-len(path.relative_to(root).parts), path.relative_to(root).as_posix()),
+    return _run_generation(
+        root,
+        config,
+        client,
+        spec,
+        incremental=True,
+        progress=progress,
     )
-    total_dirs = len(ordered_directories)
-
-    for index, directory in enumerate(ordered_directories, start=1):
-        try:
-            current_hash = hash_directory(directory, spec, root)
-            manifest = read_manifest(directory)
-            if manifest is not None and not is_stale(manifest.frontmatter.content_hash, current_hash):
-                stats.dirs_skipped += 1
-                continue
-
-            file_count, binary_count, tokens_used = _generate_directory_manifest(
-                directory,
-                root,
-                config,
-                client,
-                spec,
-            )
-            stats.dirs_processed += 1
-            stats.files_processed += file_count
-            stats.files_binary += binary_count
-            stats.tokens_used += tokens_used
-        except Exception as exc:
-            stats.errors.append(f"{directory}: {exc}")
-        finally:
-            if progress is not None:
-                progress(directory, index, total_dirs)
-
-    return stats
 
 
 def get_status(
