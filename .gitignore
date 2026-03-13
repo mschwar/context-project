@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE / local
+.obsidian/
+.claude/
+*.swp
+
+# Environment
+.env
