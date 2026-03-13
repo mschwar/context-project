@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 
 import pathspec
+import pytest
 
-from ctx.hasher import hash_directory, hash_file, is_stale
+from ctx.hasher import ERROR_HASH, SYMLINK_LOOP_HASH, hash_directory, hash_file, is_stale
 
 
 EMPTY_SPEC = pathspec.PathSpec.from_lines("gitwildmatch", [])
@@ -44,6 +45,16 @@ def test_hash_file_binary(tmp_path) -> None:
     file_path.write_bytes(payload)
 
     assert hash_file(file_path) == _expected_hash(payload)
+
+
+def test_hash_file_logs_warning_on_error(caplog, tmp_path) -> None:
+    missing_file = tmp_path / "missing.txt"
+
+    with caplog.at_level("WARNING"):
+        result = hash_file(missing_file)
+
+    assert result == ERROR_HASH
+    assert "Failed to hash file" in caplog.text
 
 
 def test_hash_directory_basic(tmp_path) -> None:
@@ -92,6 +103,28 @@ def test_hash_directory_order_independent(tmp_path) -> None:
     (second_dir / "b.txt").write_text("b", encoding="utf-8")
 
     assert hash_directory(first_dir, EMPTY_SPEC, first_dir) == hash_directory(second_dir, EMPTY_SPEC, second_dir)
+
+
+def test_hash_directory_detects_symlink_loops(tmp_path) -> None:
+    loop_root = tmp_path / "loop"
+    loop_root.mkdir()
+    (loop_root / "file.txt").write_text("content", encoding="utf-8")
+    loop_link = loop_root / "self"
+
+    try:
+        loop_link.symlink_to(loop_root, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("symlinks are not supported in this environment")
+
+    directory_hash = hash_directory(loop_root, EMPTY_SPEC, loop_root)
+    expected = _expected_directory_hash(
+        [
+            f"file.txt:{hash_file(loop_root / 'file.txt')}\n",
+            f"self:{SYMLINK_LOOP_HASH}\n",
+        ]
+    )
+
+    assert directory_hash == expected
 
 
 def test_is_stale_different() -> None:

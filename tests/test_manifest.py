@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from ctx import __version__
 from ctx.manifest import read_manifest, write_manifest
 
@@ -107,3 +109,17 @@ def test_timestamp_format(tmp_path) -> None:
     assert manifest.frontmatter.generated.endswith("Z")
     parsed = datetime.fromisoformat(manifest.frontmatter.generated.replace("Z", "+00:00"))
     assert parsed.tzinfo == timezone.utc
+
+
+def test_read_manifest_rejects_missing_opening_delimiter(tmp_path) -> None:
+    (tmp_path / "CONTEXT.md").write_text("generated: nope\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Invalid manifest frontmatter"):
+        read_manifest(tmp_path)
+
+
+def test_read_manifest_rejects_missing_closing_delimiter(tmp_path) -> None:
+    (tmp_path / "CONTEXT.md").write_text("---\ngenerated: nope\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Invalid manifest frontmatter"):
+        read_manifest(tmp_path)

@@ -6,7 +6,7 @@ import click
 import pytest
 import yaml
 
-from ctx.config import load_config
+from ctx.config import Config, load_config
 
 
 def _clear_ctx_env(monkeypatch) -> None:
@@ -30,6 +30,12 @@ def test_load_config_defaults(monkeypatch, tmp_path) -> None:
     assert config.max_file_tokens == 8000
     assert config.max_depth is None
     assert config.extensions is None
+
+
+def test_config_repr_redacts_api_key() -> None:
+    config = Config(api_key="super-secret-key")
+
+    assert "super-secret-key" not in repr(config)
 
 
 def test_load_config_reads_nearest_parent_ctxconfig(monkeypatch, tmp_path) -> None:
@@ -89,6 +95,18 @@ def test_load_config_cli_overrides_env(monkeypatch, tmp_path) -> None:
     assert config.provider == "openai"
     assert config.model == "cli-model"
     assert config.max_depth == 5
+    assert config.api_key == "openai-test-key"
+
+
+def test_load_config_uses_openai_default_model(monkeypatch, tmp_path) -> None:
+    _clear_ctx_env(monkeypatch)
+    monkeypatch.setenv("CTX_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+
+    config = load_config(tmp_path)
+
+    assert config.provider == "openai"
+    assert config.model == "gpt-4o-mini"
     assert config.api_key == "openai-test-key"
 
 

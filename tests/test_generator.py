@@ -19,6 +19,8 @@ from ctx.manifest import read_manifest
 
 
 class FakeLLMClient:
+    model = "fake-llm-model"
+
     def __init__(self) -> None:
         self.file_calls: list[tuple[Path, list[tuple[str, str]]]] = []
         self.directory_calls: list[tuple[Path, list[FileSummary], list[SubdirSummary]]] = []
@@ -110,6 +112,7 @@ def test_generate_tree_creates_manifests(tmp_path) -> None:
     for directory in (root, root / "docs", root / "src"):
         manifest = read_manifest(directory)
         assert manifest is not None
+        assert manifest.frontmatter.model == "fake-llm-model"
         assert manifest.body.startswith(f"# {directory.as_posix()}")
 
 

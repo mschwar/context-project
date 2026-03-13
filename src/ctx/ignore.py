@@ -17,11 +17,33 @@ from typing import Optional
 import pathspec
 
 
-def _find_project_root(start: Path) -> Optional[Path]:
-    for directory in (start, *start.parents):
-        if (directory / "pyproject.toml").is_file() or (directory / ".git").exists():
-            return directory
-    return None
+def _pattern_lines(text: str) -> list[str]:
+    lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        lines.append(line.rstrip("\r\n"))
+    return lines
+
+
+def _load_default_patterns(default_patterns_path: Optional[Path]) -> list[str]:
+    if default_patterns_path is not None:
+        return _pattern_lines(default_patterns_path.read_text(encoding="utf-8"))
+
+    try:
+        packaged_default = files("ctx").joinpath(".ctxignore.default")
+        if packaged_default.is_file():
+            return _pattern_lines(packaged_default.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ModuleNotFoundError):
+        pass
+
+    for directory in Path(__file__).resolve().parents:
+        candidate = directory / ".ctxignore.default"
+        if candidate.is_file():
+            return _pattern_lines(candidate.read_text(encoding="utf-8"))
+
+    return []
 
 
 def load_ignore_patterns(
@@ -33,8 +55,7 @@ def load_ignore_patterns(
     Args:
         target_root: Root directory being processed. Look for .ctxignore here.
         default_patterns_path: Path to .ctxignore.default. If None, use the one
-            shipped alongside this package (../../../.ctxignore.default relative
-            to this file, or locate via importlib.resources).
+            shipped alongside this package or the first repo-level fallback found.
 
     Returns:
         A compiled PathSpec object. Use `spec.match_file(relative_path)` to test.
@@ -45,28 +66,11 @@ def load_ignore_patterns(
         3. Combine all pattern lines, filter blanks and comments.
         4. Return pathspec.PathSpec.from_lines("gitwildmatch", combined_lines).
     """
-    packaged_default_path = files("ctx").joinpath(".ctxignore.default")
-    default_path = default_patterns_path
-    if default_path is None:
-        if packaged_default_path.is_file():
-            default_path = packaged_default_path
-        else:
-            project_root = _find_project_root(Path(__file__).resolve().parent)
-            default_path = (
-                project_root / ".ctxignore.default"
-                if project_root is not None
-                else Path(__file__).resolve().with_name(".ctxignore.default")
-            )
-    pattern_lines: list[str] = []
+    pattern_lines = _load_default_patterns(default_patterns_path)
 
-    for path in (default_path, target_root / ".ctxignore"):
-        if not path.is_file():
-            continue
-        for line in path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            pattern_lines.append(line.rstrip("\r\n"))
+    user_patterns_path = target_root / ".ctxignore"
+    if user_patterns_path.exists():
+        pattern_lines.extend(_pattern_lines(user_patterns_path.read_text(encoding="utf-8")))
 
     return pathspec.PathSpec.from_lines("gitwildmatch", pattern_lines)
 
@@ -88,6 +92,11 @@ def should_ignore(path: Path, spec: pathspec.PathSpec, target_root: Path) -> boo
         3. Return spec.match_file(relative_str).
     """
     relative_str = path.relative_to(target_root).as_posix()
-    if path.is_dir() and relative_str and not relative_str.endswith("/"):
+    try:
+        is_directory = path.is_dir()
+    except OSError:
+        is_directory = False
+
+    if is_directory and relative_str and not relative_str.endswith("/"):
         relative_str = f"{relative_str}/"
     return spec.match_file(relative_str)

@@ -174,6 +174,13 @@ def _should_regenerate_directory(
     return manifest is None or is_stale(manifest.frontmatter.content_hash, current_hash)
 
 
+def _manifest_model(config: Config, client: LLMClient) -> str:
+    model = getattr(client, "model", "")
+    if isinstance(model, str) and model.strip():
+        return model.strip()
+    return config.resolved_model()
+
+
 def _generate_directory_manifest(
     path: Path,
     root: Path,
@@ -230,7 +237,7 @@ def _generate_directory_manifest(
     content_hash = hash_directory(path, spec, root)
     write_manifest(
         path,
-        model=config.model,
+        model=_manifest_model(config, client),
         content_hash=content_hash,
         files=len(files),
         dirs=len(directories),
