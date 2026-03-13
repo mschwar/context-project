@@ -13,6 +13,7 @@ the parent is generated, so parent summaries can reference child summaries.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -20,7 +21,10 @@ from typing import Callable, Optional
 import pathspec
 
 from ctx.config import Config
+from ctx.hasher import hash_directory, is_stale
+from ctx.ignore import should_ignore
 from ctx.llm import LLMClient, FileSummary, SubdirSummary
+from ctx.manifest import Manifest, read_manifest, write_manifest
 
 
 @dataclass
@@ -37,6 +41,171 @@ class GenerateStats:
 
 # Type alias for progress callback: (current_dir, dirs_done, dirs_total)
 ProgressCallback = Callable[[Path, int, int], None]
+
+
+def _relative_path_str(path: Path, root: Path) -> str:
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return path.as_posix()
+    if not relative.parts:
+        return "."
+    return relative.as_posix()
+
+
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return max(1, math.ceil(len(text) / 4))
+
+
+def _extract_manifest_summary(manifest: Manifest, directory_name: str) -> str:
+    lines = [line.strip() for line in manifest.body.splitlines()]
+    seen_heading = False
+    for line in lines:
+        if not line:
+            continue
+        if not seen_heading and line.startswith("#"):
+            seen_heading = True
+            continue
+        if seen_heading:
+            return line
+    return f"{directory_name} directory"
+
+
+def _collect_directories(
+    root: Path,
+    spec: pathspec.PathSpec,
+    target_root: Path,
+    *,
+    max_depth: Optional[int] = None,
+) -> list[Path]:
+    directories: list[Path] = []
+
+    def visit(path: Path, depth: int) -> None:
+        directories.append(path)
+        if max_depth is not None and depth >= max_depth:
+            return
+
+        try:
+            children = sorted(path.iterdir(), key=lambda child: child.name)
+        except OSError:
+            return
+
+        for child in children:
+            if not child.is_dir() or should_ignore(child, spec, target_root):
+                continue
+            visit(child, depth + 1)
+
+    visit(root, 0)
+    return directories
+
+
+def _list_directory_entries(
+    path: Path,
+    spec: pathspec.PathSpec,
+    target_root: Path,
+) -> tuple[list[Path], list[Path]]:
+    files: list[Path] = []
+    directories: list[Path] = []
+
+    for child in sorted(path.iterdir(), key=lambda item: item.name):
+        if should_ignore(child, spec, target_root):
+            continue
+        if child.is_dir():
+            directories.append(child)
+        elif child.is_file():
+            files.append(child)
+
+    return files, directories
+
+
+def _generate_directory_manifest(
+    path: Path,
+    root: Path,
+    config: Config,
+    client: LLMClient,
+    spec: pathspec.PathSpec,
+) -> tuple[int, int, int]:
+    files, directories = _list_directory_entries(path, spec, root)
+
+    ordered_entries: list[FileSummary | str] = []
+    text_inputs: list[tuple[str, str]] = []
+    binary_count = 0
+    tokens_total = 0
+
+    for file_path in files:
+        if is_binary_file(file_path):
+            binary_count += 1
+            ordered_entries.append(
+                FileSummary(
+                    name=file_path.name,
+                    summary=format_binary_info(file_path),
+                    is_binary=True,
+                )
+            )
+            continue
+
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            binary_count += 1
+            ordered_entries.append(
+                FileSummary(
+                    name=file_path.name,
+                    summary=format_binary_info(file_path),
+                    is_binary=True,
+                )
+            )
+            continue
+
+        truncated = content[: config.max_file_tokens]
+        text_inputs.append((file_path.name, truncated))
+        tokens_total += _estimate_tokens(truncated)
+        ordered_entries.append(file_path.name)
+
+    text_results = client.summarize_files(path, text_inputs)
+    if len(text_results) != len(text_inputs):
+        raise ValueError(f"Expected {len(text_inputs)} file summaries for {path}, got {len(text_results)}.")
+
+    file_summaries: list[FileSummary] = []
+    text_index = 0
+    for entry in ordered_entries:
+        if isinstance(entry, FileSummary):
+            file_summaries.append(entry)
+            continue
+
+        result = text_results[text_index]
+        file_summaries.append(FileSummary(name=entry, summary=result.text))
+        text_index += 1
+
+    subdir_summaries: list[SubdirSummary] = []
+    for directory in directories:
+        manifest = read_manifest(directory)
+        if manifest is None:
+            continue
+        subdir_summaries.append(
+            SubdirSummary(
+                name=directory.name,
+                summary=_extract_manifest_summary(manifest, directory.name),
+            )
+        )
+
+    directory_result = client.summarize_directory(path, file_summaries, subdir_summaries)
+    content_hash = hash_directory(path, spec, root)
+    write_manifest(
+        path,
+        model=config.model,
+        content_hash=content_hash,
+        files=len(files),
+        dirs=len(directories),
+        tokens_total=tokens_total,
+        body=directory_result.text,
+    )
+
+    total_tokens_used = sum(result.input_tokens + result.output_tokens for result in text_results)
+    total_tokens_used += directory_result.input_tokens + directory_result.output_tokens
+    return len(files), binary_count, total_tokens_used
 
 
 def generate_tree(
@@ -82,7 +251,34 @@ def generate_tree(
            i. Update stats, call progress callback.
         5. Return stats.
     """
-    raise NotImplementedError
+    stats = GenerateStats()
+    directories = _collect_directories(root, spec, root, max_depth=config.max_depth)
+    ordered_directories = sorted(
+        directories,
+        key=lambda path: (-len(path.relative_to(root).parts), path.relative_to(root).as_posix()),
+    )
+    total_dirs = len(ordered_directories)
+
+    for index, directory in enumerate(ordered_directories, start=1):
+        try:
+            file_count, binary_count, tokens_used = _generate_directory_manifest(
+                directory,
+                root,
+                config,
+                client,
+                spec,
+            )
+            stats.dirs_processed += 1
+            stats.files_processed += file_count
+            stats.files_binary += binary_count
+            stats.tokens_used += tokens_used
+        except Exception as exc:
+            stats.errors.append(f"{directory}: {exc}")
+        finally:
+            if progress is not None:
+                progress(directory, index, total_dirs)
+
+    return stats
 
 
 def update_tree(
@@ -115,7 +311,40 @@ def update_tree(
               bottom-up and the parent's hash_directory() will compute a new hash.
         4. Return stats.
     """
-    raise NotImplementedError
+    stats = GenerateStats()
+    directories = _collect_directories(root, spec, root, max_depth=config.max_depth)
+    ordered_directories = sorted(
+        directories,
+        key=lambda path: (-len(path.relative_to(root).parts), path.relative_to(root).as_posix()),
+    )
+    total_dirs = len(ordered_directories)
+
+    for index, directory in enumerate(ordered_directories, start=1):
+        try:
+            current_hash = hash_directory(directory, spec, root)
+            manifest = read_manifest(directory)
+            if manifest is not None and not is_stale(manifest.frontmatter.content_hash, current_hash):
+                stats.dirs_skipped += 1
+                continue
+
+            file_count, binary_count, tokens_used = _generate_directory_manifest(
+                directory,
+                root,
+                config,
+                client,
+                spec,
+            )
+            stats.dirs_processed += 1
+            stats.files_processed += file_count
+            stats.files_binary += binary_count
+            stats.tokens_used += tokens_used
+        except Exception as exc:
+            stats.errors.append(f"{directory}: {exc}")
+        finally:
+            if progress is not None:
+                progress(directory, index, total_dirs)
+
+    return stats
 
 
 def get_status(
@@ -141,7 +370,21 @@ def get_status(
               If hashes match: "fresh". Else: "stale".
         3. Return sorted by path.
     """
-    raise NotImplementedError
+    directories = _collect_directories(root, spec, target_root)
+    results: list[dict] = []
+
+    for directory in directories:
+        manifest = read_manifest(directory)
+        relative_path = _relative_path_str(directory, target_root)
+        if manifest is None:
+            results.append({"path": relative_path, "status": "missing"})
+            continue
+
+        current_hash = hash_directory(directory, spec, target_root)
+        status = "stale" if is_stale(manifest.frontmatter.content_hash, current_hash) else "fresh"
+        results.append({"path": relative_path, "status": status})
+
+    return sorted(results, key=lambda item: item["path"])
 
 
 def is_binary_file(path: Path) -> bool:
@@ -153,7 +396,21 @@ def is_binary_file(path: Path) -> bool:
         3. Try decoding as UTF-8. If UnicodeDecodeError: binary.
         4. Otherwise: text.
     """
-    raise NotImplementedError
+    try:
+        with path.open("rb") as handle:
+            sample = handle.read(8192)
+    except OSError:
+        return True
+
+    if b"\x00" in sample:
+        return True
+
+    try:
+        sample.decode("utf-8")
+    except UnicodeDecodeError:
+        return True
+
+    return False
 
 
 def format_binary_info(path: Path) -> str:
@@ -164,4 +421,11 @@ def format_binary_info(path: Path) -> str:
         2. Get file size, format as KB/MB.
         3. Return f"[binary: {ext}, {size}]".
     """
-    raise NotImplementedError
+    extension = path.suffix.lstrip(".").lower() or "unknown"
+    size_bytes = path.stat().st_size
+    if size_bytes < 1024 * 1024:
+        size = f"{max(1, math.ceil(size_bytes / 1024))}KB"
+    else:
+        size_mb = size_bytes / (1024 * 1024)
+        size = f"{size_mb:.1f}".rstrip("0").rstrip(".") + "MB"
+    return f"[binary: {extension}, {size}]"
