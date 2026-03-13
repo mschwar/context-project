@@ -47,7 +47,6 @@ class Config:
 
     # Runtime stats (populated during run, not from config)
     tokens_used: int = field(default=0, repr=False)
-    cost_usd: float = field(default=0.0, repr=False)
 
     def resolved_model(self) -> str:
         """Return the provider-specific default when no explicit model is set."""

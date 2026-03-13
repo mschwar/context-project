@@ -10,8 +10,10 @@ Both implementations should handle token counting without mutating shared config
 
 from __future__ import annotations
 
+import anthropic
 import json
 import logging
+import openai
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -268,12 +270,34 @@ def _file_summary_output_budget(file_count: int) -> int:
     return min(8192, max(1024, 256 + (file_count * 128)))
 
 
+def _retryable_errors(provider: str) -> tuple[type[Exception], ...]:
+    retryable_map = {
+        "anthropic": (
+            anthropic.APIConnectionError,
+            anthropic.APITimeoutError,
+            anthropic.RateLimitError,
+            anthropic.InternalServerError,
+        ),
+        "openai": (
+            openai.APIConnectionError,
+            openai.APITimeoutError,
+            openai.RateLimitError,
+            openai.InternalServerError,
+        ),
+    }
+    return retryable_map.get(provider.lower(), ())
+
+
 def _call_with_retries(provider: str, request: Callable[[], object]) -> object:
     last_error: Exception | None = None
+    retryable_errors = _retryable_errors(provider)
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
             return request()
         except Exception as exc:
+            if not isinstance(exc, retryable_errors):
+                raise
+
             last_error = exc
             if attempt == RETRY_ATTEMPTS:
                 raise

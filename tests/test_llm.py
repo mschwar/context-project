@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import anthropic
 import click
+import httpx
+import openai
 import pytest
 
 from ctx.config import Config
@@ -21,6 +24,18 @@ from ctx.llm import (
 
 def _placeholder(label: str) -> str:
     return f"{label}-value"
+
+
+def _request() -> httpx.Request:
+    return httpx.Request("POST", "https://example.com/v1/messages")
+
+
+def _anthropic_connection_error() -> Exception:
+    return anthropic.APIConnectionError(request=_request())
+
+
+def _openai_connection_error() -> Exception:
+    return openai.APIConnectionError(request=_request())
 
 
 class _FakeAnthropicFactory:
@@ -160,7 +175,7 @@ def test_anthropic_summarize_directory_returns_markdown_without_mutating_config(
 def test_anthropic_summarize_files_retries_transient_failure(monkeypatch) -> None:
     factory = _FakeAnthropicFactory(
         [
-            RuntimeError("temporary failure"),
+            _anthropic_connection_error(),
             SimpleNamespace(
                 content=[SimpleNamespace(text='["Entrypoint module"]')],
                 usage=SimpleNamespace(input_tokens=12, output_tokens=4),
@@ -177,6 +192,20 @@ def test_anthropic_summarize_files_retries_transient_failure(monkeypatch) -> Non
     assert [result.text for result in results] == ["Entrypoint module"]
     assert sleeps == [1.0]
     assert len(factory.instances[0].calls) == 2
+
+
+def test_anthropic_summarize_files_does_not_retry_non_transient_failure(monkeypatch) -> None:
+    factory = _FakeAnthropicFactory([ValueError("bad input")])
+    sleeps: list[float] = []
+    monkeypatch.setattr("ctx.llm.Anthropic", factory)
+    monkeypatch.setattr("ctx.llm.time.sleep", lambda delay: sleeps.append(delay))
+    client = AnthropicClient(Config(provider="anthropic", api_key=_placeholder("anthropic")))
+
+    with pytest.raises(ValueError, match="bad input"):
+        client.summarize_files(Path("src"), [("main.py", "print('hi')")])
+
+    assert sleeps == []
+    assert len(factory.instances[0].calls) == 1
 
 
 def test_anthropic_summarize_files_scales_output_budget_for_large_batches(monkeypatch) -> None:
@@ -291,7 +320,7 @@ def test_openai_summarize_directory_tracks_tokens_without_mutating_config(monkey
 def test_openai_summarize_directory_retries_transient_failure(monkeypatch) -> None:
     factory = _FakeOpenAIFactory(
         [
-            RuntimeError("temporary failure"),
+            _openai_connection_error(),
             SimpleNamespace(
                 choices=[
                     SimpleNamespace(
@@ -312,3 +341,17 @@ def test_openai_summarize_directory_retries_transient_failure(monkeypatch) -> No
     assert result.text.startswith("# docs")
     assert sleeps == [1.0]
     assert len(factory.instances[0].calls) == 2
+
+
+def test_openai_summarize_directory_does_not_retry_non_transient_failure(monkeypatch) -> None:
+    factory = _FakeOpenAIFactory([TypeError("bad invocation")])
+    sleeps: list[float] = []
+    monkeypatch.setattr("ctx.llm.OpenAI", factory)
+    monkeypatch.setattr("ctx.llm.time.sleep", lambda delay: sleeps.append(delay))
+    client = OpenAIClient(Config(provider="openai", api_key=_placeholder("openai")))
+
+    with pytest.raises(TypeError, match="bad invocation"):
+        client.summarize_directory(Path("docs"), [], [])
+
+    assert sleeps == []
+    assert len(factory.instances[0].calls) == 1
