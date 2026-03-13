@@ -121,7 +121,10 @@ def _extract_json_array(text: str) -> list[str]:
         match = re.search(r"\[[\s\S]*\]", stripped)
         if match is None:
             raise ValueError("LLM response did not contain a JSON array.") from None
-        payload = json.loads(match.group(0))
+        try:
+            payload = json.loads(match.group(0))
+        except json.JSONDecodeError as e:
+            raise ValueError("LLM response contained a malformed JSON array.") from e
 
     if not isinstance(payload, list):
         raise ValueError("LLM response was not a JSON array.")
