@@ -266,7 +266,7 @@ class AnthropicClient:
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self.model = config.model.strip() or Config().model
+        self.model = config.model.strip() or Config.__dataclass_fields__["model"].default
         self.config.model = self.model
         self.client = Anthropic(api_key=config.api_key)
 
