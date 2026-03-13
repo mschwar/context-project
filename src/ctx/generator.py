@@ -402,8 +402,12 @@ def get_status(
     results: list[dict] = []
 
     for directory in directories:
-        manifest = read_manifest(directory)
         relative_path = _relative_path_str(directory, target_root)
+        try:
+            manifest = read_manifest(directory)
+        except ValueError:
+            results.append({"path": relative_path, "status": "stale"})
+            continue
         if manifest is None:
             results.append({"path": relative_path, "status": "missing"})
             continue

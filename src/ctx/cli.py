@@ -21,6 +21,28 @@ from ctx.ignore import load_ignore_patterns
 from ctx.llm import create_client
 
 
+def _build_generation_runtime(
+    path: str,
+    *,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    max_depth: Optional[int] = None,
+) -> tuple[Path, object, object, object, Callable[[Path, int, int], None]]:
+    target_path = Path(path)
+    load_config_kwargs: dict[str, Optional[str] | int] = {
+        "provider": provider,
+        "model": model,
+    }
+    if max_depth is not None:
+        load_config_kwargs["max_depth"] = max_depth
+
+    config = load_config(target_path, **load_config_kwargs)
+    spec = load_ignore_patterns(target_path)
+    client = create_client(config)
+    progress_cb = _progress_callback()
+    return target_path, config, spec, client, progress_cb
+
+
 def _progress_callback() -> Callable[[Path, int, int], None]:
     def callback(current_dir: Path, done: int, total: int) -> None:
         click.echo(f"  [{done}/{total}] Processing {current_dir.name or current_dir}")
@@ -65,11 +87,12 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
         6. stats = generate_tree(Path(path), config, client, spec, progress=progress_cb).
         7. Print summary: dirs processed, files processed, tokens used, errors.
     """
-    target_path = Path(path)
-    config = load_config(target_path, provider=provider, model=model, max_depth=max_depth)
-    spec = load_ignore_patterns(target_path)
-    client = create_client(config)
-    progress_cb = _progress_callback()
+    target_path, config, spec, client, progress_cb = _build_generation_runtime(
+        path,
+        provider=provider,
+        model=model,
+        max_depth=max_depth,
+    )
 
     click.echo(f"ctx init: generating manifests for {target_path}")
     stats = generate_tree(target_path, config, client, spec, progress=progress_cb)
@@ -92,11 +115,11 @@ def update(path: str, provider: Optional[str], model: Optional[str]) -> None:
         2. stats = update_tree(Path(path), config, client, spec, progress=progress_cb).
         3. Print summary: dirs refreshed, dirs skipped (fresh), tokens used.
     """
-    target_path = Path(path)
-    config = load_config(target_path, provider=provider, model=model)
-    spec = load_ignore_patterns(target_path)
-    client = create_client(config)
-    progress_cb = _progress_callback()
+    target_path, config, spec, client, progress_cb = _build_generation_runtime(
+        path,
+        provider=provider,
+        model=model,
+    )
 
     click.echo(f"ctx update: refreshing manifests for {target_path}")
     stats = update_tree(target_path, config, client, spec, progress=progress_cb)
