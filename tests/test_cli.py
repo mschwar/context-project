@@ -7,6 +7,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from ctx import __version__
 from ctx.config import Config
 from ctx.generator import GenerateStats
 
@@ -161,4 +162,4 @@ def test_version_command_outputs_version() -> None:
     result = runner.invoke(cli_module.cli, ["--version"])
 
     assert result.exit_code == 0
-    assert "ctx, version 0.1.0" in result.output
+    assert f"ctx, version {__version__}" in result.output
