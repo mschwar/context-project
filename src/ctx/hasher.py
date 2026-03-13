@@ -10,11 +10,23 @@ This means a directory hash changes if and only if its contents change.
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 
 import pathspec
 
 from ctx.ignore import should_ignore
+
+
+logger = logging.getLogger(__name__)
+
+
+def _sentinel_hash(label: str) -> str:
+    return f"sha256:{hashlib.sha256(f'ctx:{label}'.encode('utf-8')).hexdigest()}"
+
+
+ERROR_HASH = _sentinel_hash("error")
+SYMLINK_LOOP_HASH = _sentinel_hash("symlink-loop")
 
 
 def hash_file(path: Path) -> str:
@@ -30,17 +42,68 @@ def hash_file(path: Path) -> str:
         1. Read file in binary mode, chunked (8KB chunks).
         2. Feed chunks to hashlib.sha256().
         3. Return f"sha256:{digest.hexdigest()}".
-        4. On read error (permission, encoding), return "sha256:error".
+        4. On read error, log and return a stable error sentinel hash.
     """
     digest = hashlib.sha256()
     try:
         with path.open("rb") as handle:
             for chunk in iter(lambda: handle.read(8192), b""):
                 digest.update(chunk)
-    except OSError:
-        return "sha256:error"
+    except OSError as exc:
+        logger.warning("Failed to hash file %s: %s", path, exc)
+        return ERROR_HASH
 
     return f"sha256:{digest.hexdigest()}"
+
+
+def _path_identity(path: Path) -> str:
+    try:
+        return str(path.resolve(strict=False))
+    except (OSError, RuntimeError):
+        return str(path.absolute())
+
+
+def _hash_directory(
+    path: Path,
+    spec: pathspec.PathSpec,
+    target_root: Path,
+    active_paths: set[str],
+) -> str:
+    identity = _path_identity(path)
+    if identity in active_paths:
+        logger.warning("Detected recursive symlink loop while hashing %s", path)
+        return SYMLINK_LOOP_HASH
+
+    active_paths.add(identity)
+    try:
+        try:
+            children = sorted(path.iterdir(), key=lambda child: child.name)
+        except OSError as exc:
+            logger.warning("Failed to list directory %s: %s", path, exc)
+            return ERROR_HASH
+
+        combined: list[str] = []
+        for child in children:
+            if should_ignore(child, spec, target_root):
+                continue
+
+            try:
+                is_directory = child.is_dir()
+            except OSError as exc:
+                logger.warning("Failed to inspect path %s: %s", child, exc)
+                child_hash = ERROR_HASH
+            else:
+                if is_directory:
+                    child_hash = _hash_directory(child, spec, target_root, active_paths)
+                else:
+                    child_hash = hash_file(child)
+
+            combined.append(f"{child.name}:{child_hash}\n")
+
+        digest = hashlib.sha256("".join(combined).encode("utf-8"))
+        return f"sha256:{digest.hexdigest()}"
+    finally:
+        active_paths.remove(identity)
 
 
 def hash_directory(
@@ -62,29 +125,12 @@ def hash_directory(
         1. List immediate children (files + dirs), sorted by name.
         2. Filter out ignored paths using spec.
         3. For each child: if file, hash_file(); if dir, hash_directory() (recursive).
-        4. Build string: "childname:childhash\\n" for each child, sorted.
-        5. SHA-256 that combined string.
-        6. Return f"sha256:{hexdigest}".
+        4. Detect recursive directory cycles and substitute a stable sentinel hash.
+        5. Build string: "childname:childhash\\n" for each child, sorted.
+        6. SHA-256 that combined string.
+        7. Return f"sha256:{hexdigest}".
     """
-    try:
-        children = sorted(path.iterdir(), key=lambda child: child.name)
-    except OSError:
-        return "sha256:error"
-
-    combined = []
-    for child in children:
-        if should_ignore(child, spec, target_root):
-            continue
-
-        if child.is_dir():
-            child_hash = hash_directory(child, spec, target_root)
-        else:
-            child_hash = hash_file(child)
-
-        combined.append(f"{child.name}:{child_hash}\n")
-
-    digest = hashlib.sha256("".join(combined).encode("utf-8"))
-    return f"sha256:{digest.hexdigest()}"
+    return _hash_directory(path, spec, target_root, set())
 
 
 def is_stale(manifest_hash: str, current_hash: str) -> bool:

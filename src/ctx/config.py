@@ -8,7 +8,9 @@ Resolution order (highest priority first):
 
 Built-in defaults:
     provider: "anthropic"
-    model: "claude-haiku-4-5-20251001"
+    model: provider-specific default
+        - anthropic: "claude-haiku-4-5-20251001"
+        - openai: "gpt-4o-mini"
     max_file_tokens: 8000  (truncate files larger than this before sending to LLM)
     max_depth: None  (unlimited)
     extensions: None  (all text files)
@@ -25,13 +27,20 @@ import click
 import yaml
 
 
+DEFAULT_PROVIDER = "anthropic"
+DEFAULT_MODELS = {
+    "anthropic": "claude-haiku-4-5-20251001",
+    "openai": "gpt-4o-mini",
+}
+
+
 @dataclass
 class Config:
     """Resolved configuration for a ctx run."""
 
-    provider: str = "anthropic"
-    model: str = "claude-haiku-4-5-20251001"
-    api_key: str = ""
+    provider: str = DEFAULT_PROVIDER
+    model: str = ""
+    api_key: str = field(default="", repr=False)
     max_file_tokens: int = 8000
     max_depth: Optional[int] = None
     extensions: Optional[list[str]] = None  # None = all text files
@@ -39,6 +48,12 @@ class Config:
     # Runtime stats (populated during run, not from config)
     tokens_used: int = field(default=0, repr=False)
     cost_usd: float = field(default=0.0, repr=False)
+
+    def resolved_model(self) -> str:
+        """Return the provider-specific default when no explicit model is set."""
+
+        provider = (self.provider or DEFAULT_PROVIDER).strip().lower() or DEFAULT_PROVIDER
+        return self.model.strip() or DEFAULT_MODELS.get(provider, DEFAULT_MODELS[DEFAULT_PROVIDER])
 
 
 def load_config(
@@ -118,8 +133,9 @@ def load_config(
         config.max_depth = max_depth
 
     config.provider = config.provider.strip().lower()
-    if config.provider not in {"anthropic", "openai"}:
+    if config.provider not in DEFAULT_MODELS:
         raise click.UsageError(f"Unsupported provider: {config.provider}")
+    config.model = config.resolved_model()
 
     api_key_env = "ANTHROPIC_API_KEY" if config.provider == "anthropic" else "OPENAI_API_KEY"
     api_key = os.getenv(api_key_env, "").strip()
