@@ -343,7 +343,7 @@ class OpenAIClient:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.model = config.model.strip() if config.model else ""
-        if not self.model or self.model == Config().model:
+        if not self.model or self.model == Config.__dataclass_fields__["model"].default:
             self.model = "gpt-4o-mini"
         self.config.model = self.model
         self.client = OpenAI(api_key=config.api_key)
