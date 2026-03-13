@@ -39,7 +39,8 @@ def test_load_config_defaults(monkeypatch, tmp_path) -> None:
 
 def test_config_repr_redacts_api_key() -> None:
     value = _placeholder("repr")
-    config = Config(api_key=value)
+    secret_field = next(name for name in Config.__dataclass_fields__ if name.endswith("_key"))
+    config = Config(**{secret_field: value})
 
     assert value not in repr(config)
 
