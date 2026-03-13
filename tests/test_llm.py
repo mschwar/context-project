@@ -125,6 +125,28 @@ def test_anthropic_summarize_directory_returns_markdown(monkeypatch) -> None:
     assert "Subdirectory summaries:" in factory.instances[0].calls[0]["messages"][0]["content"]
 
 
+def test_anthropic_summarize_files_scales_output_budget_for_large_batches(monkeypatch) -> None:
+    responses = [
+        SimpleNamespace(
+            content=[
+                SimpleNamespace(
+                    text=str([f"Summary {index}" for index in range(20)]).replace("'", '"')
+                )
+            ],
+            usage=SimpleNamespace(input_tokens=40, output_tokens=20),
+        )
+    ]
+    factory = _FakeAnthropicFactory(responses)
+    monkeypatch.setattr("ctx.llm.Anthropic", factory)
+    config = Config(provider="anthropic", api_key="anthropic-key")
+    client = AnthropicClient(config)
+
+    files = [(f"file_{index}.py", f"print({index})") for index in range(20)]
+    client.summarize_files(Path("src"), files)
+
+    assert factory.instances[0].calls[0]["max_tokens"] == 2816
+
+
 def test_openai_summarize_files_uses_openai_default_model(monkeypatch) -> None:
     factory = _FakeOpenAIFactory(
         [
@@ -152,6 +174,30 @@ def test_openai_summarize_files_uses_openai_default_model(monkeypatch) -> None:
     assert [result.text for result in results] == ["CLI entrypoint", "Utilities"]
     assert config.tokens_used == 11
     assert factory.instances[0].calls[0]["model"] == "gpt-4o-mini"
+
+
+def test_openai_summarize_files_scales_output_budget_for_large_batches(monkeypatch) -> None:
+    responses = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=str([f"Summary {index}" for index in range(20)]).replace("'", '"')
+                    )
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=40, completion_tokens=20),
+        )
+    ]
+    factory = _FakeOpenAIFactory(responses)
+    monkeypatch.setattr("ctx.llm.OpenAI", factory)
+    config = Config(provider="openai", api_key="openai-key", model="gpt-5-mini")
+    client = OpenAIClient(config)
+
+    files = [(f"file_{index}.py", f"print({index})") for index in range(20)]
+    client.summarize_files(Path("src"), files)
+
+    assert factory.instances[0].calls[0]["max_completion_tokens"] == 2816
 
 
 def test_openai_summarize_directory_tracks_tokens(monkeypatch) -> None:

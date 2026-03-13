@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ctx.ignore import load_ignore_patterns, should_ignore
 
 
@@ -22,6 +24,26 @@ def test_load_ignore_patterns_merges_default_and_user(tmp_path) -> None:
     assert spec.match_file("module.pyc")
     assert spec.match_file("custom/")
     assert spec.match_file("server.log")
+
+
+def test_load_ignore_patterns_finds_project_root_default_when_package_file_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    project_root = tmp_path / "repo"
+    module_dir = project_root / "src" / "ctx"
+    target_root = project_root / "target"
+    module_dir.mkdir(parents=True)
+    target_root.mkdir()
+    (project_root / "pyproject.toml").write_text("[project]\nname = 'ctx'\n", encoding="utf-8")
+    (project_root / ".ctxignore.default").write_text("fallback.txt\n", encoding="utf-8")
+
+    monkeypatch.setattr("ctx.ignore.files", lambda _package: tmp_path / "missing-package-resource")
+    monkeypatch.setattr("ctx.ignore.__file__", str(module_dir / "ignore.py"))
+
+    spec = load_ignore_patterns(target_root)
+
+    assert spec.match_file("fallback.txt")
 
 
 def test_should_ignore_directory_appends_trailing_slash(tmp_path) -> None:

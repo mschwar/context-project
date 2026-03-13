@@ -17,6 +17,13 @@ from typing import Optional
 import pathspec
 
 
+def _find_project_root(start: Path) -> Optional[Path]:
+    for directory in (start, *start.parents):
+        if (directory / "pyproject.toml").is_file() or (directory / ".git").exists():
+            return directory
+    return None
+
+
 def load_ignore_patterns(
     target_root: Path,
     default_patterns_path: Optional[Path] = None,
@@ -41,15 +48,19 @@ def load_ignore_patterns(
     packaged_default_path = files("ctx").joinpath(".ctxignore.default")
     default_path = default_patterns_path
     if default_path is None:
-        default_path = (
-            packaged_default_path
-            if packaged_default_path.is_file()
-            else Path(__file__).resolve().parents[2] / ".ctxignore.default"
-        )
+        if packaged_default_path.is_file():
+            default_path = packaged_default_path
+        else:
+            project_root = _find_project_root(Path(__file__).resolve().parent)
+            default_path = (
+                project_root / ".ctxignore.default"
+                if project_root is not None
+                else Path(__file__).resolve().with_name(".ctxignore.default")
+            )
     pattern_lines: list[str] = []
 
     for path in (default_path, target_root / ".ctxignore"):
-        if not path.exists():
+        if not path.is_file():
             continue
         for line in path.read_text(encoding="utf-8").splitlines():
             stripped = line.strip()

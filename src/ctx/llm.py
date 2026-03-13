@@ -245,6 +245,10 @@ def _build_batch_results(
     return results
 
 
+def _file_summary_output_budget(file_count: int) -> int:
+    return min(8192, max(1024, 256 + (file_count * 128)))
+
+
 class AnthropicClient:
     """Anthropic (Claude) implementation of LLMClient.
 
@@ -278,7 +282,7 @@ class AnthropicClient:
 
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=1024,
+            max_tokens=_file_summary_output_budget(len(files)),
             temperature=0,
             system=(
                 "You summarize files for a directory manifest. "
@@ -357,7 +361,7 @@ class OpenAIClient:
         response = self.client.chat.completions.create(
             model=self.model,
             temperature=0,
-            max_completion_tokens=1024,
+            max_completion_tokens=_file_summary_output_budget(len(files)),
             messages=[
                 {
                     "role": "system",
