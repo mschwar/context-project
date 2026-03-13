@@ -10,6 +10,7 @@ Pattern resolution:
 
 from __future__ import annotations
 
+from importlib.resources import files
 from pathlib import Path
 from typing import Optional
 
@@ -37,7 +38,14 @@ def load_ignore_patterns(
         3. Combine all pattern lines, filter blanks and comments.
         4. Return pathspec.PathSpec.from_lines("gitwildmatch", combined_lines).
     """
-    default_path = default_patterns_path or files("ctx").joinpath(".ctxignore.default")
+    packaged_default_path = files("ctx").joinpath(".ctxignore.default")
+    default_path = default_patterns_path
+    if default_path is None:
+        default_path = (
+            packaged_default_path
+            if packaged_default_path.is_file()
+            else Path(__file__).resolve().parents[2] / ".ctxignore.default"
+        )
     pattern_lines: list[str] = []
 
     for path in (default_path, target_root / ".ctxignore"):
