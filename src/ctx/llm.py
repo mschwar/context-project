@@ -21,7 +21,7 @@ import click
 from anthropic import Anthropic
 from openai import OpenAI
 
-from ctx.config import Config, DEFAULT_MODELS
+from ctx.config import Config
 
 
 logger = logging.getLogger(__name__)
@@ -397,7 +397,7 @@ class OpenAIClient:
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self.model = config.model.strip() or DEFAULT_MODELS["openai"]
+        self.model = config.resolved_model()
         self.client = OpenAI(api_key=config.api_key)
 
     def summarize_files(

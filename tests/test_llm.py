@@ -19,6 +19,10 @@ from ctx.llm import (
 )
 
 
+def _placeholder(label: str) -> str:
+    return f"{label}-value"
+
+
 class _FakeAnthropicFactory:
     def __init__(self, responses: list[object]) -> None:
         self.instances: list[SimpleNamespace] = []
@@ -62,21 +66,23 @@ class _FakeOpenAIFactory:
 def test_create_client_returns_anthropic(monkeypatch) -> None:
     factory = _FakeAnthropicFactory([])
     monkeypatch.setattr("ctx.llm.Anthropic", factory)
+    value = _placeholder("anthropic")
 
-    client = create_client(Config(provider="anthropic", api_key="anthropic-key"))
+    client = create_client(Config(provider="anthropic", api_key=value))
 
     assert isinstance(client, AnthropicClient)
-    assert factory.instances[0].api_key == "anthropic-key"
+    assert factory.instances[0].api_key == value
 
 
 def test_create_client_returns_openai(monkeypatch) -> None:
     factory = _FakeOpenAIFactory([])
     monkeypatch.setattr("ctx.llm.OpenAI", factory)
+    value = _placeholder("openai")
 
-    client = create_client(Config(provider="openai", api_key="openai-key"))
+    client = create_client(Config(provider="openai", api_key=value))
 
     assert isinstance(client, OpenAIClient)
-    assert factory.instances[0].api_key == "openai-key"
+    assert factory.instances[0].api_key == value
 
 
 def test_create_client_rejects_unknown_provider() -> None:
@@ -100,7 +106,7 @@ def test_anthropic_summarize_files_parses_json_without_mutating_config(monkeypat
         ]
     )
     monkeypatch.setattr("ctx.llm.Anthropic", factory)
-    config = Config(provider="anthropic", api_key="anthropic-key", model="claude-custom")
+    config = Config(provider="anthropic", api_key=_placeholder("anthropic"), model="claude-custom")
     client = AnthropicClient(config)
 
     results = client.summarize_files(
@@ -134,7 +140,7 @@ def test_anthropic_summarize_directory_returns_markdown_without_mutating_config(
         ]
     )
     monkeypatch.setattr("ctx.llm.Anthropic", factory)
-    config = Config(provider="anthropic", api_key="anthropic-key", model="claude-custom")
+    config = Config(provider="anthropic", api_key=_placeholder("anthropic"), model="claude-custom")
     client = AnthropicClient(config)
 
     result = client.summarize_directory(
@@ -164,7 +170,7 @@ def test_anthropic_summarize_files_retries_transient_failure(monkeypatch) -> Non
     sleeps: list[float] = []
     monkeypatch.setattr("ctx.llm.Anthropic", factory)
     monkeypatch.setattr("ctx.llm.time.sleep", lambda delay: sleeps.append(delay))
-    client = AnthropicClient(Config(provider="anthropic", api_key="anthropic-key"))
+    client = AnthropicClient(Config(provider="anthropic", api_key=_placeholder("anthropic")))
 
     results = client.summarize_files(Path("src"), [("main.py", "print('hi')")])
 
@@ -186,7 +192,7 @@ def test_anthropic_summarize_files_scales_output_budget_for_large_batches(monkey
     ]
     factory = _FakeAnthropicFactory(responses)
     monkeypatch.setattr("ctx.llm.Anthropic", factory)
-    client = AnthropicClient(Config(provider="anthropic", api_key="anthropic-key"))
+    client = AnthropicClient(Config(provider="anthropic", api_key=_placeholder("anthropic")))
 
     files = [(f"file_{index}.py", f"print({index})") for index in range(20)]
     client.summarize_files(Path("src"), files)
@@ -208,7 +214,7 @@ def test_openai_summarize_files_uses_openai_default_model_without_mutating_confi
         ]
     )
     monkeypatch.setattr("ctx.llm.OpenAI", factory)
-    config = Config(provider="openai", api_key="openai-key")
+    config = Config(provider="openai", api_key=_placeholder("openai"))
     client = OpenAIClient(config)
 
     results = client.summarize_files(
@@ -239,7 +245,9 @@ def test_openai_summarize_files_scales_output_budget_for_large_batches(monkeypat
     ]
     factory = _FakeOpenAIFactory(responses)
     monkeypatch.setattr("ctx.llm.OpenAI", factory)
-    client = OpenAIClient(Config(provider="openai", api_key="openai-key", model="gpt-5-mini"))
+    client = OpenAIClient(
+        Config(provider="openai", api_key=_placeholder("openai"), model="gpt-5-mini")
+    )
 
     files = [(f"file_{index}.py", f"print({index})") for index in range(20)]
     client.summarize_files(Path("src"), files)
@@ -263,7 +271,7 @@ def test_openai_summarize_directory_tracks_tokens_without_mutating_config(monkey
         ]
     )
     monkeypatch.setattr("ctx.llm.OpenAI", factory)
-    config = Config(provider="openai", api_key="openai-key", model="gpt-5-mini")
+    config = Config(provider="openai", api_key=_placeholder("openai"), model="gpt-5-mini")
     client = OpenAIClient(config)
 
     result = client.summarize_directory(
@@ -297,7 +305,7 @@ def test_openai_summarize_directory_retries_transient_failure(monkeypatch) -> No
     sleeps: list[float] = []
     monkeypatch.setattr("ctx.llm.OpenAI", factory)
     monkeypatch.setattr("ctx.llm.time.sleep", lambda delay: sleeps.append(delay))
-    client = OpenAIClient(Config(provider="openai", api_key="openai-key"))
+    client = OpenAIClient(Config(provider="openai", api_key=_placeholder("openai")))
 
     result = client.summarize_directory(Path("docs"), [], [])
 

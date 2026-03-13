@@ -18,24 +18,30 @@ def _write_ctxconfig(path, data: dict) -> None:
     (path / ".ctxconfig").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
 
+def _placeholder(label: str) -> str:
+    return f"{label}-value"
+
+
 def test_load_config_defaults(monkeypatch, tmp_path) -> None:
     _clear_ctx_env(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    anthropic_value = _placeholder("anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", anthropic_value)
 
     config = load_config(tmp_path)
 
     assert config.provider == "anthropic"
     assert config.model == "claude-haiku-4-5-20251001"
-    assert config.api_key == "anthropic-test-key"
+    assert config.api_key == anthropic_value
     assert config.max_file_tokens == 8000
     assert config.max_depth is None
     assert config.extensions is None
 
 
 def test_config_repr_redacts_api_key() -> None:
-    config = Config(api_key="super-secret-key")
+    value = _placeholder("repr")
+    config = Config(api_key=value)
 
-    assert "super-secret-key" not in repr(config)
+    assert value not in repr(config)
 
 
 def test_load_config_reads_nearest_parent_ctxconfig(monkeypatch, tmp_path) -> None:
@@ -55,13 +61,14 @@ def test_load_config_reads_nearest_parent_ctxconfig(monkeypatch, tmp_path) -> No
             "extensions": [".py", ".md"],
         },
     )
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    openai_value = _placeholder("openai")
+    monkeypatch.setenv("OPENAI_API_KEY", openai_value)
 
     config = load_config(nested_dir)
 
     assert config.provider == "openai"
     assert config.model == "gpt-5-mini"
-    assert config.api_key == "openai-test-key"
+    assert config.api_key == openai_value
     assert config.max_file_tokens == 1234
     assert config.max_depth == 2
     assert config.extensions == [".py", ".md"]
@@ -72,14 +79,15 @@ def test_load_config_env_overrides_file(monkeypatch, tmp_path) -> None:
     _write_ctxconfig(tmp_path, {"provider": "anthropic", "model": "file-model", "max_depth": 1})
     monkeypatch.setenv("CTX_PROVIDER", "openai")
     monkeypatch.setenv("CTX_MODEL", "env-model")
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    openai_value = _placeholder("openai")
+    monkeypatch.setenv("OPENAI_API_KEY", openai_value)
 
     config = load_config(tmp_path)
 
     assert config.provider == "openai"
     assert config.model == "env-model"
     assert config.max_depth == 1
-    assert config.api_key == "openai-test-key"
+    assert config.api_key == openai_value
 
 
 def test_load_config_cli_overrides_env(monkeypatch, tmp_path) -> None:
@@ -87,27 +95,30 @@ def test_load_config_cli_overrides_env(monkeypatch, tmp_path) -> None:
     _write_ctxconfig(tmp_path, {"provider": "anthropic", "model": "file-model"})
     monkeypatch.setenv("CTX_PROVIDER", "anthropic")
     monkeypatch.setenv("CTX_MODEL", "env-model")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    anthropic_value = _placeholder("anthropic")
+    openai_value = _placeholder("openai")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", anthropic_value)
+    monkeypatch.setenv("OPENAI_API_KEY", openai_value)
 
     config = load_config(tmp_path, provider="openai", model="cli-model", max_depth=5)
 
     assert config.provider == "openai"
     assert config.model == "cli-model"
     assert config.max_depth == 5
-    assert config.api_key == "openai-test-key"
+    assert config.api_key == openai_value
 
 
 def test_load_config_uses_openai_default_model(monkeypatch, tmp_path) -> None:
     _clear_ctx_env(monkeypatch)
     monkeypatch.setenv("CTX_PROVIDER", "openai")
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    openai_value = _placeholder("openai")
+    monkeypatch.setenv("OPENAI_API_KEY", openai_value)
 
     config = load_config(tmp_path)
 
     assert config.provider == "openai"
     assert config.model == "gpt-4o-mini"
-    assert config.api_key == "openai-test-key"
+    assert config.api_key == openai_value
 
 
 def test_load_config_missing_api_key(monkeypatch, tmp_path) -> None:
