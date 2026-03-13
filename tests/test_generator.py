@@ -183,3 +183,19 @@ def test_get_status(tmp_path) -> None:
         {"path": "docs", "status": "missing"},
         {"path": "src", "status": "stale"},
     ]
+
+
+def test_get_status_marks_invalid_manifest_stale(tmp_path) -> None:
+    root = _copy_sample_project(tmp_path)
+    spec = load_ignore_patterns(root)
+    generate_tree(root, Config(api_key="test-key"), FakeLLMClient(), spec)
+
+    (root / "docs" / "CONTEXT.md").write_text("not valid frontmatter", encoding="utf-8")
+
+    statuses = get_status(root, spec, root)
+
+    assert statuses == [
+        {"path": ".", "status": "fresh"},
+        {"path": "docs", "status": "stale"},
+        {"path": "src", "status": "fresh"},
+    ]
