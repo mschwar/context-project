@@ -5,6 +5,12 @@ from __future__ import annotations
 from ctx.ignore import load_ignore_patterns, should_ignore
 
 
+def test_load_ignore_patterns_uses_repo_default_file(tmp_path) -> None:
+    spec = load_ignore_patterns(tmp_path)
+
+    assert spec.match_file("CONTEXT.md")
+
+
 def test_load_ignore_patterns_merges_default_and_user(tmp_path) -> None:
     default_patterns = tmp_path / ".ctxignore.default"
     default_patterns.write_text("# defaults\nnode_modules/\n*.pyc\n", encoding="utf-8")
