@@ -6,12 +6,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ctx.watcher import _DebounceHandler, _FakeEvent, _should_process_event
+from ctx.watcher import _DebounceHandler, _should_process_event
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+class _FakeEvent:
+    """Minimal stand-in for FileSystemEvent used in tests."""
+    def __init__(self, path: Path, *, is_directory: bool = False) -> None:
+        self.src_path = str(path)
+        self.is_directory = is_directory
+
 
 def _make_event(path: str | Path, *, is_directory: bool = False) -> _FakeEvent:
     return _FakeEvent(Path(path), is_directory=is_directory)
@@ -56,8 +63,7 @@ def test_ignores_ctxignored_path(tmp_path):
 # _DebounceHandler
 # ---------------------------------------------------------------------------
 
-@patch("threading.Timer")
-def test_debounce_calls_on_change_once_for_rapid_events(mock_timer, tmp_path):
+def test_debounce_calls_on_change_once_for_rapid_events(tmp_path):
     """Multiple events for the same file within the debounce window → one callback."""
     spec = _load_spec(tmp_path)
     calls: list[Path] = []
@@ -67,13 +73,8 @@ def test_debounce_calls_on_change_once_for_rapid_events(mock_timer, tmp_path):
     for _ in range(5):
         handler.on_modified(_make_event(target))
 
-    # Check a timer was created and get its callback
-    mock_timer.assert_called()
-    callback, args = mock_timer.call_args.args[1], mock_timer.call_args.args[2]
-
-    # Manually fire the callback
-    callback(*args)
-
+    # Wait for debounce to fire (0.5 s + margin)
+    time.sleep(0.8)
     assert calls == [target]
 
 

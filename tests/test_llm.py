@@ -870,7 +870,9 @@ def test_caching_client_loads_summaries_from_disk(tmp_path) -> None:
     import json, hashlib
     cache_file = tmp_path / "cache.json"
     file_dict = {"name": "a.py", "content": "hello"}
-    key = hashlib.sha256(json.dumps(file_dict, sort_keys=True).encode()).hexdigest()
+    # Key format: sha256(model_bytes + b":" + file_json). _CountingClient has no
+    # model attribute so CachingLLMClient.model returns "" → prefix is b":".
+    key = hashlib.sha256(b":" + json.dumps(file_dict, sort_keys=True).encode()).hexdigest()
     cache_file.write_text(json.dumps({key: "preloaded summary"}), encoding="utf-8")
 
     inner = _CountingClient()
@@ -903,3 +905,46 @@ def test_caching_client_tolerates_corrupt_cache_file(tmp_path) -> None:
 
     assert results[0].text == "summary:a.py"
     assert inner.file_call_count == 1  # corrupt cache → real LLM call
+
+
+def test_caching_client_different_models_produce_separate_cache_entries(tmp_path) -> None:
+    """Switching models must never serve stale summaries from a previous model's cache."""
+    file_payload = [{"name": "a.py", "content": "same content"}]
+    cache_file = tmp_path / "cache.json"
+
+    class _ModelledClient(_CountingClient):
+        def __init__(self, model_name: str) -> None:
+            super().__init__()
+            self.model = model_name
+
+    # First run with model A — populates the shared disk cache.
+    client_a = _ModelledClient("claude-haiku-3")
+    cache_a = CachingLLMClient(client_a, cache_path=cache_file)
+    cache_a.summarize_files(Path("src"), file_payload)
+
+    # Second run with model B — loads the same disk cache but must not hit model A's entry.
+    client_b = _ModelledClient("claude-sonnet-3-7")
+    cache_b = CachingLLMClient(client_b, cache_path=cache_file)
+    cache_b.summarize_files(Path("src"), file_payload)
+
+    # Each model must have made its own LLM call — no cross-model cache hit.
+    assert client_a.file_call_count == 1
+    assert client_b.file_call_count == 1
+
+
+def test_caching_client_same_model_still_hits_cache() -> None:
+    """Same file content + same model → cache hit on second call."""
+    file_payload = [{"name": "a.py", "content": "same content"}]
+
+    class _ModelledClient(_CountingClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.model = "claude-haiku-3"
+
+    inner = _ModelledClient()
+    cache = CachingLLMClient(inner)
+
+    cache.summarize_files(Path("src"), file_payload)
+    cache.summarize_files(Path("other"), file_payload)
+
+    assert inner.file_call_count == 1  # second call was a cache hit
