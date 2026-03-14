@@ -907,27 +907,27 @@ def test_caching_client_tolerates_corrupt_cache_file(tmp_path) -> None:
     assert inner.file_call_count == 1  # corrupt cache → real LLM call
 
 
-def test_caching_client_different_models_produce_separate_cache_entries() -> None:
+def test_caching_client_different_models_produce_separate_cache_entries(tmp_path) -> None:
     """Switching models must never serve stale summaries from a previous model's cache."""
     file_payload = [{"name": "a.py", "content": "same content"}]
+    cache_file = tmp_path / "cache.json"
 
     class _ModelledClient(_CountingClient):
         def __init__(self, model_name: str) -> None:
             super().__init__()
             self.model = model_name
 
+    # First run with model A — populates the shared disk cache.
     client_a = _ModelledClient("claude-haiku-3")
-    client_b = _ModelledClient("claude-sonnet-3-7")
-
-    # Share the same in-memory CachingLLMClient instance to simulate a model switch
-    # by wrapping two clients and checking keys differ.
-    cache_a = CachingLLMClient(client_a)
-    cache_b = CachingLLMClient(client_b)
-
+    cache_a = CachingLLMClient(client_a, cache_path=cache_file)
     cache_a.summarize_files(Path("src"), file_payload)
+
+    # Second run with model B — loads the same disk cache but must not hit model A's entry.
+    client_b = _ModelledClient("claude-sonnet-3-7")
+    cache_b = CachingLLMClient(client_b, cache_path=cache_file)
     cache_b.summarize_files(Path("src"), file_payload)
 
-    # Each model should have made its own LLM call — no cross-model cache hit.
+    # Each model must have made its own LLM call — no cross-model cache hit.
     assert client_a.file_call_count == 1
     assert client_b.file_call_count == 1
 
