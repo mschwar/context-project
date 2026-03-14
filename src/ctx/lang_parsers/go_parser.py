@@ -34,18 +34,19 @@ def parse_go_file(path: Path) -> Dict[str, List[str]]:
     except (OSError, UnicodeDecodeError):
         return _empty()
 
-    # _EXPORTED_CONST has two capture groups; flatten and drop empty strings
-    const_matches = [
-        name
-        for match in _EXPORTED_CONST.finditer(content)
-        for name in match.groups()
-        if name
-    ]
+    # For constants, use a more robust multi-step parsing.
+    const_block_re = re.compile(r"^const\s*\((.*?)\)", re.DOTALL | re.MULTILINE)
+    const_in_block_re = re.compile(r"^\s*([A-Z]\w*)", re.MULTILINE)
+    single_const_re = re.compile(r"^const\s+([A-Z]\w*)\b", re.MULTILINE)
+
+    const_matches = single_const_re.findall(content)
+    for block_content in const_block_re.findall(content):
+        const_matches.extend(const_in_block_re.findall(block_content))
 
     return {
         "functions": _EXPORTED_FUNC.findall(content),
         "types": _EXPORTED_TYPE.findall(content),
-        "constants": const_matches,
+        "constants": sorted(list(set(const_matches))),
         "variables": _EXPORTED_VAR.findall(content),
     }
 
