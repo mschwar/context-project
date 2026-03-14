@@ -77,21 +77,18 @@ class _DebounceHandler(FileSystemEventHandler):
             self._schedule(Path(event.src_path))
 
     def on_moved(self, event: FileSystemEvent) -> None:
-        # Treat a move as a deletion of the source and creation of the dest.
-        src = Path(event.src_path)
-        dest = Path(getattr(event, "dest_path", event.src_path))
-        for path in (src, dest):
-            fake = _FakeEvent(path, is_directory=event.is_directory)
-            if _should_process_event(fake, self._root, self._spec):
-                self._schedule(path)
+        # A move event affects the parent directories of both the source and destination.
+        # The event passed to on_moved is a FileSystemMovedEvent, which guarantees dest_path.
+        paths_to_process = {Path(event.src_path), Path(event.dest_path)}
 
-
-class _FakeEvent:
-    """Minimal stand-in for FileSystemEvent used in on_moved."""
-
-    def __init__(self, path: Path, *, is_directory: bool) -> None:
-        self.src_path = str(path)
-        self.is_directory = is_directory
+        for path in paths_to_process:
+            # We can't use _should_process_event as it filters out directories,
+            # but we need to trigger updates for parents of moved directories.
+            if path.name == "CONTEXT.md" or should_ignore(path, self._spec, self._root):
+                continue
+            
+            # Scheduling the moved path will cause update_tree to process its parent.
+            self._schedule(path)
 
 
 def run_watch(
