@@ -1,13 +1,9 @@
 {
   "name": "context-project",
   "version": "1.0.0",
-  "description": "`ctx` generates `CONTEXT.md` manifests for directories in a project tree so AI\r agents can navigate codebases coarse-to-fine without reading every raw file.",
-  "main": "index.js",
-  "directories": {
-    "test": "tests"
-  },
+  "description": "`ctx` generates `CONTEXT.md` manifests for directories in a project tree so AI agents can navigate codebases coarse-to-fine without reading every raw file.",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "pytest",
     "prepare": "husky"
   },
   "repository": {
