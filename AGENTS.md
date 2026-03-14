@@ -13,7 +13,7 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 - **Test Coverage**: 166 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
 
-> **Branch notice**: As of March 2026, Phases 1–10 are complete on `main`. Phase 11 is not yet scoped. New work should branch from `main`.
+> **Branch notice**: As of March 2026, Phases 1–11 are complete on `main`. Phase 12 is the active development phase. New work should branch from `main`.
 
 > **Manifest refresh rule**: Any commit that adds or modifies source files must include a `ctx update .` pass to regenerate stale `CONTEXT.md` files before pushing. The `CTX Manifest Check` CI job enforces this and will fail otherwise.
 
@@ -98,11 +98,12 @@ Every roadmap phase (gate) requires a closeout pass before it can be marked comp
 Required sequence:
 1. validate the gate output,
 2. pause and reflect,
-3. file a reflection artifact,
+3. file a reflection artifact with a **disposition table** (one row per suggestion: "Implemented" or "Carry into Phase N"),
 4. implement feasible in-scope reflection suggestions or explicitly defer them,
-5. update durable docs if the reflection changes standing guidance,
-6. update the roadmap status,
-7. deliver the end-of-gate report and wait for user disposition.
+5. **carry-forward** — every "Carry" suggestion must be written into the target phase's scope in `AGENTS.md` and `state.md` before the gate closes,
+6. update durable docs if the reflection changes standing guidance,
+7. update the roadmap status,
+8. deliver the end-of-gate report and wait for user disposition.
 
 Do not commit or push automatically at gate closeout. The standard user dispositions after a gate report are:
 - make changes
@@ -201,12 +202,23 @@ Scope: fix the three reliability gaps that erode confidence at scale.
 
 **Branch:** `feat/phase10-trust` (branch from `main` after Phase 9 merges)
 
-### Phase 11 — Completeness
+### Phase 11 — Completeness ✓
 Scope: close all open suggestions accumulated across Phases 4–10 reflections.
 - Prompt regression tests for all six `DEFAULT_PROMPT_TEMPLATES` (Phase 4 backlog).
 - `watch_debounce_seconds` config key (Phase 7 backlog).
 - `ctx setup` UX: probing messages + `--check` flag (Phases 9–10 backlog).
-- Java parser: `public class/interface/enum/record`, `public` methods.
-- C# parser: `public class/interface/enum/struct/record`, `public` methods.
+- Java parser: `public class/interface/enum/record`, `public` methods, public static nested classes. 8 tests.
+- C# parser: `public class/interface/enum/struct/record`, `public` methods. 7 tests.
 
 **Branch:** `feat/phase11-completeness`
+
+### Phase 12 — Language Depth & CLI Ergonomics
+Scope: close all suggestions from the Phase 11 reflection; expand language coverage and improve CLI discoverability.
+- Kotlin parser: `fun`, `data class`, `object`, `interface`, `enum class`. Wired in for `.kt` files.
+- Ruby parser: top-level `def`, `class`, `module`. Wired in for `.rb` files.
+- `ctx diff` command: show which `CONTEXT.md` files changed since the last generation run.
+- C# property parsing: separate `properties` key from `methods` in `parse_csharp_file()`.
+- Annotation-aware Java method matching: handle `@Annotation\npublic void foo()` patterns.
+- `ctx init --overwrite` flag: skip fresh manifests when `--overwrite=false` (matching `ctx update` behaviour).
+
+**Branch:** `feat/phase12-language-depth`
