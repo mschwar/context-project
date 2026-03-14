@@ -1,11 +1,11 @@
 ---
-generated: '2026-03-14T23:34:13Z'
+generated: '2026-03-14T23:44:55Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:7785c4af86955b12d9226e045a402cbb123d3968fc721129ddea6d192e85fadc
+content_hash: sha256:b728039fb5404bc2ee85f700fb218ea49d44da6542cffa0cb32869207c8696a5
 files: 17
 dirs: 9
-tokens_total: 12070
+tokens_total: 12086
 ---
 # C:/Users/Matty/Documents/context-project
 
@@ -20,7 +20,7 @@ CLI tool that generates CONTEXT.md manifests for project directories to help AI 
 - **=4.0** — Empty or malformed file with no discernible purpose.
 - **AGENTS.md** — Canonical onboarding and workflow contract defining mission, rules, phases, and SDLC guardrails for agents contributing to ctx.
 - **CONTRIBUTING.md** — Guidelines for participating in the agentic SDLC workflow and maintaining code quality standards.
-- **GATE_CLOSEOUT.md** — Required closeout protocol for roadmap phases including validation, reflection, disposition tables, and carry-forward procedures.
+- **GATE_CLOSEOUT.md** — Defines the mandatory closeout sequence for each project phase, including validation, reflection, suggestion disposition, and founder sign-off.
 - **README.md** — CLI tool that generates CONTEXT.md manifests for project directories to help AI agents navigate codebases efficiently.
 - **RUNBOOK.md** — Operational runbook covering prerequisites, CLI usage, testing, release publishing, cache management, and common failure modes for ctx development.
 - **architecture.md** — System design overview covering bottom-up generation, content hashing, LLM abstraction, and data flow.
@@ -37,14 +37,14 @@ CLI tool that generates CONTEXT.md manifests for project directories to help AI 
 - **.githooks/** — Git hooks directory for automated pre-commit testing and validation.
 - **.github/** — GitHub configuration and automation for the context-project repository.
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
-- **.pytest_cache/** — Pytest cache directory storing test execution metadata, performance data, and cache configuration files.
+- **.pytest_cache/** — Pytest cache directory storing test execution metadata, results, and configuration to optimize test runs.
 - **.worktrees/** — Git worktrees configuration and management directory for the context-project.
 - **archive/** — Archive of design documents, analyses, and roadmaps for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
 - **src/** — Source code directory containing the main implementation of the context project.
-- **tests/** — Test suite for the context-project, covering CLI, parsers, configuration, Git integration, LLM clients, and manifest generation.
+- **tests/** — Test suite covering CLI commands, configuration, language parsers, Git integration, file hashing, manifest generation, LLM clients, and end-to-end workflows.
 
 ## Notes
 
-- This project uses both Python (pyproject.toml) and Node.js (package.json) tooling for development and distribution.
-- Git hooks and pre-commit validation ensure manifest freshness and conventional commit compliance.
-- The archive subdirectory preserves historical design decisions and roadmap evolution for reference.
+- This project implements an agentic SDLC workflow with mandatory phase closeout procedures and pre-commit validation.
+- Python and Node.js tooling are both configured; the primary distribution is via PyPI as ctx-tool.
+- Git hooks enforce conventional commits and manifest freshness checks before commits.

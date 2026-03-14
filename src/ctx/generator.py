@@ -35,6 +35,8 @@ from ctx.lang_parsers.rust_parser import parse_rust_file
 from ctx.lang_parsers.go_parser import parse_go_file
 from ctx.lang_parsers.java_parser import parse_java_file
 from ctx.lang_parsers.csharp_parser import parse_csharp_file
+from ctx.lang_parsers.kotlin_parser import parse_kotlin_file
+from ctx.lang_parsers.ruby_parser import parse_ruby_file
 
 
 # Cap on threads per depth level. LLM calls are I/O-bound so threads are effective,
@@ -197,6 +199,10 @@ def _prepare_file_entry(
         metadata = parse_java_file(path)
     elif language == "C#":
         metadata = parse_csharp_file(path)
+    elif language == "Kotlin":
+        metadata = parse_kotlin_file(path)
+    elif language == "Ruby":
+        metadata = parse_ruby_file(path)
 
     truncated = content[: config.max_file_tokens]
     entry = {

@@ -19,6 +19,15 @@ _PUBLIC_METHOD = re.compile(
     r"(\w+)\s*[(<]",             # method name followed by ( or < (generic)
     re.MULTILINE,
 )
+# Matches: public [modifiers] Type PropertyName { get or { get; set; } or => ...
+# Property bodies use { or => after the name; methods use (.
+_PUBLIC_PROPERTY = re.compile(
+    r"^[ \t]*(?:(?:static|virtual|override|abstract|sealed|new|unsafe|required)\s+)*"
+    r"public\s+(?:(?:static|virtual|override|abstract|sealed|new|unsafe|required)\s+)*"
+    r"(?:[\w\[\]<>, .?]+?\s+)"   # type
+    r"(\w+)\s*(?:\{|=>)",        # property name followed by { or =>
+    re.MULTILINE,
+)
 
 
 def parse_csharp_file(path: Path) -> Dict[str, List[str]]:
@@ -26,7 +35,7 @@ def parse_csharp_file(path: Path) -> Dict[str, List[str]]:
     Parses a C# file and extracts public type and method declarations.
 
     Returns a dictionary with keys: 'classes', 'interfaces', 'enums',
-    'structs', 'records', and 'methods'.
+    'structs', 'records', 'methods', and 'properties'.
     """
     try:
         content = path.read_text(encoding="utf-8")
@@ -52,6 +61,7 @@ def parse_csharp_file(path: Path) -> Dict[str, List[str]]:
             records.append(name)
 
     methods = _PUBLIC_METHOD.findall(content)
+    properties = _PUBLIC_PROPERTY.findall(content)
 
     return {
         "classes": classes,
@@ -60,6 +70,7 @@ def parse_csharp_file(path: Path) -> Dict[str, List[str]]:
         "structs": structs,
         "records": records,
         "methods": methods,
+        "properties": properties,
     }
 
 
@@ -71,4 +82,5 @@ def _empty() -> Dict[str, List[str]]:
         "structs": [],
         "records": [],
         "methods": [],
+        "properties": [],
     }
