@@ -30,6 +30,8 @@ from ctx.llm import CachingLLMClient, LLMClient, FileSummary, SubdirSummary
 from ctx.manifest import Manifest, read_manifest, write_manifest
 from ctx.language_detector import detect_language
 from ctx.lang_parsers.python_parser import parse_python_file
+from ctx.lang_parsers.js_ts_parser import parse_js_ts_file
+from ctx.lang_parsers.rust_parser import parse_rust_file
 
 
 # Cap on threads per depth level. LLM calls are I/O-bound so threads are effective,
@@ -167,9 +169,13 @@ def _prepare_file_entry(
         return _binary_file_summary(path), 0
 
     language = detect_language(path)
-    metadata = {}
+    metadata: dict = {}
     if language == "Python":
         metadata = parse_python_file(path)
+    elif language in ("JavaScript", "TypeScript", "JavaScript (React)", "TypeScript (React)"):
+        metadata = parse_js_ts_file(path)
+    elif language == "Rust":
+        metadata = parse_rust_file(path)
 
     truncated = content[: config.max_file_tokens]
     entry = {
