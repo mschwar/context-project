@@ -16,6 +16,7 @@ Built-in defaults:
     max_file_tokens: 8000  (truncate files larger than this before sending to LLM)
     max_depth: None  (unlimited)
     token_budget: None  (unlimited — set to cap total tokens per run)
+    batch_size: None  (send all files in a single LLM call — set to limit files per call for small-context providers)
     extensions: None  (all text files)
     base_url: None  (provider default — override for custom endpoints)
 """
@@ -57,6 +58,7 @@ class Config:
     max_file_tokens: int = 8000
     max_depth: Optional[int] = None
     token_budget: Optional[int] = None  # None = unlimited
+    batch_size: Optional[int] = None  # None = send all files in one call
     extensions: Optional[list[str]] = None  # None = all text files
     prompts: dict[str, str] = field(default_factory=dict)
 
@@ -123,6 +125,8 @@ def load_config(
             config.max_depth = None if data["max_depth"] is None else int(data["max_depth"])
         if "token_budget" in data:
             config.token_budget = None if data["token_budget"] is None else int(data["token_budget"])
+        if "batch_size" in data:
+            config.batch_size = None if data["batch_size"] is None else int(data["batch_size"])
         if "base_url" in data and data["base_url"] is not None:
             config.base_url = str(data["base_url"]).strip()
         if "extensions" in data:
