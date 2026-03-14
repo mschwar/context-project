@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from ctx.config import detect_provider, write_default_config
+from ctx.config import MissingApiKeyError, detect_provider, write_default_config
 
 
 # ---------------------------------------------------------------------------
