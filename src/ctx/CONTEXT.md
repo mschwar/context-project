@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T23:23:25Z'
+generated: '2026-03-14T23:33:59Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:1167395e62de36924b5f934684eabec7a868d65961272a1fb46c02391a417ac5
+content_hash: sha256:90e0b86c8990397ed9a9134e61734ebc0d557973132153145e42e8dcebf832ba
 files: 14
 dirs: 1
 tokens_total: 12744
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
-Core module implementing a filesystem-native context layer for AI agents, providing CLI tools and LLM-powered directory summarization with manifest generation and serving.
+Core module implementing a filesystem-native context layer for AI agents, providing CLI tools and LLM-powered directory summarization with manifest generation and incremental updates.
 
 ## Files
 
@@ -30,10 +30,10 @@ Core module implementing a filesystem-native context layer for AI agents, provid
 
 ## Subdirectories
 
-- **lang_parsers/** — Language-specific parsers that extract public APIs and exported symbols from source code files.
+- **lang_parsers/** — Language-specific parsers that extract public APIs and declarations from source code files.
 
 ## Notes
 
-- The module follows a layered architecture: configuration and CLI at the top, generation and serving in the middle, and utilities (git, hashing, ignore patterns) at the foundation.
-- LLM integration is abstracted via a protocol to support multiple providers; language detection and parsing enable context-aware summarization.
-- Manifest files are the primary output format, with watcher and server components enabling real-time updates and programmatic access.
+- The module follows a bottom-up tree-walking pattern for efficient manifest generation and incremental updates.
+- Configuration is resolved through a layered approach: environment variables, .ctxconfig files, and CLI flags.
+- LLM integration is abstraction-based, supporting multiple providers (Anthropic, OpenAI) with pluggable implementations.

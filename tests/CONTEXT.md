@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T23:23:31Z'
+generated: '2026-03-14T23:34:06Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:ce982c22461d46e61320cdd76d8e236cfc828e6ee30ffe24192654f9045a9c48
+content_hash: sha256:8cb2c2897eba074264352ca668ffdba78bc70318d58ed45a6f9fb00a084015b3
 files: 24
 dirs: 1
-tokens_total: 20460
+tokens_total: 20537
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Test suite covering CLI, parsers, configuration, Git integration, LLM clients, and manifest generation for the context project.
+Test suite for the context-project, covering CLI, parsers, configuration, Git integration, LLM clients, and manifest generation.
 
 ## Files
 
@@ -24,7 +24,7 @@ Test suite covering CLI, parsers, configuration, Git integration, LLM clients, a
 - **test_hasher.py** — Tests for file and directory content hashing with ignore pattern support.
 - **test_ignore.py** — Tests for ignore pattern loading and merging with path matching logic.
 - **test_integration.py** — End-to-end CLI tests on sample fixture project with fake LLM client.
-- **test_java_parser.py** — Tests Java parser extraction of public classes, interfaces, enums, records, and methods.
+- **test_java_parser.py** — Unit tests for Java parser validating extraction of public classes, interfaces, enums, records, methods, and modifiers.
 - **test_js_ts_parser.py** — Tests for JavaScript/TypeScript parser extracting exports and language constructs.
 - **test_language_detector.py** — Tests for language detection from file extensions and project markers.
 - **test_llm.py** — Tests for LLM client creation and file/directory summarization with retries.
@@ -46,4 +46,4 @@ Test suite covering CLI, parsers, configuration, Git integration, LLM clients, a
 
 - Tests are organized by module and feature area, with language-specific parser tests grouped together.
 - Integration tests use fixture projects and fake LLM clients to validate end-to-end workflows.
-- Prompt regression tests ensure security and correctness of LLM instruction templates.
+- Conftest.py provides shared pytest fixtures for temporary directory management across all tests.

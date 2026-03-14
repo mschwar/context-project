@@ -3,11 +3,11 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–10 complete.
+- **Status:** Stable. Phases 1–11 complete.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 166 tests passing across all modules.
+- **Test Coverage:** 195 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
-- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview.
+- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection.
 
 ## Completed Milestones
 
@@ -122,14 +122,27 @@ Fix the three reliability gaps that erode confidence at scale.
 
 **Branch:** `feat/phase10-trust` (branch from `main` after Phase 9 merges)
 
-## Phase 11 — Completeness
+## Phase 11 — Completeness ✓
 
 Close all outstanding suggestions accumulated across Phases 4–10 reflections.
 
-- [ ] **11.1 Prompt regression tests** — smoke tests for all six `DEFAULT_PROMPT_TEMPLATES` with a `FakeLLMClient`; assert structural markers present (Phase 4 suggestion, open 7 phases).
-- [ ] **11.2 `watch_debounce_seconds` config** — expose debounce window as a `.ctxconfig` key and `Config` field (Phase 7 suggestion).
-- [ ] **11.3 `ctx setup` UX** — print "Probing Ollama..." / "Probing LM Studio..." during local port probes so users understand the pause; add `--check` flag for non-destructive provider detection (Phases 9 & 10 suggestions).
-- [ ] **11.4 Java parser** — regex extraction of `public class/interface/enum/record`, `public` methods. Wired into `generator._prepare_file_entry` for `.java` files.
-- [ ] **11.5 C# parser** — regex extraction of `public class/interface/enum/struct/record`, `public` methods. Wired in for `.cs` files.
+- [x] **11.1 Prompt regression tests** — 11 tests covering all six `DEFAULT_PROMPT_TEMPLATES`; structural markers, injection-defence language, `{json_payload}` placeholder, rendering.
+- [x] **11.2 `watch_debounce_seconds` config** — `Config` field (default 0.5s); wired from `.ctxconfig`; passed to `_DebounceHandler` replacing hardcoded constant.
+- [x] **11.3 `ctx setup` UX** — live probing messages via `_probe_callback`; `--check` flag for non-destructive detection.
+- [x] **11.4 Java parser** — `public class/interface/enum/record` + public methods + public static nested classes. 8 tests.
+- [x] **11.5 C# parser** — `public class/interface/enum/struct/record` + public methods (async, override, static). 7 tests.
 
 **Branch:** `feat/phase11-completeness`
+
+## Phase 12 — Language Depth & CLI Ergonomics
+
+Close all suggestions from the Phase 11 reflection. Expand language coverage and improve CLI discoverability.
+
+- [ ] **12.1 Kotlin parser** — `fun`, `data class`, `object`, `interface`, `enum class`. Wired in for `.kt` files.
+- [ ] **12.2 Ruby parser** — top-level `def`, `class`, `module`. Public by default; parse all top-level definitions. Wired in for `.rb` files.
+- [ ] **12.3 `ctx diff` command** — show which `CONTEXT.md` files changed since the last generation run (git diff on `CONTEXT.md` files). Low cost, high diagnostic value.
+- [ ] **12.4 C# property parsing** — add `properties` key to `parse_csharp_file()`, separate from `methods`. `public int Foo { get; set; }` currently may match method regex.
+- [ ] **12.5 Annotation-aware Java method matching** — handle `@Override\npublic void foo()` by stripping annotation lines before matching or relaxing line-anchor requirement.
+- [ ] **12.6 `ctx init --overwrite` flag** — skip existing fresh manifests when `--overwrite=false` (default), matching `ctx update` behaviour.
+
+**Branch:** `feat/phase12-language-depth`
