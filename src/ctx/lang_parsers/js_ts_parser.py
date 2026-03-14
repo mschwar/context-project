@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Union
 
 
 # Matches: export function foo, export async function foo
