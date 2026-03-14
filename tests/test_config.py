@@ -127,3 +127,51 @@ def test_load_config_missing_api_key(monkeypatch, tmp_path) -> None:
 
     with pytest.raises(click.UsageError, match="ANTHROPIC_API_KEY"):
         load_config(tmp_path)
+
+
+def test_load_config_ollama_no_api_key_required(monkeypatch, tmp_path) -> None:
+    _clear_ctx_env(monkeypatch)
+
+    config = load_config(tmp_path, provider="ollama")
+
+    assert config.provider == "ollama"
+    assert config.model == "llama3.2"
+    assert config.base_url == "http://localhost:11434/v1"
+    assert config.api_key == "not-needed"
+
+
+def test_load_config_lmstudio_no_api_key_required(monkeypatch, tmp_path) -> None:
+    _clear_ctx_env(monkeypatch)
+
+    config = load_config(tmp_path, provider="lmstudio")
+
+    assert config.provider == "lmstudio"
+    assert config.model == "loaded-model"
+    assert config.base_url == "http://localhost:1234/v1"
+
+
+def test_load_config_local_provider_custom_base_url(monkeypatch, tmp_path) -> None:
+    _clear_ctx_env(monkeypatch)
+
+    config = load_config(tmp_path, provider="ollama", base_url="http://gpu-server:11434/v1")
+
+    assert config.base_url == "http://gpu-server:11434/v1"
+
+
+def test_load_config_token_budget_from_cli(monkeypatch, tmp_path) -> None:
+    _clear_ctx_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", _placeholder("anthropic"))
+
+    config = load_config(tmp_path, token_budget=50000)
+
+    assert config.token_budget == 50000
+
+
+def test_load_config_token_budget_from_ctxconfig(monkeypatch, tmp_path) -> None:
+    _clear_ctx_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", _placeholder("anthropic"))
+    _write_ctxconfig(tmp_path, {"token_budget": 100000})
+
+    config = load_config(tmp_path)
+
+    assert config.token_budget == 100000

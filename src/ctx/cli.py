@@ -27,6 +27,8 @@ def _build_generation_runtime(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     max_depth: Optional[int] = None,
+    token_budget: Optional[int] = None,
+    base_url: Optional[str] = None,
 ) -> tuple[Path, object, object, object, Callable[[Path, int, int], None]]:
     target_path = Path(path)
     load_config_kwargs: dict[str, Optional[str] | int] = {
@@ -35,6 +37,10 @@ def _build_generation_runtime(
     }
     if max_depth is not None:
         load_config_kwargs["max_depth"] = max_depth
+    if token_budget is not None:
+        load_config_kwargs["token_budget"] = token_budget
+    if base_url is not None:
+        load_config_kwargs["base_url"] = base_url
 
     config = load_config(target_path, **load_config_kwargs)
     spec = load_ignore_patterns(target_path)
@@ -72,10 +78,12 @@ def cli() -> None:
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
-@click.option("--provider", type=click.Choice(["anthropic", "openai"]), default=None, help="LLM provider.")
+@click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "lmstudio"]), default=None, help="LLM provider.")
 @click.option("--model", default=None, help="Model ID override.")
 @click.option("--max-depth", type=int, default=None, help="Max directory depth to process.")
-def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Optional[int]) -> None:
+@click.option("--token-budget", type=int, default=None, help="Max total tokens before stopping.")
+@click.option("--base-url", default=None, help="Custom API base URL.")
+def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Optional[int], token_budget: Optional[int], base_url: Optional[str]) -> None:
     """Generate CONTEXT.md files for a directory tree.
 
     Implementation:
@@ -92,9 +100,13 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
         provider=provider,
         model=model,
         max_depth=max_depth,
+        token_budget=token_budget,
+        base_url=base_url,
     )
 
     click.echo(f"ctx init: generating manifests for {target_path}")
+    if config.token_budget:
+        click.echo(f"Token budget: {config.token_budget:,}")
     stats = generate_tree(target_path, config, client, spec, progress=progress_cb)
     click.echo(f"Directories processed: {stats.dirs_processed}")
     click.echo(f"Files processed: {stats.files_processed}")
@@ -105,9 +117,11 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
-@click.option("--provider", type=click.Choice(["anthropic", "openai"]), default=None)
+@click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "lmstudio"]), default=None)
 @click.option("--model", default=None)
-def update(path: str, provider: Optional[str], model: Optional[str]) -> None:
+@click.option("--token-budget", type=int, default=None, help="Max total tokens before stopping.")
+@click.option("--base-url", default=None, help="Custom API base URL.")
+def update(path: str, provider: Optional[str], model: Optional[str], token_budget: Optional[int], base_url: Optional[str]) -> None:
     """Incrementally refresh stale CONTEXT.md files.
 
     Implementation:
@@ -119,9 +133,13 @@ def update(path: str, provider: Optional[str], model: Optional[str]) -> None:
         path,
         provider=provider,
         model=model,
+        token_budget=token_budget,
+        base_url=base_url,
     )
 
     click.echo(f"ctx update: refreshing manifests for {target_path}")
+    if config.token_budget:
+        click.echo(f"Token budget: {config.token_budget:,}")
     stats = update_tree(target_path, config, client, spec, progress=progress_cb)
     click.echo(f"Directories refreshed: {stats.dirs_processed}")
     click.echo(f"Directories skipped: {stats.dirs_skipped}")

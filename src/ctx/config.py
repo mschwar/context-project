@@ -11,9 +11,13 @@ Built-in defaults:
     model: provider-specific default
         - anthropic: "claude-haiku-4-5-20251001"
         - openai: "gpt-4o-mini"
+        - ollama: "llama3.2"
+        - lmstudio: "loaded-model"
     max_file_tokens: 8000  (truncate files larger than this before sending to LLM)
     max_depth: None  (unlimited)
+    token_budget: None  (unlimited — set to cap total tokens per run)
     extensions: None  (all text files)
+    base_url: None  (provider default — override for custom endpoints)
 """
 
 from __future__ import annotations
@@ -31,7 +35,14 @@ DEFAULT_PROVIDER = "anthropic"
 DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5-20251001",
     "openai": "gpt-4o-mini",
+    "ollama": "llama3.2",
+    "lmstudio": "loaded-model",
 }
+DEFAULT_BASE_URLS = {
+    "ollama": "http://localhost:11434/v1",
+    "lmstudio": "http://localhost:1234/v1",
+}
+LOCAL_PROVIDERS = frozenset({"ollama", "lmstudio"})
 
 
 @dataclass
@@ -41,8 +52,10 @@ class Config:
     provider: str = DEFAULT_PROVIDER
     model: str = ""
     api_key: str = field(default="", repr=False)
+    base_url: Optional[str] = None
     max_file_tokens: int = 8000
     max_depth: Optional[int] = None
+    token_budget: Optional[int] = None  # None = unlimited
     extensions: Optional[list[str]] = None  # None = all text files
 
     # Runtime stats (populated during run, not from config)
@@ -61,6 +74,8 @@ def load_config(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     max_depth: Optional[int] = None,
+    token_budget: Optional[int] = None,
+    base_url: Optional[str] = None,
 ) -> Config:
     """Load config by merging .ctxconfig, env vars, and CLI overrides.
 
@@ -103,6 +118,10 @@ def load_config(
             config.max_file_tokens = int(data["max_file_tokens"])
         if "max_depth" in data:
             config.max_depth = None if data["max_depth"] is None else int(data["max_depth"])
+        if "token_budget" in data:
+            config.token_budget = None if data["token_budget"] is None else int(data["token_budget"])
+        if "base_url" in data and data["base_url"] is not None:
+            config.base_url = str(data["base_url"]).strip()
         if "extensions" in data:
             extensions = data["extensions"]
             if extensions is None:
@@ -130,16 +149,26 @@ def load_config(
         config.model = model
     if max_depth is not None:
         config.max_depth = max_depth
+    if token_budget is not None:
+        config.token_budget = token_budget
+    if base_url is not None:
+        config.base_url = base_url
 
     config.provider = config.provider.strip().lower()
     if config.provider not in DEFAULT_MODELS:
         raise click.UsageError(f"Unsupported provider: {config.provider}")
     config.model = config.resolved_model()
 
-    api_key_env = "ANTHROPIC_API_KEY" if config.provider == "anthropic" else "OPENAI_API_KEY"
-    api_key = os.getenv(api_key_env, "").strip()
-    if not api_key:
-        raise click.UsageError(f"Missing required environment variable: {api_key_env}")
+    # Local providers get a default base_url and don't require an API key
+    if config.provider in LOCAL_PROVIDERS:
+        if not config.base_url:
+            config.base_url = DEFAULT_BASE_URLS[config.provider]
+        config.api_key = os.getenv("OPENAI_API_KEY", "not-needed").strip() or "not-needed"
+    else:
+        api_key_env = "ANTHROPIC_API_KEY" if config.provider == "anthropic" else "OPENAI_API_KEY"
+        api_key = os.getenv(api_key_env, "").strip()
+        if not api_key:
+            raise click.UsageError(f"Missing required environment variable: {api_key_env}")
+        config.api_key = api_key
 
-    config.api_key = api_key
     return config

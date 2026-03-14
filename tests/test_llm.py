@@ -63,8 +63,8 @@ class _FakeOpenAIFactory:
         self.instances: list[SimpleNamespace] = []
         self._responses = list(responses)
 
-    def __call__(self, *, api_key: str) -> SimpleNamespace:
-        instance = SimpleNamespace(api_key=api_key, calls=[])
+    def __call__(self, *, api_key: str, base_url: str | None = None) -> SimpleNamespace:
+        instance = SimpleNamespace(api_key=api_key, base_url=base_url, calls=[])
 
         def create(**kwargs):
             instance.calls.append(kwargs)
@@ -103,6 +103,36 @@ def test_create_client_returns_openai(monkeypatch) -> None:
 def test_create_client_rejects_unknown_provider() -> None:
     with pytest.raises(click.UsageError, match="Unknown provider"):
         create_client(Config(provider="unknown", api_key="key"))
+
+
+def test_create_client_ollama_uses_openai_with_base_url(monkeypatch) -> None:
+    factory = _FakeOpenAIFactory([])
+    monkeypatch.setattr("ctx.llm.OpenAI", factory)
+
+    client = create_client(Config(
+        provider="ollama",
+        api_key="not-needed",
+        base_url="http://localhost:11434/v1",
+    ))
+
+    assert isinstance(client, OpenAIClient)
+    assert client.model == "llama3.2"
+    assert factory.instances[0].base_url == "http://localhost:11434/v1"
+
+
+def test_create_client_lmstudio_uses_openai_with_base_url(monkeypatch) -> None:
+    factory = _FakeOpenAIFactory([])
+    monkeypatch.setattr("ctx.llm.OpenAI", factory)
+
+    client = create_client(Config(
+        provider="lmstudio",
+        api_key="not-needed",
+        base_url="http://localhost:1234/v1",
+    ))
+
+    assert isinstance(client, OpenAIClient)
+    assert client.model == "loaded-model"
+    assert factory.instances[0].base_url == "http://localhost:1234/v1"
 
 
 def test_extract_json_array_skips_invalid_bracket_blocks() -> None:

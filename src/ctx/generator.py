@@ -264,6 +264,14 @@ def _run_generation(
     total_dirs = len(ordered_directories)
 
     for index, directory in enumerate(ordered_directories, start=1):
+        if config.token_budget is not None and stats.tokens_used >= config.token_budget:
+            stats.dirs_skipped += total_dirs - index + 1
+            stats.errors.append(
+                f"Token budget reached ({stats.tokens_used:,}/{config.token_budget:,}). "
+                f"Stopped with {total_dirs - index + 1} directories remaining."
+            )
+            break
+
         try:
             if not _should_regenerate_directory(directory, root, spec, incremental=incremental):
                 stats.dirs_skipped += 1

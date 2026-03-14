@@ -23,7 +23,7 @@ import click
 from anthropic import Anthropic
 from openai import OpenAI
 
-from ctx.config import Config
+from ctx.config import LOCAL_PROVIDERS, Config
 
 
 logger = logging.getLogger(__name__)
@@ -422,7 +422,10 @@ class OpenAIClient:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.model = config.resolved_model()
-        self.client = OpenAI(api_key=config.api_key)
+        kwargs: dict[str, str] = {"api_key": config.api_key}
+        if config.base_url:
+            kwargs["base_url"] = config.base_url
+        self.client = OpenAI(**kwargs)
 
     def summarize_files(
         self, dir_path: Path, files: list[tuple[str, str]]
@@ -503,13 +506,11 @@ class OpenAIClient:
 def create_client(config: Config) -> AnthropicClient | OpenAIClient:
     """Factory: return the right client based on config.provider.
 
-    Implementation:
-        if config.provider == "anthropic": return AnthropicClient(config)
-        elif config.provider == "openai": return OpenAIClient(config)
-        else: raise click.UsageError(f"Unknown provider: {config.provider}")
+    Local providers (ollama, lmstudio) use OpenAIClient with a custom base_url
+    since they expose OpenAI-compatible APIs.
     """
     if config.provider == "anthropic":
         return AnthropicClient(config)
-    if config.provider == "openai":
+    if config.provider == "openai" or config.provider in LOCAL_PROVIDERS:
         return OpenAIClient(config)
     raise click.UsageError(f"Unknown provider: {config.provider}")

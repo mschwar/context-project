@@ -202,3 +202,17 @@ def test_get_status_marks_invalid_manifest_stale(tmp_path) -> None:
         {"path": "docs", "status": "stale"},
         {"path": "src", "status": "fresh"},
     ]
+
+
+def test_generate_tree_stops_at_token_budget(tmp_path) -> None:
+    root = _copy_sample_project(tmp_path)
+    spec = load_ignore_patterns(root)
+    client = FakeLLMClient()
+    config = Config(api_key="test-key", token_budget=1)
+
+    stats = generate_tree(root, config, client, spec)
+
+    # First dir should process (budget checked before each dir), then budget exceeded
+    assert stats.dirs_processed >= 1
+    assert stats.dirs_processed < 3
+    assert any("Token budget reached" in error for error in stats.errors)
