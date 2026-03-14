@@ -94,10 +94,10 @@ class _DebounceHandler(FileSystemEventHandler):
 def run_watch(
     root: Path,
     config: Config,
-    client: object,
-    spec: object,
+    client: "LLMClient",
+    spec: "pathspec.PathSpec",
     *,
-    echo: object = None,
+    echo: Callable[[str], None] = None,
 ) -> None:
     """Start watching root and regenerate manifests on file changes.
 
