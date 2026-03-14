@@ -47,7 +47,7 @@ def parse_js_ts_file(path: Path) -> Dict[str, List[str]]:
     }
 
 
-def _empty() -> Dict[str, List[str]]:
+def _empty() -> Dict[str, Union[List[str], bool]]:
     return {
         "functions": [],
         "classes": [],
