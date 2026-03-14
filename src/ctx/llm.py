@@ -716,9 +716,11 @@ class CachingLLMClient:
         if not files:
             return []
 
-        # Generate keys based on the full content of each file dictionary
+        # Generate keys from file content + model name so that switching models
+        # always produces cache misses rather than serving stale summaries.
+        model_bytes = self.model.encode()
         keys = [
-            hashlib.sha256(json.dumps(f, sort_keys=True).encode()).hexdigest()
+            hashlib.sha256(model_bytes + b":" + json.dumps(f, sort_keys=True).encode()).hexdigest()
             for f in files
         ]
 
