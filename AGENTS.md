@@ -6,12 +6,14 @@ This file is the canonical onboarding and workflow contract for agents contribut
 Build and maintain `ctx`, a filesystem-native context layer that generates recursive `CONTEXT.md` summaries to help AI agents navigate large codebases.
 
 ## Current State
-- **Core Engine**: Fully implemented with bottom-up traversal and incremental hashing.
+- **Core Engine**: Fully implemented with bottom-up traversal, incremental hashing, parallel processing, and persistent LLM disk cache.
 - **LLM Clients**: Anthropic and OpenAI supported (including Ollama and LM Studio). **BitNet is deprecated** — `create_client("bitnet")` raises an informative error directing users to Ollama or LM Studio.
-- **Test Coverage**: 101 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, integration).
+- **Test Coverage**: 112 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
 
-> **Branch notice**: As of March 2026, Phases 1–4 are complete. `feat/phase4-prompt-quality-batch-control` is pending PR to `main`. Phase 5 work (`feat/phase5-cost-control`) should branch from `main` after that merge.
+> **Branch notice**: As of March 2026, Phases 1–5 are complete on `main`. Phase 6 work (`feat/phase6-language-expansion`) should branch from `main`.
+
+> **Dry-run note**: CLI paths that do not call an LLM must pass `require_api_key=False` to `load_config` to avoid `UsageError` in CI environments without API keys set.
 
 ## Canonical Rules
 
@@ -149,27 +151,33 @@ Scope: improve output consistency and give users control over LLM call granulari
 - Add `batch_size` config key and `Config.batch_size` field for chunked file summarization.
 - Remove `bitnet` from CLI `--provider` choices; deprecation error preserved in `create_client`.
 
-### Phase 5 — Cost Control & Observability
+### Phase 5 — Cost Control & Observability ✓
 Scope: close gaps in token budget and caching, add a cost-preview flag before spending tokens.
 
-**Gate condition:** Phase 4 must be formally closed out (reflection filed, docs updated, PR merged) before Phase 5 work begins.
+- Persistent LLM disk cache (`.ctx-cache/llm_cache.json`), `cache_path` config key, `--cache-path` CLI flag.
+- Token budget enforcement: `budget_exhausted` flag, dedicated CLI warning.
+- `--dry-run` flag on `ctx update` and `ctx smart-update`; backed by `check_stale_dirs()`.
+- `load_config` gains `require_api_key=False` for paths that don't call an LLM.
+
+### Phase 6 — Language Expansion & CI Hygiene
+Scope: richer summaries for JS/TS/Rust, fix pre-existing CI noise.
+
+**Gate condition:** Phase 5 gate closeout (reflection filed, docs updated, PR merged) before work begins.
 
 **Deliverables:**
 
-#### 5.1 — Persistent LLM Cache
-- Extend `CachingLLMClient` to load/save its cache from disk (`.ctx-cache/llm_cache.json` by default).
-- New config key `cache_path`; new CLI flag `--cache-path`.
-- Cache file added to `.ctxignore.default` and `.gitignore`.
-- Files: `src/ctx/llm.py`, `src/ctx/config.py`, `src/ctx/cli.py`, `tests/test_llm.py`.
+#### 6.1 — JavaScript / TypeScript Parser
+- New `src/ctx/lang_parsers/js_ts_parser.py`: extract exported functions, classes, interfaces, type aliases.
+- Wire into `generator.py` alongside the Python parser (detect `.js`, `.ts`, `.tsx`, `.jsx`).
+- Files: `src/ctx/lang_parsers/js_ts_parser.py`, `src/ctx/generator.py`, `tests/test_js_ts_parser.py`.
 
-#### 5.2 — Token Budget Enforcement
-- `Config.token_budget` is already wired but never enforced. Add a check in `_run_generation` that stops issuing LLM calls once `stats.tokens_used >= token_budget`.
-- Add `budget_exhausted: bool` to `GenerateStats`; surface a CLI warning when set.
-- Files: `src/ctx/generator.py`, `src/ctx/cli.py`, `tests/test_generator.py`.
+#### 6.2 — Rust Parser
+- New `src/ctx/lang_parsers/rust_parser.py`: extract `pub fn`, `pub struct`, `pub enum`, `pub trait`, `mod`.
+- Files: `src/ctx/lang_parsers/rust_parser.py`, `src/ctx/generator.py`, `tests/test_rust_parser.py`.
 
-#### 5.3 — `--dry-run` Flag
-- Add `--dry-run` to `ctx update` and `ctx smart-update`. Lists stale directories without making LLM calls or writing files.
-- Reuses existing `is_stale()` from `hasher.py`.
-- Files: `src/ctx/cli.py`, `src/ctx/generator.py`, `tests/test_cli.py`, `tests/test_generator.py`.
+#### 6.3 — Fix Pre-existing CI Failures (chore)
+- CTX Manifest Check: create `.github/actions/ctx-check/action.yml` or rewrite workflow to use `ctx status --check-exit-code` inline.
+- PR Checks: update `pr-checks.yml` to use Python `pytest` instead of `npm run test`.
+- Files: `.github/workflows/pr-checks.yml`, `.github/actions/ctx-check/action.yml` (new).
 
-**Branch:** `feat/phase5-cost-control` (branch from `main` after Phase 4 merge)
+**Branch:** `feat/phase6-language-expansion` (branch from `main` after Phase 5 closeout)
