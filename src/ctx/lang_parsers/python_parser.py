@@ -19,7 +19,7 @@ def parse_python_file(path: Path) -> Dict[str, List[str]]:
         classes = []
         functions = []
         
-        for node in ast.walk(tree):
+        for node in ast.iter_child_nodes(tree):
             if isinstance(node, ast.ClassDef):
                 classes.append(node.name)
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):

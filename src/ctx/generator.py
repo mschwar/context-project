@@ -227,20 +227,7 @@ def _generate_directory_manifest(
         tokens_total += estimated_tokens
         ordered_entries.append(entry)
 
-    # Convert dict inputs to list[tuple[str, str]] for backward compatibility if needed, 
-    # but the plan says to modify LLM prompts, so let's see if LLMClient needs to change too.
-    # The current LLMClient.summarize_files expects list[tuple[str, str]].
-    # I'll update the Protocol and implementations to accept list[dict] or similar.
-    # For now, let's keep it as is and just pass the 'content' for summarization, 
-    # OR better, update the whole flow to pass augmented info.
-    
-    # Let's check LLMClient Protocol in llm.py again.
-    
-    legacy_text_inputs = [(entry["name"], entry["content"]) for entry in text_inputs]
-    # Actually, let's pass the whole dict to summarize_files if we want language-specific heuristics.
-    # I will need to update llm.py next.
-    
-    text_results = client.summarize_files(path, text_inputs) # Pass list[dict]
+    text_results = client.summarize_files(path, text_inputs)
     if len(text_results) != len(text_inputs):
         raise ValueError(f"Expected {len(text_inputs)} file summaries for {path}, got {len(text_results)}.")
 

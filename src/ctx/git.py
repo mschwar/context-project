@@ -17,21 +17,20 @@ def get_changed_files(repo_path: Path) -> List[Path]:
         RuntimeError: If the command fails or it's not a git repository.
     """
     try:
-        # --name-only: Show only names of changed files
-        # HEAD: Compare against the latest commit
-        # The output will be relative to the repository root.
-        command = ["git", "diff", "--name-only", "HEAD"]
-        result = subprocess.run(
-            command,
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        # Split by lines, filter out empty lines, and convert to Path objects
-        changed_files_str = result.stdout.strip().splitlines()
-        changed_files = [repo_path / f for f in changed_files_str if f]
-        return changed_files
+        changed_files_str: set[str] = set()
+        for command in (
+            ["git", "diff", "--name-only", "HEAD"],
+            ["git", "diff", "--name-only", "--cached"],
+        ):
+            result = subprocess.run(
+                command,
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            changed_files_str.update(f for f in result.stdout.strip().splitlines() if f)
+        return [repo_path / f for f in sorted(changed_files_str)]
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Git command failed: {e.stderr}") from e
     except FileNotFoundError:
