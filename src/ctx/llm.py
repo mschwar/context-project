@@ -691,11 +691,12 @@ class CachingLLMClient:
                     fut.set_result(summary)
                     self._cache[key] = fut
 
-    def _write_to_disk(self, key: str, summary: str) -> None:
-        if self._cache_path is None:
+    def _write_batch_to_disk(self, new_entries: dict[str, str]) -> None:
+        """Write multiple new cache entries to disk in a single operation."""
+        if self._cache_path is None or not new_entries:
             return
         with self._disk_lock:
-            self._disk_cache[key] = summary
+            self._disk_cache.update(new_entries)
             try:
                 self._cache_path.parent.mkdir(parents=True, exist_ok=True)
                 self._cache_path.write_text(
@@ -743,10 +744,12 @@ class CachingLLMClient:
         if to_fetch:
             try:
                 new_results = self._client.summarize_files(dir_path, [files[i] for i in to_fetch])
+                new_disk_entries: dict[str, str] = {}
                 for i, result in zip(to_fetch, new_results):
                     file_futures[i].set_result(result.text)
                     original_results[i] = result
-                    self._write_to_disk(keys[i], result.text)
+                    new_disk_entries[keys[i]] = result.text
+                self._write_batch_to_disk(new_disk_entries)
             except Exception as exc:
                 for i in to_fetch:
                     if not file_futures[i].done():

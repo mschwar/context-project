@@ -83,6 +83,7 @@ def load_config(
     token_budget: Optional[int] = None,
     base_url: Optional[str] = None,
     cache_path: Optional[str] = None,
+    require_api_key: bool = True,
 ) -> Config:
     """Load config by merging .ctxconfig, env vars, and CLI overrides.
 
@@ -185,7 +186,7 @@ def load_config(
             raise click.UsageError(
                 "--provider bitnet requires --model with the path to a .gguf file."
             )
-    else:
+    elif require_api_key:
         api_key_env = "ANTHROPIC_API_KEY" if config.provider == "anthropic" else "OPENAI_API_KEY"
         api_key = os.getenv(api_key_env, "").strip()
         if not api_key:

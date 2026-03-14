@@ -68,6 +68,17 @@ def _echo_generation_errors(stats: GenerateStats) -> None:
         click.echo(f"  - {error}")
 
 
+def _echo_stale_dirs(stale: list[Path], target_path: Path) -> None:
+    """Print the list of stale directories for --dry-run output."""
+    click.echo(f"{len(stale)} director{'y' if len(stale) == 1 else 'ies'} would be regenerated:")
+    for directory in stale:
+        try:
+            rel = directory.relative_to(target_path).as_posix()
+        except ValueError:
+            rel = directory.as_posix()
+        click.echo(f"  {rel or '.'}")
+
+
 def _echo_budget_warning(stats: GenerateStats, config: object) -> None:
     if not stats.budget_exhausted:
         return
@@ -136,18 +147,12 @@ def update(path: str, provider: Optional[str], model: Optional[str], token_budge
     spec = load_ignore_patterns(target_path)
 
     if dry_run:
-        config = load_config(target_path, provider=provider, model=model, token_budget=token_budget, base_url=base_url, cache_path=cache_path)
+        config = load_config(target_path, provider=provider, model=model, token_budget=token_budget, base_url=base_url, cache_path=cache_path, require_api_key=False)
         stale = check_stale_dirs(target_path, config, spec)
         if not stale:
             click.echo("All manifests are fresh. Nothing to regenerate.")
             return
-        click.echo(f"{len(stale)} director{'y' if len(stale) == 1 else 'ies'} would be regenerated:")
-        for directory in stale:
-            try:
-                rel = directory.relative_to(target_path).as_posix()
-            except ValueError:
-                rel = directory.as_posix()
-            click.echo(f"  {rel or '.'}")
+        _echo_stale_dirs(stale, target_path)
         return
 
     target_path, config, spec, client, progress_cb = _build_generation_runtime(
@@ -228,19 +233,13 @@ def smart_update(path: str, provider: Optional[str], model: Optional[str], token
         return
 
     if dry_run:
-        config = load_config(target_path, provider=provider, model=model, token_budget=token_budget, base_url=base_url, cache_path=cache_path)
+        config = load_config(target_path, provider=provider, model=model, token_budget=token_budget, base_url=base_url, cache_path=cache_path, require_api_key=False)
         stale = check_stale_dirs(target_path, config, spec, changed_files=changed_files)
         click.echo(f"Detected {len(changed_files)} changed files.")
         if not stale:
             click.echo("All affected manifests are fresh. Nothing to regenerate.")
             return
-        click.echo(f"{len(stale)} director{'y' if len(stale) == 1 else 'ies'} would be regenerated:")
-        for directory in stale:
-            try:
-                rel = directory.relative_to(target_path).as_posix()
-            except ValueError:
-                rel = directory.as_posix()
-            click.echo(f"  {rel or '.'}")
+        _echo_stale_dirs(stale, target_path)
         return
 
     target_path, config, spec, client, progress_cb = _build_generation_runtime(
