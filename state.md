@@ -98,8 +98,8 @@ Richer summaries for the most common open-source language mix; fix pre-existing 
 - Files: `src/ctx/lang_parsers/rust_parser.py`, `src/ctx/generator.py`, `tests/test_rust_parser.py`.
 
 #### 6.3 — Fix Pre-existing CI Failures (chore)
-- Fix CTX Manifest Check: create `.github/actions/ctx-check/action.yml` or update the workflow to use `ctx status --check-exit-code` inline.
+- Fix CTX Manifest Check: create `.github/actions/ctx-check/action.yml` or update `.github/workflows/ctx-manifest-check.yml` to use `ctx status --check-exit-code` inline.
 - Fix PR Checks / Validate PR: update workflow to use Python's `pytest` instead of `npm run test`.
-- Files: `.github/workflows/pr-checks.yml`, `.github/workflows/ctx-manifest-check.yml`.
+- Files: `.github/workflows/pr-checks.yml`, `.github/workflows/ctx-manifest-check.yml`, `.github/actions/ctx-check/action.yml` (new, if composite-action approach chosen).
 
 **Branch:** `feat/phase6-language-expansion` (branch from `main` after Phase 5 closeout)

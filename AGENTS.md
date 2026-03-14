@@ -176,8 +176,8 @@ Scope: richer summaries for JS/TS/Rust, fix pre-existing CI noise.
 - Files: `src/ctx/lang_parsers/rust_parser.py`, `src/ctx/generator.py`, `tests/test_rust_parser.py`.
 
 #### 6.3 — Fix Pre-existing CI Failures (chore)
-- CTX Manifest Check: create `.github/actions/ctx-check/action.yml` or rewrite workflow to use `ctx status --check-exit-code` inline.
+- CTX Manifest Check: create `.github/actions/ctx-check/action.yml` or rewrite `.github/workflows/ctx-manifest-check.yml` to use `ctx status --check-exit-code` inline.
 - PR Checks: update `pr-checks.yml` to use Python `pytest` instead of `npm run test`.
-- Files: `.github/workflows/pr-checks.yml`, `.github/actions/ctx-check/action.yml` (new).
+- Files: `.github/workflows/pr-checks.yml`, `.github/workflows/ctx-manifest-check.yml`, `.github/actions/ctx-check/action.yml` (new, if composite-action approach chosen).
 
 **Branch:** `feat/phase6-language-expansion` (branch from `main` after Phase 5 closeout)
