@@ -10,8 +10,6 @@ _PUBLIC_TYPE = re.compile(
     re.MULTILINE,
 )
 # Matches: public [modifiers] ReturnType methodName(
-# Handles annotations on the same or preceding line is out of scope;
-# we match the line that contains `public` and a method-like signature.
 _PUBLIC_METHOD = re.compile(
     r"^[ \t]*(?:(?:static|final|abstract|synchronized|native|default|override)\s+)*"
     r"public\s+(?:(?:static|final|abstract|synchronized|native|default|override)\s+)*"
@@ -20,6 +18,9 @@ _PUBLIC_METHOD = re.compile(
     r"(\w+)\s*\(",
     re.MULTILINE,
 )
+# Annotation lines: @Foo or @Foo(...) — stripped before method matching so that
+# @Override\npublic void foo() is correctly detected.
+_ANNOTATION_LINE = re.compile(r"^[ \t]*@\w+[^\n]*\n", re.MULTILINE)
 
 
 def parse_java_file(path: Path) -> Dict[str, List[str]]:
@@ -49,7 +50,9 @@ def parse_java_file(path: Path) -> Dict[str, List[str]]:
         elif kind == "record":
             records.append(name)
 
-    methods = _PUBLIC_METHOD.findall(content)
+    # Strip annotation lines so @Override\npublic void foo() is matched correctly.
+    stripped = _ANNOTATION_LINE.sub("", content)
+    methods = _PUBLIC_METHOD.findall(stripped)
 
     return {
         "classes": classes,

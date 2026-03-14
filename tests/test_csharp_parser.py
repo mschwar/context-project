@@ -95,6 +95,27 @@ public class Worker
     assert "ToString" in result["methods"]
 
 
+def test_public_properties(tmp_path):
+    src = """\
+public class Person
+{
+    public string Name { get; set; }
+    public int Age { get; private set; }
+    public string FullName => $"{Name}";
+    private int _secret { get; set; }
+}
+"""
+    f = tmp_path / "Person.cs"
+    f.write_text(src, encoding="utf-8")
+    result = parse_csharp_file(f)
+    assert "Name" in result["properties"]
+    assert "Age" in result["properties"]
+    assert "FullName" in result["properties"]
+    assert "_secret" not in result["properties"]
+    # Properties should not appear in methods
+    assert "Name" not in result["methods"]
+
+
 def test_empty_file(tmp_path):
     f = tmp_path / "Empty.cs"
     f.touch()
@@ -106,6 +127,7 @@ def test_empty_file(tmp_path):
         "structs": [],
         "records": [],
         "methods": [],
+        "properties": [],
     }
 
 
@@ -118,4 +140,5 @@ def test_missing_file(tmp_path):
         "structs": [],
         "records": [],
         "methods": [],
+        "properties": [],
     }

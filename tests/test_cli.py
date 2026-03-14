@@ -231,3 +231,117 @@ def test_update_surfaces_budget_warning_when_exhausted(tmp_path, monkeypatch) ->
     result = runner.invoke(cli_module.cli, ["update", str(root)])
 
     assert "budget" in result.output.lower()
+
+
+# --- init --overwrite ---
+
+
+def test_init_no_overwrite_calls_update_tree(tmp_path, monkeypatch) -> None:
+    """ctx init --no-overwrite should delegate to update_tree (skip fresh manifests)."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    fake_config = Config(provider="openai", model="gpt-test", api_key="test-key")
+    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
+    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        cli_module,
+        "generate_tree",
+        lambda *a, **kw: calls.append("generate") or GenerateStats(),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "update_tree",
+        lambda *a, **kw: calls.append("update") or GenerateStats(),
+    )
+
+    result = runner.invoke(cli_module.cli, ["init", "--no-overwrite", str(root)])
+
+    assert result.exit_code == 0
+    assert calls == ["update"]
+    assert "incremental" in result.output.lower()
+
+
+def test_init_default_overwrite_calls_generate_tree(tmp_path, monkeypatch) -> None:
+    """ctx init (default) should call generate_tree."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    fake_config = Config(provider="openai", model="gpt-test", api_key="test-key")
+    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
+    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        cli_module,
+        "generate_tree",
+        lambda *a, **kw: calls.append("generate") or GenerateStats(),
+    )
+
+    result = runner.invoke(cli_module.cli, ["init", str(root)])
+
+    assert result.exit_code == 0
+    assert calls == ["generate"]
+
+
+# --- ctx diff ---
+
+
+def test_diff_no_changes(tmp_path, monkeypatch) -> None:
+    """ctx diff should report nothing when no CONTEXT.md files are changed."""
+    import subprocess
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    def fake_run(cmd, **kwargs):
+        class R:
+            stdout = ""
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", str(root)])
+
+    assert result.exit_code == 0
+    assert "No CONTEXT.md files changed" in result.output
+
+
+def test_diff_reports_modified_files(tmp_path, monkeypatch) -> None:
+    """ctx diff should list modified and new CONTEXT.md files."""
+    import subprocess
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    call_count = 0
+
+    def fake_run(cmd, **kwargs):
+        nonlocal call_count
+        call_count += 1
+
+        class R:
+            returncode = 0
+
+        r = R()
+        if call_count == 1:
+            r.stdout = "src/CONTEXT.md\n"
+        else:
+            r.stdout = "new_dir/CONTEXT.md\n"
+        return r
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", str(root)])
+
+    assert result.exit_code == 0
+    assert "2 CONTEXT.md files changed" in result.output
+    assert "[mod]" in result.output
+    assert "[new]" in result.output

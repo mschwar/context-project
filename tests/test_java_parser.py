@@ -110,6 +110,28 @@ public class Outer {
     assert "Nested" in result["classes"]
 
 
+def test_annotation_above_method(tmp_path):
+    src = """\
+public class Controller {
+    @Override
+    public String toString() { return ""; }
+
+    @GetMapping("/hello")
+    @ResponseBody
+    public String hello() { return "hi"; }
+
+    @Deprecated
+    public void oldMethod() {}
+}
+"""
+    f = tmp_path / "Controller.java"
+    f.write_text(src, encoding="utf-8")
+    result = parse_java_file(f)
+    assert "toString" in result["methods"]
+    assert "hello" in result["methods"]
+    assert "oldMethod" in result["methods"]
+
+
 def test_generic_return_type_method(tmp_path):
     src = """\
 public class Repo<T> {

@@ -4,6 +4,7 @@ Commands:
     ctx init <path>     Generate CONTEXT.md files for a directory tree.
     ctx update <path>   Incrementally refresh stale CONTEXT.md files.
     ctx status [path]   Show manifest health across a directory tree.
+    ctx diff [path]     Show which CONTEXT.md files changed since last generation.
 """
 
 from __future__ import annotations
@@ -129,7 +130,8 @@ def cli() -> None:
 @click.option("--token-budget", type=int, default=None, help="Max total tokens before stopping.")
 @click.option("--base-url", default=None, help="Custom API base URL.")
 @click.option("--cache-path", default=None, help="Disk cache file path. Set to '' to disable.")
-def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Optional[int], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str]) -> None:
+@click.option("--overwrite/--no-overwrite", default=True, help="Regenerate all manifests (default) or skip already-fresh ones.")
+def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Optional[int], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], overwrite: bool) -> None:
     """Generate CONTEXT.md files for a directory tree."""
     target_path, config, spec, client, progress_cb = _build_generation_runtime(
         path,
@@ -142,9 +144,14 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
     )
 
     click.echo(f"ctx init: generating manifests for {target_path}")
+    if not overwrite:
+        click.echo("Mode: incremental (skipping fresh manifests)")
     if config.token_budget:
         click.echo(f"Token budget: {config.token_budget:,}")
-    stats = generate_tree(target_path, config, client, spec, progress=progress_cb)
+    if overwrite:
+        stats = generate_tree(target_path, config, client, spec, progress=progress_cb)
+    else:
+        stats = update_tree(target_path, config, client, spec, progress=progress_cb)
     click.echo(f"Directories processed: {stats.dirs_processed}")
     click.echo(f"Files processed: {stats.files_processed}")
     click.echo(f"Tokens used: {stats.tokens_used}")
@@ -339,6 +346,51 @@ def setup(path: str, check_only: bool) -> None:
     write_default_config(target_path, provider, model=model, base_url=base_url)
     click.echo(f"Config written to {config_file}")
     click.echo("\nNext step: run `ctx init .` to generate manifests.")
+
+
+@cli.command()
+@click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True), default=".", required=False)
+def diff(path: str) -> None:
+    """Show CONTEXT.md files that changed since the last generation run.
+
+    Uses git to list CONTEXT.md files with uncommitted modifications,
+    giving a quick view of which parts of the manifest tree are freshly
+    regenerated or unexpectedly dirty.
+    """
+    import subprocess
+
+    target_path = Path(path)
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD", "--", "*/CONTEXT.md", "CONTEXT.md"],
+            cwd=str(target_path),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        changed = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        # Also include untracked CONTEXT.md files (new directories)
+        untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard", "--", "*/CONTEXT.md", "CONTEXT.md"],
+            cwd=str(target_path),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        new_files = [line.strip() for line in untracked.stdout.splitlines() if line.strip()]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        raise click.UsageError("ctx diff requires git to be available and the path to be inside a git repository.")
+
+    new_files_set = set(new_files)
+    all_changed = sorted(set(changed) | new_files_set)
+    if not all_changed:
+        click.echo("No CONTEXT.md files changed since last commit.")
+        return
+
+    click.echo(f"{len(all_changed)} CONTEXT.md file{'s' if len(all_changed) != 1 else ''} changed:")
+    for f in all_changed:
+        prefix = "new" if f in new_files_set else "mod"
+        click.echo(f"  [{prefix}] {f}")
 
 
 @cli.command()
