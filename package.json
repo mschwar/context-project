@@ -1,0 +1,30 @@
+{
+  "name": "context-project",
+  "version": "1.0.0",
+  "description": "`ctx` generates `CONTEXT.md` manifests for directories in a project tree so AI\r agents can navigate codebases coarse-to-fine without reading every raw file.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "husky"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mschwar/context-project.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/mschwar/context-project/issues"
+  },
+  "homepage": "https://github.com/mschwar/context-project#readme",
+  "devDependencies": {
+    "@commitlint/cli": "^20.4.4",
+    "@commitlint/config-conventional": "^20.4.4",
+    "husky": "^9.1.7"
+  }
+}

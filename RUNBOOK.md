@@ -47,6 +47,11 @@ See how many manifests are stale or missing.
 ctx status /path/to/project
 ```
 
+## Roadmap Gate Closeout
+
+Every roadmap phase (gate) requires a formal closeout pass.
+Follow the steps in [GATE_CLOSEOUT.md](./GATE_CLOSEOUT.md) before marking a phase as complete.
+
 ## Common Failure Modes
 
 ### HTTP 400 Bad Request (Context Length)
