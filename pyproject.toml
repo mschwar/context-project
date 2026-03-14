@@ -29,5 +29,8 @@ ctx = "ctx.cli:cli"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+ctx = [".ctxignore.default"]
+
 [tool.setuptools.dynamic]
 version = {attr = "ctx.__version__"}

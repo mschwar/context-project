@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from importlib.resources import files
+
 import pytest
 
 from ctx.ignore import load_ignore_patterns, should_ignore
+
+
+def test_packaged_default_ignore_file_exists() -> None:
+    packaged_default = files("ctx").joinpath(".ctxignore.default")
+
+    assert packaged_default.is_file()
 
 
 def test_load_ignore_patterns_uses_repo_default_file(tmp_path) -> None:
