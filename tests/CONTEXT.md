@@ -1,11 +1,11 @@
 ---
-generated: '2026-03-14T21:47:58Z'
+generated: '2026-03-14T21:53:07Z'
 generator: ctx/0.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:15ffaa2ba7f669a1a35b817aa814e6aca8147a24b8fbc61421f5d20e7a50d1de
-files: 18
+content_hash: sha256:5cb8944d5baee43237db4116566b16591ceee5581dac918eb2acf9ba001737a4
+files: 19
 dirs: 1
-tokens_total: 15144
+tokens_total: 16092
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
@@ -31,6 +31,7 @@ Test suite for the context project, covering CLI, configuration, generation engi
 - **test_python_parser.py** — Tests for Python parser extracting classes and functions from source code.
 - **test_rust_parser.py** — Tests for Rust parser extracting public functions, structs, enums, traits, and modules.
 - **test_server.py** — Tests for MCP server endpoints and CLI serve command integration.
+- **test_watcher.py** — Tests for file watcher event filtering and debounce logic in the ctx module.
 
 ## Subdirectories
 
@@ -38,6 +39,6 @@ Test suite for the context project, covering CLI, configuration, generation engi
 
 ## Notes
 
-- Tests are organized by module, with each test file corresponding to a core component (parsers, generators, CLI, etc.).
-- The `conftest.py` provides shared pytest fixtures for temporary workspace isolation.
+- Each test module corresponds to a major component of the context project (parsers, CLI, generation, integration).
+- The `conftest.py` provides shared pytest fixtures for temporary directory management across tests.
 - Integration tests in `test_integration.py` validate end-to-end workflows using fixture projects.
