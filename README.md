@@ -64,6 +64,8 @@ repos:
       - id: ctx-check
 ```
 
+Run `ctx init .` once before the hook will pass on a new repo.
+
 ## Links
 
 - [Architecture](./architecture.md) — bottom-up context strategy

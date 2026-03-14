@@ -13,7 +13,7 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 - **Test Coverage**: 166 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
 
-> **Branch notice**: As of March 2026, Phases 1–7 are complete on `main`. Phases 8–10 are scoped (Ship It, Automate It, Trust It). New work should branch from `main`.
+> **Branch notice**: As of March 2026, Phases 1–10 are complete on `main`. Phase 11 is not yet scoped. New work should branch from `main`.
 
 > **Manifest refresh rule**: Any commit that adds or modifies source files must include a `ctx update .` pass to regenerate stale `CONTEXT.md` files before pushing. The `CTX Manifest Check` CI job enforces this and will fail otherwise.
 
@@ -27,6 +27,7 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 4. **Surgical Changes**: Make the smallest possible change that fulfills the requirement.
 5. **No Logic Without Tests**: No logic changes without a corresponding test update.
 6. **Strict Typing**: Python 3.10+ typing is mandatory.
+7. **Narrow Exceptions**: Always catch specific exception types. `except Exception` is permitted only at top-level boundaries with explicit logging. Use it nowhere else.
 
 ## Required Behavior
 
@@ -176,7 +177,7 @@ Scope: richer summaries for JS/TS/Rust, fix pre-existing CI noise.
 - `ctx watch`: OS-native watcher via `watchdog`; CONTEXT.md excluded; 0.5 s debounce; hooks into `update_tree`. 8 tests.
 - Cache model-awareness: `sha256(model + ":" + file_json)` key. Model switch always produces cache miss. 2 new tests.
 
-### Phase 8 — Ship It
+### Phase 8 — Ship It ✓
 Scope: make `ctx` installable via `pip install`, automated releases, and a README that gets someone from zero to working in 60 seconds.
 - PyPI-ready packaging: `ctx-tool` on PyPI; classifiers, project URLs; `__version__` bumped to `"0.8.0"`; `setuptools-scm` removed from build deps.
 - GitHub Actions publish workflow (`.github/workflows/publish.yml`): tag `v*` → run tests → build + publish via OIDC trusted publishing.
@@ -184,7 +185,7 @@ Scope: make `ctx` installable via `pip install`, automated releases, and a READM
 
 **Branch:** `feat/phase8-distribution`
 
-### Phase 9 — Automate It
+### Phase 9 — Automate It ✓
 Scope: zero-friction first run and automatic manifest freshness without remembering.
 - `ctx setup` command: auto-detect provider (env vars → Ollama probe → LM Studio probe), write `.ctxconfig` with sensible defaults, print next step.
 - `.pre-commit-hooks.yaml`: standard `pre-commit` framework hook running `ctx status . --check-exit-code`.
@@ -192,7 +193,7 @@ Scope: zero-friction first run and automatic manifest freshness without remember
 
 **Branch:** `feat/phase9-onboarding-automation` (branch from `main` after Phase 8 merges)
 
-### Phase 10 — Trust It
+### Phase 10 — Trust It ✓
 Scope: fix the three reliability gaps that erode confidence at scale.
 - Accurate token estimation: replace `len(text) / 4` heuristic in `generator._estimate_tokens()` with `tiktoken` (`cl100k_base`, lazy-loaded, falls back to heuristic if unavailable). New dep: `tiktoken>=0.7`.
 - Cache eviction: cap `.ctx-cache/llm_cache.json` at 10,000 entries (trim oldest on write); `max_cache_entries` config key.

@@ -121,3 +121,12 @@ Fix the three reliability gaps that erode confidence at scale.
 - [x] **10.3 Transient error transparency:** prefix `[transient, retries exhausted]` on known transient failures; CLI footer suggests retry.
 
 **Branch:** `feat/phase10-trust` (branch from `main` after Phase 9 merges)
+
+## Phase 11 — (Not Yet Scoped)
+
+Candidates from Phase 8–10 reflections:
+- **Java / C# parsers** — complete enterprise language coverage (originally from Phase 7 reflection, still unactioned).
+- **`ctx setup --check`** — non-destructive flag that prints detected provider without writing config; useful in CI.
+- **Streaming per-file progress** — progress callback fires per-directory; per-file updates would improve perceived responsiveness for large directories.
+
+**Branch:** `feat/phase11-*` (branch from `main` after Phase 11 is scoped)
