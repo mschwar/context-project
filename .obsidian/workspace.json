@@ -4,53 +4,24 @@
     "type": "split",
     "children": [
       {
-        "id": "846c1b4c39ead42f",
+        "id": "3a7ecc1bd754ec60",
         "type": "tabs",
         "children": [
           {
-            "id": "4f0a38c1f5a047b5",
+            "id": "8b5c29351be72235",
             "type": "leaf",
             "state": {
               "type": "markdown",
               "state": {
-                "file": "GPT5.4-dump.md",
+                "file": "AGENTS.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "GPT5.4-dump"
-            }
-          },
-          {
-            "id": "609caaee68c2233f",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "Grok4.2-dump.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "Grok4.2-dump"
-            }
-          },
-          {
-            "id": "5833eabf43bc24f1",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "Core Idea.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "Core Idea"
+              "title": "AGENTS"
             }
           }
-        ],
-        "currentTab": 2
+        ]
       }
     ],
     "direction": "vertical"
@@ -123,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "Core Idea.md",
+                "file": "AGENTS.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -133,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for Core Idea"
+              "title": "Backlinks for AGENTS"
             }
           },
           {
@@ -142,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "Core Idea.md",
+                "file": "AGENTS.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from Core Idea"
+              "title": "Outgoing links from AGENTS"
             }
           },
           {
@@ -185,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "Core Idea.md",
+                "file": "AGENTS.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of Core Idea"
+              "title": "Outline of AGENTS"
             }
           }
         ]
@@ -212,11 +183,27 @@
       "bases:Create new base": false
     }
   },
-  "active": "5833eabf43bc24f1",
+  "active": "8b5c29351be72235",
   "lastOpenFiles": [
-    "Grok4.2-dump.md",
-    "GPT5.4-dump.md",
-    "Core Idea.md",
-    "Untitled"
+    "pytest-cache-files-ibvoqsfr",
+    "pytest-cache-files-qjw807g1",
+    "README.md",
+    "pytest-cache-files-50rudczp",
+    "src/ctx/__pycache__/__main__.cpython-312.pyc",
+    "tests/__pycache__/test_main.cpython-312-pytest-9.0.2.pyc",
+    "tests/__pycache__/test_integration.cpython-312-pytest-9.0.2.pyc",
+    "tests/test_main.py",
+    "tests/test_integration.py",
+    "src/ctx/__main__.py",
+    "tests/__pycache__/test_cli.cpython-312-pytest-9.0.2.pyc.37592",
+    "tests/conftest.py",
+    "AGENTS.md",
+    "tests/fixtures/sample_project/docs/guide.md",
+    "tests/fixtures/sample_project/README.md",
+    "archive/Opus4.6-plan.md",
+    "archive/Opus4.6.md",
+    "archive/Core Idea.md",
+    "archive/Grok4.2-dump.md",
+    "archive/GPT5.4-dump.md"
   ]
 }
