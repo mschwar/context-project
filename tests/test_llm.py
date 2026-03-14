@@ -754,3 +754,96 @@ def test_caching_client_handles_empty_files() -> None:
     results = cache.summarize_files(Path("src"), [])
     assert results == []
     assert inner.file_call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# batch_size tests
+# ---------------------------------------------------------------------------
+
+def _anthropic_file_response(summaries: list[str], input_tokens: int = 5, output_tokens: int = 2) -> object:
+    import json
+    return SimpleNamespace(
+        content=[SimpleNamespace(text=json.dumps(summaries))],
+        usage=SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens),
+    )
+
+
+def _openai_file_response(summaries: list[str], prompt_tokens: int = 5, completion_tokens: int = 2) -> object:
+    import json
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(summaries)))],
+        usage=SimpleNamespace(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
+    )
+
+
+def test_anthropic_batch_size_splits_into_multiple_calls(monkeypatch) -> None:
+    factory = _FakeAnthropicFactory([
+        _anthropic_file_response(["Summary A"]),
+        _anthropic_file_response(["Summary B"]),
+        _anthropic_file_response(["Summary C"]),
+    ])
+    monkeypatch.setattr("ctx.llm.Anthropic", factory)
+    config = Config(provider="anthropic", api_key="key", model="claude-test", batch_size=1)
+    client = AnthropicClient(config, DEFAULT_PROMPT_TEMPLATES)
+
+    files = [
+        {"name": "a.py", "content": "a"},
+        {"name": "b.py", "content": "b"},
+        {"name": "c.py", "content": "c"},
+    ]
+    results = client.summarize_files(Path("src"), files)
+
+    assert [r.text for r in results] == ["Summary A", "Summary B", "Summary C"]
+    assert len(factory.instances[0].calls) == 3  # one call per file
+
+
+def test_anthropic_batch_size_none_uses_single_call(monkeypatch) -> None:
+    factory = _FakeAnthropicFactory([
+        _anthropic_file_response(["Summary A", "Summary B"]),
+    ])
+    monkeypatch.setattr("ctx.llm.Anthropic", factory)
+    config = Config(provider="anthropic", api_key="key", model="claude-test", batch_size=None)
+    client = AnthropicClient(config, DEFAULT_PROMPT_TEMPLATES)
+
+    files = [
+        {"name": "a.py", "content": "a"},
+        {"name": "b.py", "content": "b"},
+    ]
+    results = client.summarize_files(Path("src"), files)
+
+    assert [r.text for r in results] == ["Summary A", "Summary B"]
+    assert len(factory.instances[0].calls) == 1  # single batched call
+
+
+def test_openai_batch_size_splits_into_multiple_calls(monkeypatch) -> None:
+    factory = _FakeOpenAIFactory([
+        _openai_file_response(["Summary A", "Summary B"]),
+        _openai_file_response(["Summary C"]),
+    ])
+    monkeypatch.setattr("ctx.llm.OpenAI", factory)
+    config = Config(provider="openai", api_key="key", model="gpt-test", batch_size=2)
+    client = OpenAIClient(config, DEFAULT_PROMPT_TEMPLATES)
+
+    files = [
+        {"name": "a.py", "content": "a"},
+        {"name": "b.py", "content": "b"},
+        {"name": "c.py", "content": "c"},
+    ]
+    results = client.summarize_files(Path("src"), files)
+
+    assert [r.text for r in results] == ["Summary A", "Summary B", "Summary C"]
+    assert len(factory.instances[0].calls) == 2  # two batches: [a,b] and [c]
+
+
+def test_batch_size_larger_than_file_count_uses_single_call(monkeypatch) -> None:
+    factory = _FakeAnthropicFactory([
+        _anthropic_file_response(["Summary A"]),
+    ])
+    monkeypatch.setattr("ctx.llm.Anthropic", factory)
+    config = Config(provider="anthropic", api_key="key", model="claude-test", batch_size=100)
+    client = AnthropicClient(config, DEFAULT_PROMPT_TEMPLATES)
+
+    results = client.summarize_files(Path("src"), [{"name": "a.py", "content": "a"}])
+
+    assert [r.text for r in results] == ["Summary A"]
+    assert len(factory.instances[0].calls) == 1

@@ -78,7 +78,7 @@ def cli() -> None:
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
-@click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "lmstudio", "bitnet"]), default=None, help="LLM provider.")
+@click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "lmstudio"]), default=None, help="LLM provider.")
 @click.option("--model", default=None, help="Model ID override.")
 @click.option("--max-depth", type=int, default=None, help="Max directory depth to process.")
 @click.option("--token-budget", type=int, default=None, help="Max total tokens before stopping.")
@@ -117,7 +117,7 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
-@click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "lmstudio", "bitnet"]), default=None)
+@click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "lmstudio"]), default=None)
 @click.option("--model", default=None)
 @click.option("--token-budget", type=int, default=None, help="Max total tokens before stopping.")
 @click.option("--base-url", default=None, help="Custom API base URL.")
@@ -186,7 +186,7 @@ def status(path: str, check_exit_code: bool) -> None:
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
-@click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "lmstudio", "bitnet"]), default=None)
+@click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "lmstudio"]), default=None)
 @click.option("--model", default=None)
 @click.option("--token-budget", type=int, default=None, help="Max total tokens before stopping.")
 @click.option("--base-url", default=None, help="Custom API base URL.")
