@@ -8,10 +8,13 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 ## Current State
 - **Core Engine**: Fully implemented with bottom-up traversal, incremental hashing, parallel processing, and persistent LLM disk cache.
 - **LLM Clients**: Anthropic and OpenAI supported (including Ollama and LM Studio). **BitNet is deprecated** — `create_client("bitnet")` raises an informative error directing users to Ollama or LM Studio.
-- **Test Coverage**: 112 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, integration).
+- **Language Parsers**: Python (`ast`-based), JavaScript/TypeScript (regex), Rust (regex). Wired into `generator._prepare_file_entry`; metadata is passed to the LLM prompt for richer summaries.
+- **Test Coverage**: 127 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
 
-> **Branch notice**: As of March 2026, Phases 1–5 are complete on `main`. Phase 6 work (`feat/phase6-language-expansion`) should branch from `main`.
+> **Branch notice**: As of March 2026, Phases 1–6 are complete on `main`. Phase 7 is not yet scoped. New work should branch from `main`.
+
+> **Manifest refresh rule**: Any commit that adds or modifies source files must include a `ctx update .` pass to regenerate stale `CONTEXT.md` files before pushing. The `CTX Manifest Check` CI job enforces this and will fail otherwise.
 
 > **Dry-run note**: CLI paths that do not call an LLM must pass `require_api_key=False` to `load_config` to avoid `UsageError` in CI environments without API keys set.
 
@@ -159,25 +162,19 @@ Scope: close gaps in token budget and caching, add a cost-preview flag before sp
 - `--dry-run` flag on `ctx update` and `ctx smart-update`; backed by `check_stale_dirs()`.
 - `load_config` gains `require_api_key=False` for paths that don't call an LLM.
 
-### Phase 6 — Language Expansion & CI Hygiene
+### Phase 6 — Language Expansion & CI Hygiene ✓
 Scope: richer summaries for JS/TS/Rust, fix pre-existing CI noise.
 
-**Gate condition:** Phase 5 gate closeout (reflection filed, docs updated, PR merged) before work begins.
+- JS/TS parser (`js_ts_parser.py`): exported functions (named + arrow), classes, interfaces, type aliases, default export. 8 tests.
+- Rust parser (`rust_parser.py`): `pub fn/struct/enum/trait`, `mod`. Handles `pub(crate)`/`pub(super)`. 7 tests.
+- CI hygiene: `ctx-check.yml` rewritten inline; `pr-checks.yml` replaced Node/npm with Python `pytest`. All checks green.
 
-**Deliverables:**
+### Phase 7 — (Not Yet Scoped)
 
-#### 6.1 — JavaScript / TypeScript Parser
-- New `src/ctx/lang_parsers/js_ts_parser.py`: extract exported functions, classes, interfaces, type aliases.
-- Wire into `generator.py` alongside the Python parser (detect `.js`, `.ts`, `.tsx`, `.jsx`).
-- Files: `src/ctx/lang_parsers/js_ts_parser.py`, `src/ctx/generator.py`, `tests/test_js_ts_parser.py`.
+Candidates from Phase 6 reflection (no gate condition set yet):
+- **Go parser** — export by capitalization; natural next language.
+- **`ctx watch`** — file watcher for auto-regeneration (`watchdog`/`watchfiles`).
+- **Cache model-awareness** — include model name in disk cache key to prevent stale summaries on model switch.
+- **Document manifest refresh** — add `ctx update .` requirement to `CONTRIBUTING.md`/`RUNBOOK.md`.
 
-#### 6.2 — Rust Parser
-- New `src/ctx/lang_parsers/rust_parser.py`: extract `pub fn`, `pub struct`, `pub enum`, `pub trait`, `mod`.
-- Files: `src/ctx/lang_parsers/rust_parser.py`, `src/ctx/generator.py`, `tests/test_rust_parser.py`.
-
-#### 6.3 — Fix Pre-existing CI Failures (chore)
-- CTX Manifest Check: create `.github/actions/ctx-check/action.yml` or rewrite `.github/workflows/ctx-manifest-check.yml` to use `ctx status --check-exit-code` inline.
-- PR Checks: update `pr-checks.yml` to use Python `pytest` instead of `npm run test`.
-- Files: `.github/workflows/pr-checks.yml`, `.github/workflows/ctx-manifest-check.yml`, `.github/actions/ctx-check/action.yml` (new, if composite-action approach chosen).
-
-**Branch:** `feat/phase6-language-expansion` (branch from `main` after Phase 5 closeout)
+**Branch:** `feat/phase7-*` (branch from `main` after Phase 7 is scoped)
