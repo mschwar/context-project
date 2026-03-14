@@ -5,8 +5,8 @@ Generates `CONTEXT.md` manifests for every directory in your project so AI agent
 ## Quick Start
 
 ```bash
-pip install ctx-tool
-ctx setup        # auto-detects your LLM provider and writes .ctxconfig
+pip install ctx-tool   # installs the 'ctx' command
+ctx setup              # auto-detects your LLM provider and writes .ctxconfig
 ctx init .
 ctx status .
 ```
@@ -63,6 +63,8 @@ repos:
     hooks:
       - id: ctx-check
 ```
+
+Run `ctx init .` once before the hook will pass on a new repo.
 
 ## Links
 

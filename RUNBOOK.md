@@ -49,6 +49,22 @@ See how many manifests are stale or missing.
 ctx status /path/to/project
 ```
 
+## Publishing a Release
+
+The publish workflow (`.github/workflows/publish.yml`) triggers on any `v*` tag and publishes to PyPI via OIDC trusted publishing.
+
+**One-time setup (required before the first release):**
+1. On PyPI: create a project named `ctx-tool`, go to Publishing → add a trusted publisher for `mschwar/context-project`, environment `pypi`, workflow `publish.yml`.
+2. On GitHub: create an environment named `pypi` in repo Settings → Environments.
+
+Once configured, publishing is as simple as:
+```bash
+git tag v0.8.0
+git push --tags
+```
+
+> **Package name note:** `pip install ctx-tool` installs the `ctx` CLI command. The PyPI distribution name (`ctx-tool`) and the installed command name (`ctx`) are intentionally different — `ctx` was involved in a 2022 supply-chain incident on PyPI.
+
 ## Roadmap Gate Closeout
 
 Every roadmap phase (gate) requires a formal closeout pass.

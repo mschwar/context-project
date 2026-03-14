@@ -1,11 +1,11 @@
 ---
-generated: '2026-03-14T22:58:32Z'
+generated: '2026-03-14T23:09:21Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:7d41665205726b97d214a35cf9334d9e51b79079445be91ca3fea00b6ba67d47
+content_hash: sha256:822afb94127bc75e592661f2e89eb7bc29c85b0f64ca5a3980b8e6f76acde391
 files: 14
 dirs: 1
-tokens_total: 12674
+tokens_total: 12675
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
@@ -35,5 +35,5 @@ Core implementation of ctx, a filesystem-native context layer that generates and
 ## Notes
 
 - The generator.py module orchestrates the manifest creation workflow by combining configuration, file discovery, hashing, LLM calls, and manifest serialization.
-- LLM integration is abstracted through llm.py to support multiple providers; config.py determines which is active.
-- Ignore patterns and git integration enable incremental updates and selective processing of changed files.
+- LLM implementations in llm.py support pluggable providers (Anthropic, OpenAI) for flexible summarization backends.
+- The ignore.py and git.py modules work together to determine which files should be included in manifest generation.

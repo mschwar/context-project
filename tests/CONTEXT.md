@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T22:58:38Z'
+generated: '2026-03-14T23:09:27Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:5d8c9a034e2b8d3f488a3f411681063b56f43a2d2bd2f116971c747c321064de
+content_hash: sha256:5eec8d2241470f59da95923dada94c9130f0be3db350242d1444864b5b3b00f1
 files: 21
 dirs: 1
-tokens_total: 18472
+tokens_total: 18414
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Test suite for the context-project, covering CLI, configuration, code parsing, Git integration, LLM client operations, and manifest generation.
+Test suite for the context-project, covering CLI, configuration, code parsing, Git integration, LLM clients, and manifest generation.
 
 ## Files
 
@@ -32,7 +32,7 @@ Test suite for the context-project, covering CLI, configuration, code parsing, G
 - **test_rust_parser.py** — Tests for Rust language parser extracting public items and modules.
 - **test_server.py** — Tests for MCP server endpoints serving CONTEXT.md manifests.
 - **test_setup.py** — Tests for setup command, provider detection, and config file generation with various LLM providers.
-- **test_trust.py** — Tests for token estimation, cache eviction, and transient error handling in LLM client operations.
+- **test_trust.py** — Tests for token estimation with tiktoken fallback, cache eviction with size limits, and transient error messaging.
 - **test_watcher.py** — Tests for file system watcher event filtering and debounce logic.
 
 ## Subdirectories
@@ -41,6 +41,6 @@ Test suite for the context-project, covering CLI, configuration, code parsing, G
 
 ## Notes
 
-- Tests are organized by module, with each test file corresponding to a primary component (parsers, CLI, config, LLM, etc.).
-- The `conftest.py` provides shared pytest fixtures for temporary directory management across tests.
+- Tests are organized by module, with each test file corresponding to a core feature (parsers, CLI, config, Git, LLM, etc.).
+- The `conftest.py` provides shared pytest fixtures for temporary workspace directories.
 - Integration tests in `test_integration.py` validate end-to-end workflows using fixture projects.
