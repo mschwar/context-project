@@ -1,20 +1,20 @@
 ---
-generated: '2026-03-14T22:01:41Z'
-generator: ctx/0.1.0
+generated: '2026-03-14T22:42:45Z'
+generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:e3c6e4e70bf452ebc73c11de12c45a4891ca4ea37070beeeb6ced14c8122587e
+content_hash: sha256:c1267504e89064ad948013dc9b26dc412d1682c76c155727d88d36c9bd94c0e8
 files: 14
 dirs: 1
 tokens_total: 13775
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
-Core module implementing context generation, LLM integration, and manifest management for automated documentation.
+Core module implementing a filesystem-native context layer for AI agents, providing CLI tools, LLM integration, and manifest generation.
 
 ## Files
 
 - **.ctxignore.default** — Default ignore patterns for ctx, excluding version control, dependencies, IDE files, and temporary artifacts.
-- **__init__.py** — Package initialization file declaring ctx version and module docstring.
+- **__init__.py** — Package initialization defining ctx as a filesystem-native context layer for AI agents.
 - **__main__.py** — Entry point for running ctx as a Python module via `python -m ctx`.
 - **cli.py** — Click CLI with commands for init, update, status, smart_update, watch, and serve operations.
 - **config.py** — Configuration loading from environment variables, .ctxconfig files, and CLI overrides.
@@ -34,6 +34,6 @@ Core module implementing context generation, LLM integration, and manifest manag
 
 ## Notes
 
-- The generator module serves as the orchestration hub, coordinating config, ignore patterns, hashing, LLM calls, and manifest output.
-- LLM integration supports multiple providers (Anthropic, OpenAI) through a protocol-based architecture.
-- The CLI provides both one-time operations (init, update, status) and continuous modes (watch, serve).
+- The module integrates LLM-based summarization with git-aware change detection and file system watching for incremental updates.
+- Configuration is hierarchical: environment variables, .ctxconfig files, and CLI arguments.
+- Manifest generation relies on content hashing to detect staleness and avoid unnecessary regeneration.

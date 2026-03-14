@@ -13,7 +13,7 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 - **Test Coverage**: 143 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
 
-> **Branch notice**: As of March 2026, Phases 1–7 are complete on `main`. Phase 8 is not yet scoped. New work should branch from `main`.
+> **Branch notice**: As of March 2026, Phases 1–7 are complete on `main`. Phases 8–10 are scoped (Ship It, Automate It, Trust It). New work should branch from `main`.
 
 > **Manifest refresh rule**: Any commit that adds or modifies source files must include a `ctx update .` pass to regenerate stale `CONTEXT.md` files before pushing. The `CTX Manifest Check` CI job enforces this and will fail otherwise.
 
@@ -176,11 +176,26 @@ Scope: richer summaries for JS/TS/Rust, fix pre-existing CI noise.
 - `ctx watch`: OS-native watcher via `watchdog`; CONTEXT.md excluded; 0.5 s debounce; hooks into `update_tree`. 8 tests.
 - Cache model-awareness: `sha256(model + ":" + file_json)` key. Model switch always produces cache miss. 2 new tests.
 
-### Phase 8 — (Not Yet Scoped)
+### Phase 8 — Ship It
+Scope: make `ctx` installable via `pip install`, automated releases, and a README that gets someone from zero to working in 60 seconds.
+- PyPI-ready packaging: `ctx-tool` on PyPI; classifiers, project URLs; `__version__` bumped to `"0.8.0"`; `setuptools-scm` removed from build deps.
+- GitHub Actions publish workflow (`.github/workflows/publish.yml`): tag `v*` → run tests → build + publish via OIDC trusted publishing.
+- README rewrite (~100 lines): one-line tagline, 4-command quick start, commands table, inline `.ctxconfig` example, local LLM notes.
 
-Candidates from Phase 7 reflection:
-- **Java / C# parsers** — complete enterprise language coverage.
-- **Accurate token counting** — replace `_estimate_tokens` with `tiktoken` for budget accuracy.
-- **`watch_debounce_seconds` config** — expose debounce as a `.ctxconfig` key.
+**Branch:** `feat/phase8-distribution`
 
-**Branch:** `feat/phase8-*` (branch from `main` after Phase 8 is scoped)
+### Phase 9 — Automate It
+Scope: zero-friction first run and automatic manifest freshness without remembering.
+- `ctx setup` command: auto-detect provider (env vars → Ollama probe → LM Studio probe), write `.ctxconfig` with sensible defaults, print next step.
+- `.pre-commit-hooks.yaml`: standard `pre-commit` framework hook running `ctx status . --check-exit-code`.
+- Graceful failure: when `ctx init`/`ctx update` fails due to missing API key, print actionable hint pointing to `ctx setup`.
+
+**Branch:** `feat/phase9-onboarding-automation` (branch from `main` after Phase 8 merges)
+
+### Phase 10 — Trust It
+Scope: fix the three reliability gaps that erode confidence at scale.
+- Accurate token estimation: replace `len(text) / 4` heuristic in `generator._estimate_tokens()` with `tiktoken` (`cl100k_base`, lazy-loaded, falls back to heuristic if unavailable). New dep: `tiktoken>=0.7`.
+- Cache eviction: cap `.ctx-cache/llm_cache.json` at 10,000 entries (trim oldest on write); `max_cache_entries` config key.
+- Transient error transparency: prefix `[transient, retries exhausted]` on known transient failures; CLI footer suggests retry.
+
+**Branch:** `feat/phase10-trust` (branch from `main` after Phase 9 merges)
