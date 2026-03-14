@@ -97,5 +97,10 @@ def test_empty_file(tmp_path):
 
 def test_missing_file(tmp_path):
     result = parse_js_ts_file(tmp_path / "missing.ts")
-    assert result["functions"] == []
-    assert result["has_default_export"] is False
+    assert result == {
+        "functions": [],
+        "classes": [],
+        "interfaces": [],
+        "types": [],
+        "has_default_export": False,
+    }

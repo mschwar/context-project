@@ -82,4 +82,10 @@ def test_empty_file(tmp_path):
 
 def test_missing_file(tmp_path):
     result = parse_rust_file(tmp_path / "missing.rs")
-    assert result["functions"] == []
+    assert result == {
+        "functions": [],
+        "structs": [],
+        "enums": [],
+        "traits": [],
+        "modules": [],
+    }

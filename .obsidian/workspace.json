@@ -11,10 +11,14 @@
             "id": "8b5c29351be72235",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
+              "type": "markdown",
+              "state": {
+                "file": "AGENTS.md",
+                "mode": "source",
+                "source": false
+              },
               "icon": "lucide-file",
-              "title": "New tab"
+              "title": "AGENTS"
             }
           }
         ]
@@ -90,6 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
+                "file": "AGENTS.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -99,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks"
+              "title": "Backlinks for AGENTS"
             }
           },
           {
@@ -108,11 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
+                "file": "AGENTS.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links"
+              "title": "Outgoing links from AGENTS"
             }
           },
           {
@@ -150,12 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
+                "file": "AGENTS.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline"
+              "title": "Outline of AGENTS"
             }
           }
         ]
@@ -178,30 +185,41 @@
   },
   "active": "8b5c29351be72235",
   "lastOpenFiles": [
-    "AGENTS.md",
-    "archive/AGENTS-v0-roadmap.md",
-    "RUNBOOK.md",
-    "state.md.tmp.44904.1773456907010",
-    "state.md.tmp.44904.1773456899646",
-    "tests/test_llm.py.tmp.44904.1773455787821",
-    "tests/test_llm.py.tmp.44904.1773455769221",
-    "src/ctx/llm.py.tmp.44904.1773455760308",
-    "CONTRIBUTING.md",
-    "rules.md",
-    "state.md",
-    "architecture.md",
-    "tests/test_llm.py.tmp.44904.1773455225723",
-    "src/ctx/llm.py.tmp.44904.1773455218572",
-    "tests/test_llm.py.tmp.44904.1773455023895",
-    "tests/test_llm.py.tmp.44904.1773455010310",
-    "tests/test_llm.py.tmp.44904.1773454998853",
-    "README.md",
-    "tests/fixtures/sample_project/docs/guide.md",
-    "tests/fixtures/sample_project/README.md",
-    "archive/Opus4.6-plan.md",
-    "archive/Opus4.6.md",
-    "archive/Core Idea.md",
-    "archive/Grok4.2-dump.md",
-    "archive/GPT5.4-dump.md"
+    "package.json",
+    "package-lock.json",
+    "commitlint.config.mjs",
+    "GATE_CLOSEOUT.md",
+    "node_modules/yargs-parser/build/lib/yargs-parser.js",
+    "node_modules/yargs-parser/build/lib/yargs-parser-types.js",
+    "node_modules/yargs-parser/build/lib/tokenize-arg-string.js",
+    "node_modules/yargs-parser/build/lib/string-utils.js",
+    "node_modules/yargs-parser/build/lib/index.js",
+    "node_modules/yargs-parser/build/lib",
+    "node_modules/yargs/lib/platform-shims/esm.mjs",
+    "node_modules/yargs/lib/platform-shims/browser.mjs",
+    "node_modules/lines-and-columns/README.md",
+    "node_modules/ini/README.md",
+    "node_modules/array-ify/README.md",
+    "sdlc-bootstrap-kit/templates/CONTEXT.md",
+    "node_modules/ajv/README.md",
+    "node_modules/@commitlint/cli/README.md",
+    "node_modules/@commitlint/cli/license.md",
+    "node_modules/@commitlint/is-ignored/license.md",
+    "node_modules/@commitlint/format/README.md",
+    "node_modules/@commitlint/format/license.md",
+    "node_modules/@commitlint/config-conventional/README.md",
+    "node_modules/@commitlint/config-conventional/license.md",
+    "node_modules/@commitlint/lint/README.md",
+    "node_modules/@commitlint/lint/license.md",
+    "node_modules/import-fresh/node_modules/resolve-from/readme.md",
+    "node_modules/@conventional-changelog/git-client/README.md",
+    "node_modules/conventional-changelog-angular/LICENSE.md",
+    "node_modules/@commitlint/message/license.md",
+    "node_modules/yargs-parser/CHANGELOG.md",
+    "node_modules/@commitlint/to-lines/license.md",
+    "node_modules/@commitlint/ensure/license.md",
+    "node_modules/import-meta-resolve/readme.md",
+    "node_modules/git-raw-commits/README.md",
+    "node_modules/git-raw-commits/LICENSE.md"
   ]
 }
