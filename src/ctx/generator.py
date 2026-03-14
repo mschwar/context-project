@@ -32,6 +32,7 @@ from ctx.language_detector import detect_language
 from ctx.lang_parsers.python_parser import parse_python_file
 from ctx.lang_parsers.js_ts_parser import parse_js_ts_file
 from ctx.lang_parsers.rust_parser import parse_rust_file
+from ctx.lang_parsers.go_parser import parse_go_file
 
 
 # Cap on threads per depth level. LLM calls are I/O-bound so threads are effective,
@@ -176,6 +177,8 @@ def _prepare_file_entry(
         metadata = parse_js_ts_file(path)
     elif language == "Rust":
         metadata = parse_rust_file(path)
+    elif language == "Go":
+        metadata = parse_go_file(path)
 
     truncated = content[: config.max_file_tokens]
     entry = {
