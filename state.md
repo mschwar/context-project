@@ -15,6 +15,9 @@ Current development status and upcoming milestones.
 - [x] Config system with `.ctxconfig` and env var support.
 - [x] Robust `.ctxignore` handling via `pathspec`.
 - [x] Content-based change detection (SHA-256).
+- [x] Canonical agent workflow defined in `AGENTS.md` (inspired by Ledger repo).
+- [x] Operational runbook defined in `RUNBOOK.md`.
+- [x] Git pre-commit hooks for automated quality checks.
 
 ### LLM Integration
 - [x] `AnthropicClient` for Claude (preferred).
