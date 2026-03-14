@@ -73,6 +73,7 @@ class Config:
     batch_size: Optional[int] = None  # None = send all files in one call
     extensions: Optional[list[str]] = None  # None = all text files
     cache_path: Optional[str] = None  # None = default .ctx-cache/llm_cache.json; "" = disable
+    max_cache_entries: int = 10_000  # trim disk cache when it exceeds this many entries
     prompts: dict[str, str] = field(default_factory=dict)
 
 
@@ -183,6 +184,8 @@ def load_config(
             config.token_budget = None if data["token_budget"] is None else int(data["token_budget"])
         if "batch_size" in data:
             config.batch_size = None if data["batch_size"] is None else int(data["batch_size"])
+        if "max_cache_entries" in data and data["max_cache_entries"] is not None:
+            config.max_cache_entries = int(data["max_cache_entries"])
         if "cache_path" in data:
             config.cache_path = None if data["cache_path"] is None else str(data["cache_path"])
         if "base_url" in data and data["base_url"] is not None:

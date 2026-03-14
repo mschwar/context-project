@@ -23,6 +23,7 @@ from ctx.config import (
     load_config,
     write_default_config,
 )
+from ctx.llm import TRANSIENT_ERROR_PREFIX
 from ctx.generator import GenerateStats, check_stale_dirs, generate_tree, get_status, update_tree
 from ctx.ignore import load_ignore_patterns
 from ctx.llm import create_client
@@ -80,6 +81,11 @@ def _echo_generation_errors(stats: GenerateStats) -> None:
     click.echo("Errors:")
     for error in stats.errors:
         click.echo(f"  - {error}")
+    if any(TRANSIENT_ERROR_PREFIX in e for e in stats.errors):
+        click.echo(
+            "Tip: transient errors may resolve on retry. Run the command again.",
+            err=True,
+        )
 
 
 def _echo_stale_dirs(stale: list[Path], target_path: Path) -> None:

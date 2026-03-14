@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T22:48:26Z'
+generated: '2026-03-14T22:58:38Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:8372538082d4edae922e2410829e4096fa38bb6dabfbfe80dc067b9c24048035
-files: 20
+content_hash: sha256:5d8c9a034e2b8d3f488a3f411681063b56f43a2d2bd2f116971c747c321064de
+files: 21
 dirs: 1
-tokens_total: 17749
+tokens_total: 18472
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Test suite for the context project covering CLI, configuration, generation engine, language parsers, Git integration, and LLM client functionality.
+Test suite for the context-project, covering CLI, configuration, code parsing, Git integration, LLM client operations, and manifest generation.
 
 ## Files
 
@@ -31,7 +31,8 @@ Test suite for the context project covering CLI, configuration, generation engin
 - **test_python_parser.py** — Tests for Python language parser extracting classes and functions.
 - **test_rust_parser.py** — Tests for Rust language parser extracting public items and modules.
 - **test_server.py** — Tests for MCP server endpoints serving CONTEXT.md manifests.
-- **test_setup.py** — Tests for setup command, provider detection, config writing, and graceful error handling for missing API keys.
+- **test_setup.py** — Tests for setup command, provider detection, and config file generation with various LLM providers.
+- **test_trust.py** — Tests for token estimation, cache eviction, and transient error handling in LLM client operations.
 - **test_watcher.py** — Tests for file system watcher event filtering and debounce logic.
 
 ## Subdirectories
@@ -40,6 +41,6 @@ Test suite for the context project covering CLI, configuration, generation engin
 
 ## Notes
 
-- Tests are organized by module, with each test file corresponding to a primary component (parsers, CLI, config, generation, etc.).
-- The `conftest.py` file provides shared pytest fixtures for temporary directory management across all tests.
+- Tests are organized by module, with each test file corresponding to a primary component (parsers, CLI, config, LLM, etc.).
+- The `conftest.py` provides shared pytest fixtures for temporary directory management across tests.
 - Integration tests in `test_integration.py` validate end-to-end workflows using fixture projects.

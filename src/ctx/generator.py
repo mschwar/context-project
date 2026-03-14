@@ -67,10 +67,22 @@ def _relative_path_str(path: Path, root: Path) -> str:
     return relative.as_posix()
 
 
+_TIKTOKEN_ENCODER: object = None  # lazy-loaded; None = not yet attempted, False = unavailable
+
+
 def _estimate_tokens(text: str) -> int:
+    global _TIKTOKEN_ENCODER
     if not text:
         return 0
-    return max(1, math.ceil(len(text) / 4))
+    if _TIKTOKEN_ENCODER is None:
+        try:
+            import tiktoken
+            _TIKTOKEN_ENCODER = tiktoken.get_encoding("cl100k_base")
+        except (ImportError, ValueError):
+            _TIKTOKEN_ENCODER = False  # mark unavailable so we don't retry
+    if _TIKTOKEN_ENCODER is False:
+        return max(1, math.ceil(len(text) / 4))
+    return len(_TIKTOKEN_ENCODER.encode(text))  # type: ignore[union-attr]
 
 
 def _extract_manifest_summary(manifest: Manifest, directory_name: str) -> str:
@@ -452,7 +464,7 @@ def generate_tree(
     return _run_generation(
         root,
         config,
-        CachingLLMClient(client, cache_path=_resolve_cache_path(config, root)),
+        CachingLLMClient(client, cache_path=_resolve_cache_path(config, root), max_cache_entries=config.max_cache_entries),
         spec,
         incremental=False,
         progress=progress,
@@ -496,7 +508,7 @@ def update_tree(
     return _run_generation(
         root,
         config,
-        CachingLLMClient(client, cache_path=_resolve_cache_path(config, root)),
+        CachingLLMClient(client, cache_path=_resolve_cache_path(config, root), max_cache_entries=config.max_cache_entries),
         spec,
         incremental=True,
         progress=progress,
