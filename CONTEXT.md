@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T23:09:35Z'
+generated: '2026-03-14T23:23:37Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:e2a0c1deeee34bd5ace41b4f0f1e0cf9a8fd575814b6957367f49820705aefc1
+content_hash: sha256:9516a51d1b29c1ece70bf894a4e8ce39d84624aa9fe6a9c34f1126e5427d4170
 files: 17
 dirs: 9
-tokens_total: 11846
+tokens_total: 11854
 ---
 # C:/Users/Matty/Documents/context-project
 
-A filesystem-native tool that generates CONTEXT.md manifests to help AI agents navigate and understand large codebases through hierarchical directory summaries.
+CLI tool that generates CONTEXT.md manifests for project directories to help AI agents navigate codebases efficiently.
 
 ## Files
 
@@ -21,7 +21,7 @@ A filesystem-native tool that generates CONTEXT.md manifests to help AI agents n
 - **AGENTS.md** — Onboarding contract and workflow guide for agents contributing to ctx, covering mission, current state, canonical rules, and development phases.
 - **CONTRIBUTING.md** — Guidelines for participating in the agentic SDLC workflow and maintaining code quality standards.
 - **GATE_CLOSEOUT.md** — Defines the required closeout sequence for completing roadmap phases with validation and reflection.
-- **README.md** — Quick-start guide and feature overview for ctx, a tool that generates CONTEXT.md manifests to help AI agents navigate large codebases.
+- **README.md** — CLI tool that generates CONTEXT.md manifests for project directories to help AI agents navigate codebases efficiently.
 - **RUNBOOK.md** — Operational runbook covering prerequisites, CLI usage, testing, release publishing, cache management, and common failure modes for ctx development.
 - **architecture.md** — System design overview covering bottom-up generation, content hashing, LLM abstraction, and data flow.
 - **commitlint.config.mjs** — Configuration file specifying commitlint extends conventional commit rules.
@@ -37,15 +37,14 @@ A filesystem-native tool that generates CONTEXT.md manifests to help AI agents n
 - **.githooks/** — Git hooks directory for automated pre-commit testing and validation.
 - **.github/** — GitHub configuration and automation for the context-project repository.
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
-- **.pytest_cache/** — Pytest cache directory storing test execution metadata, results, and configuration to optimize test runs.
+- **.pytest_cache/** — Pytest cache directory storing test execution metadata and diagnostic information.
 - **.worktrees/** — Git worktrees configuration and management directory for the context-project.
 - **archive/** — Archive of design documents, roadmaps, and AI analysis for the ctx project—a filesystem-native hierarchical manifest system enabling coarse-to-fine directory navigation.
-- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer.
-- **tests/** — Test suite for the context-project, covering CLI, configuration, code parsing, Git integration, LLM clients, and manifest generation.
+- **src/** — Source code for the context project, containing core modules and utilities for AI agent context management.
+- **tests/** — Test suite covering CLI, parsers, configuration, Git integration, LLM clients, and manifest generation for the context project.
 
 ## Notes
 
-- The project uses Python (pyproject.toml) with Node.js tooling (package.json) for development automation and commit validation.
-- AGENTS.md, CONTRIBUTING.md, and rules.md define the agentic workflow and engineering standards for contributors.
-- state.md and GATE_CLOSEOUT.md track development progress and phase completion requirements.
-- The archive/ directory preserves historical design decisions and analysis for reference.
+- The project uses Python (pyproject.toml) and Node.js (package.json) tooling with pre-commit hooks and Husky for automation.
+- Core documentation includes AGENTS.md for agent onboarding, CONTRIBUTING.md for development guidelines, and RUNBOOK.md for operational procedures.
+- Architecture and engineering standards are documented in architecture.md and rules.md respectively.

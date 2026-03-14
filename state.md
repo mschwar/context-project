@@ -122,11 +122,14 @@ Fix the three reliability gaps that erode confidence at scale.
 
 **Branch:** `feat/phase10-trust` (branch from `main` after Phase 9 merges)
 
-## Phase 11 — (Not Yet Scoped)
+## Phase 11 — Completeness
 
-Candidates from Phase 8–10 reflections:
-- **Java / C# parsers** — complete enterprise language coverage (originally from Phase 7 reflection, still unactioned).
-- **`ctx setup --check`** — non-destructive flag that prints detected provider without writing config; useful in CI.
-- **Streaming per-file progress** — progress callback fires per-directory; per-file updates would improve perceived responsiveness for large directories.
+Close all outstanding suggestions accumulated across Phases 4–10 reflections.
 
-**Branch:** `feat/phase11-*` (branch from `main` after Phase 11 is scoped)
+- [ ] **11.1 Prompt regression tests** — smoke tests for all six `DEFAULT_PROMPT_TEMPLATES` with a `FakeLLMClient`; assert structural markers present (Phase 4 suggestion, open 7 phases).
+- [ ] **11.2 `watch_debounce_seconds` config** — expose debounce window as a `.ctxconfig` key and `Config` field (Phase 7 suggestion).
+- [ ] **11.3 `ctx setup` UX** — print "Probing Ollama..." / "Probing LM Studio..." during local port probes so users understand the pause; add `--check` flag for non-destructive provider detection (Phases 9 & 10 suggestions).
+- [ ] **11.4 Java parser** — regex extraction of `public class/interface/enum/record`, `public` methods. Wired into `generator._prepare_file_entry` for `.java` files.
+- [ ] **11.5 C# parser** — regex extraction of `public class/interface/enum/struct/record`, `public` methods. Wired in for `.cs` files.
+
+**Branch:** `feat/phase11-completeness`

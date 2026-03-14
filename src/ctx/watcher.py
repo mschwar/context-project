@@ -42,11 +42,13 @@ class _DebounceHandler(FileSystemEventHandler):
         root: Path,
         spec: "pathspec.PathSpec",
         on_change: Callable[[Path], None],
+        debounce_seconds: float = _DEBOUNCE_SECONDS,
     ) -> None:
         super().__init__()
         self._root = root
         self._spec = spec
         self._on_change = on_change
+        self._debounce_seconds = debounce_seconds
         self._pending: dict[Path, threading.Timer] = {}
         self._lock = threading.Lock()
 
@@ -55,7 +57,7 @@ class _DebounceHandler(FileSystemEventHandler):
             existing = self._pending.pop(path, None)
             if existing:
                 existing.cancel()
-            timer = threading.Timer(_DEBOUNCE_SECONDS, self._fire, args=[path])
+            timer = threading.Timer(self._debounce_seconds, self._fire, args=[path])
             self._pending[path] = timer
             timer.start()
 
@@ -125,7 +127,7 @@ def run_watch(
             for err in stats.errors:
                 echo(f"  error: {err}")
 
-    handler = _DebounceHandler(root, spec, on_change)
+    handler = _DebounceHandler(root, spec, on_change, debounce_seconds=config.watch_debounce_seconds)
     observer = Observer()
     observer.schedule(handler, str(root), recursive=True)
     observer.start()

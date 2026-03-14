@@ -15,6 +15,7 @@ EXTENSION_MAP = {
     ".h": "C/C++ Header",
     ".hpp": "C++ Header",
     ".java": "Java",
+    ".cs": "C#",
     ".kt": "Kotlin",
     ".rb": "Ruby",
     ".php": "PHP",
