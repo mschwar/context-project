@@ -21,6 +21,7 @@ Current development status and upcoming milestones.
 - [x] `OpenAIClient` with support for OpenAI, Ollama, and LM Studio.
 - [x] `BitNetClient` for local inference using BitNet subprocesses.
 - [x] Batch file summarization to reduce API calls.
+- [x] Per-file fallback for Ollama when batch output is malformed or wrong count.
 
 ### Manifest Management
 - [x] YAML frontmatter serialization.
@@ -37,6 +38,11 @@ Current development status and upcoming milestones.
 ### Performance
 - [ ] Implement parallel processing for directory summarization (currently sequential).
 - [ ] Add caching for LLM responses to avoid redundant calls during debugging.
+
+## Backlog
+
+- [ ] **Fix BitNet subprocess path resolution:** `run_inference.py` is not found even when `--base-url` points to the correct directory. Absolute path resolution was attempted but did not solve it. Needs deeper debugging of Windows subprocess `cwd` + script path handling.
+- [ ] **Add 400 context-length fallback for local providers:** When a local provider returns HTTP 400 due to `n_keep >= n_ctx`, catch `openai.BadRequestError` and fall back to per-file summarization with more aggressive truncation. Also handle directory-level prompt truncation when combined file summaries exceed the model's context window.
 
 ## Roadmap
 
