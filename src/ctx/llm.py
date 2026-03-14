@@ -338,6 +338,23 @@ def _build_batch_results(
     return results
 
 
+def _apply_batch_size(
+    chunk_fn: Callable[[Path, list[dict]], list[LLMResult]],
+    batch_size: int | None,
+    dir_path: Path,
+    files: list[dict],
+) -> list[LLMResult]:
+    """Call chunk_fn in slices of batch_size, or once when batch_size is unset."""
+    if not files:
+        return []
+    if batch_size is None or batch_size >= len(files):
+        return chunk_fn(dir_path, files)
+    results: list[LLMResult] = []
+    for i in range(0, len(files), batch_size):
+        results.extend(chunk_fn(dir_path, files[i : i + batch_size]))
+    return results
+
+
 def _file_summary_output_budget(file_count: int) -> int:
     return min(8192, max(1024, 256 + (file_count * 128)))
 
@@ -438,18 +455,8 @@ class AnthropicClient:
         output_tokens = int(getattr(getattr(response, "usage", None), "output_tokens", 0) or 0)
         return _build_batch_results(summaries, input_tokens, output_tokens)
 
-    def summarize_files(
-        self, dir_path: Path, files: list[dict]
-    ) -> list[LLMResult]:
-        if not files:
-            return []
-        batch_size = self.config.batch_size
-        if batch_size is None or batch_size >= len(files):
-            return self._summarize_files_chunk(dir_path, files)
-        results: list[LLMResult] = []
-        for i in range(0, len(files), batch_size):
-            results.extend(self._summarize_files_chunk(dir_path, files[i : i + batch_size]))
-        return results
+    def summarize_files(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
+        return _apply_batch_size(self._summarize_files_chunk, self.config.batch_size, dir_path, files)
 
     def summarize_directory(
         self,
@@ -587,18 +594,8 @@ class OpenAIClient:
         input_tokens, output_tokens = self._usage_from_response(response)
         return _build_batch_results(summaries, input_tokens, output_tokens)
 
-    def summarize_files(
-        self, dir_path: Path, files: list[dict]
-    ) -> list[LLMResult]:
-        if not files:
-            return []
-        batch_size = self.config.batch_size
-        if batch_size is None or batch_size >= len(files):
-            return self._summarize_files_chunk(dir_path, files)
-        results: list[LLMResult] = []
-        for i in range(0, len(files), batch_size):
-            results.extend(self._summarize_files_chunk(dir_path, files[i : i + batch_size]))
-        return results
+    def summarize_files(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
+        return _apply_batch_size(self._summarize_files_chunk, self.config.batch_size, dir_path, files)
 
     def _call_summarize_directory(
         self,
