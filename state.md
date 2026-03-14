@@ -41,14 +41,14 @@ Repo cleanup and branch merge. Prerequisite for all subsequent work.
 - [ ] Update `.gitignore`: add `.tmp/`, `pytest-cache-files-*/`, `.worktrees/`.
 - [ ] Merge `feat/local-providers-token-budget` → `main`.
 
-## Phase 2 — Reliability & Performance
+## Phase 2 — Reliability & Performance ✓
 
 Make local providers robust and unlock parallelism.
 
-- [ ] **400 context-length fallback:** Catch `openai.BadRequestError` when local provider returns HTTP 400 (`n_keep >= n_ctx`). Fall back to per-file summarization with aggressive truncation. Handle directory-level prompt truncation when combined summaries exceed context.
-- [ ] **Parallel directory processing:** `_run_generation` currently processes directories sequentially. Add async or threaded parallelism.
-- [ ] **LLM response caching:** Cache summarization results to avoid redundant API calls during iteration and debugging.
-- [ ] **BitNet subprocess resolution:** `run_inference.py` not found on Windows. Either fix path resolution or deprecate the provider.
+- [x] **400 context-length fallback:** `openai.BadRequestError` caught in `OpenAIClient.summarize_files` (falls back to per-file) and `summarize_directory` (truncates summaries to `_SUMMARY_TRUNCATE_CHARS` and retries once). Local providers only.
+- [x] **Parallel directory processing:** `_run_generation` groups directories by depth and processes each level with `ThreadPoolExecutor` (max 4 workers). Bottom-up invariant preserved — level barrier via context manager `__exit__`. Token budget checked at level granularity.
+- [x] **LLM response caching:** `CachingLLMClient` wraps any `LLMClient` and caches file summaries by SHA-256 content hash. Thread-safe. Applied automatically in `generate_tree` and `update_tree`.
+- [x] **BitNet deprecated:** Removed `BitNetClient` class. `create_client("bitnet")` raises `click.UsageError` directing users to Ollama or LM Studio.
 - [ ] Refine system prompts for more consistent summary styles.
 - [ ] Optimize batch sizes for different LLM context windows.
 

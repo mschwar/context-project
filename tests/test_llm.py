@@ -14,12 +14,12 @@ import pytest
 from ctx.config import Config
 from ctx.llm import (
     AnthropicClient,
-    BitNetClient,
+    CachingLLMClient,
     FileSummary,
+    LLMResult,
     OpenAIClient,
     SubdirSummary,
     _extract_json_array,
-    _parse_bitnet_output,
     create_client,
 )
 
@@ -424,95 +424,163 @@ def test_openai_summarize_directory_does_not_retry_non_transient_failure(monkeyp
     assert len(factory.instances[0].calls) == 1
 
 
-# --- BitNet tests ---
+# --- BitNet deprecation ---
 
 
-def _fake_subprocess_run(stdout: str, returncode: int = 0):
-    def run(cmd, *, input, cwd, capture_output, text, timeout):
-        return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="error detail" if returncode else "")
-    return run
+def test_create_client_bitnet_raises_usage_error() -> None:
+    with pytest.raises(click.UsageError, match="bitnet.*not supported"):
+        create_client(Config(provider="bitnet", model="models/bitnet.gguf"))
 
 
-def test_parse_bitnet_output_extracts_after_marker() -> None:
-    output = "some noise\nAssistant: CLI entrypoint module."
-    assert _parse_bitnet_output(output, "Assistant:") == "CLI entrypoint module."
+# --- OpenAI 400 fallback ---
 
 
-def test_parse_bitnet_output_falls_back_to_last_line_when_no_marker() -> None:
-    output = "some preamble\nActual answer here"
-    assert _parse_bitnet_output(output, "Summary:") == "Actual answer here"
+def _openai_bad_request_error() -> openai.BadRequestError:
+    response = httpx.Response(400, request=httpx.Request("POST", "https://example.com"))
+    return openai.BadRequestError(message="context length exceeded", response=response, body={})
 
 
-def test_create_client_bitnet_returns_bitnet_client() -> None:
-    client = create_client(Config(provider="bitnet", model="models/bitnet.gguf"))
-    assert isinstance(client, BitNetClient)
+def test_openai_summarize_files_falls_back_on_400_for_local_provider(monkeypatch) -> None:
+    """For local providers, HTTP 400 on batch summarize triggers per-file fallback."""
+    single_call_count = 0
 
+    class FakeCompletions:
+        call_count = 0
 
-def test_bitnet_summarize_files_returns_empty_for_no_files() -> None:
-    client = BitNetClient(Config(provider="bitnet", model="models/bitnet.gguf"))
-    assert client.summarize_files(Path("src"), []) == []
+        def create(self, **kwargs):
+            self.call_count += 1
+            if self.call_count == 1:
+                raise _openai_bad_request_error()
+            # Per-file fallback calls
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="One-line summary."))],
+                usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
+            )
 
-
-def test_bitnet_summarize_files_calls_subprocess_per_file(monkeypatch) -> None:
-    calls: list[dict] = []
-
-    def fake_run(cmd, *, input, cwd, capture_output, text, timeout):
-        calls.append({"cmd": cmd, "cwd": cwd, "input": input})
-        return SimpleNamespace(returncode=0, stdout="Assistant: CLI entrypoint.", stderr="")
-
-    monkeypatch.setattr("ctx.llm.subprocess.run", fake_run)
-    client = BitNetClient(Config(
-        provider="bitnet",
-        model="models/bitnet.gguf",
-        base_url="/path/to/bitnet",
-    ))
-
-    results = client.summarize_files(
-        Path("src"),
-        [("main.py", "print('hi')"), ("utils.py", "def helper(): pass")],
+    fake_completions = FakeCompletions()
+    monkeypatch.setattr(
+        "ctx.llm.OpenAI",
+        lambda **kw: SimpleNamespace(chat=SimpleNamespace(completions=fake_completions)),
     )
 
+    client = OpenAIClient(Config(provider="ollama", model="llama3", api_key="x"))
+    results = client.summarize_files(Path("src"), [("a.py", "x"), ("b.py", "y")])
+
     assert len(results) == 2
-    assert all(r.text == "CLI entrypoint." for r in results)
-    assert len(calls) == 2
-    assert calls[0]["cmd"][0] == "python"
-    assert calls[0]["cmd"][1].endswith("run_inference.py")
-    assert Path(calls[0]["cmd"][1]).is_absolute()
-    assert "-cnv" in calls[0]["cmd"]
-    assert "models/bitnet.gguf" in calls[0]["cmd"]
-    assert "main.py" in calls[0]["input"]
+    assert all(r.text == "One-line summary." for r in results)
+    # 1 failed batch call + 2 per-file calls
+    assert fake_completions.call_count == 3
 
 
-def test_bitnet_summarize_files_raises_on_nonzero_returncode(monkeypatch) -> None:
-    monkeypatch.setattr("ctx.llm.subprocess.run", _fake_subprocess_run("", returncode=1))
-    client = BitNetClient(Config(provider="bitnet", model="models/bitnet.gguf"))
+def test_openai_summarize_files_raises_400_for_non_local_provider(monkeypatch) -> None:
+    """For non-local providers, HTTP 400 propagates as-is."""
+    call_count = 0
 
-    with pytest.raises(RuntimeError, match="BitNet inference failed"):
-        client.summarize_files(Path("src"), [("main.py", "x")])
+    def fake_create(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise _openai_bad_request_error()
+
+    monkeypatch.setattr(
+        "ctx.llm.OpenAI",
+        lambda **kw: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create))),
+    )
+
+    client = OpenAIClient(Config(provider="openai", model="gpt-4o", api_key="x"))
+    with pytest.raises(openai.BadRequestError):
+        client.summarize_files(Path("src"), [("a.py", "x")])
 
 
-def test_bitnet_summarize_directory_extracts_output_marker(monkeypatch) -> None:
-    output = "preamble\nAssistant:\n# src\nPurpose.\n## Files\n- None\n"
-    monkeypatch.setattr("ctx.llm.subprocess.run", _fake_subprocess_run(output))
-    client = BitNetClient(Config(provider="bitnet", model="models/bitnet.gguf"))
+def test_openai_summarize_directory_truncates_and_retries_on_400(monkeypatch) -> None:
+    """For local providers, HTTP 400 on summarize_directory triggers summary truncation + retry."""
+    call_count = 0
+    received_prompts: list[str] = []
 
-    result = client.summarize_directory(Path("src"), [], [])
+    def fake_create(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        received_prompts.append(kwargs["messages"][-1]["content"])
+        if call_count == 1:
+            raise _openai_bad_request_error()
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="# src\nPurpose."))],
+            usage=SimpleNamespace(prompt_tokens=20, completion_tokens=10),
+        )
 
-    assert result.text.startswith("# src")
-    assert result.input_tokens == 0
-    assert result.output_tokens == 0
+    monkeypatch.setattr(
+        "ctx.llm.OpenAI",
+        lambda **kw: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create))),
+    )
+
+    long_summary = "x" * 200
+    client = OpenAIClient(Config(provider="ollama", model="llama3", api_key="x"))
+    result = client.summarize_directory(
+        Path("src"),
+        [FileSummary(name="a.py", summary=long_summary)],
+        [SubdirSummary(name="sub", summary=long_summary)],
+    )
+
+    assert call_count == 2
+    assert result.text == "# src\nPurpose."
+    # Second prompt must contain truncated summaries (shorter than the 200-char originals)
+    assert long_summary not in received_prompts[1]
 
 
-def test_bitnet_uses_base_url_as_cwd_defaulting_to_dot(monkeypatch) -> None:
-    calls: list[dict] = []
+# --- CachingLLMClient ---
 
-    def fake_run(cmd, *, cwd, input, **kwargs):
-        calls.append({"cwd": cwd})
-        return SimpleNamespace(returncode=0, stdout="Assistant: x.", stderr="")
 
-    monkeypatch.setattr("ctx.llm.subprocess.run", fake_run)
-    client = BitNetClient(Config(provider="bitnet", model="models/bitnet.gguf"))  # no base_url
+class _CountingClient:
+    """Fake LLMClient that counts calls and returns predictable results."""
 
-    client.summarize_files(Path("src"), [("f.py", "x")])
+    def __init__(self) -> None:
+        self.file_call_count = 0
+        self.dir_call_count = 0
 
-    assert Path(calls[0]["cwd"]).is_absolute()
+    def summarize_files(self, dir_path: Path, files: list[tuple[str, str]]) -> list[LLMResult]:
+        self.file_call_count += 1
+        return [LLMResult(text=f"summary:{name}") for name, _ in files]
+
+    def summarize_directory(self, dir_path, file_summaries, subdir_summaries) -> LLMResult:
+        self.dir_call_count += 1
+        return LLMResult(text="dir summary")
+
+
+def test_caching_client_calls_underlying_on_first_call() -> None:
+    inner = _CountingClient()
+    cache = CachingLLMClient(inner)
+
+    results = cache.summarize_files(Path("src"), [("a.py", "content a")])
+
+    assert len(results) == 1
+    assert results[0].text == "summary:a.py"
+    assert inner.file_call_count == 1
+
+
+def test_caching_client_skips_llm_on_repeated_content() -> None:
+    inner = _CountingClient()
+    cache = CachingLLMClient(inner)
+
+    cache.summarize_files(Path("src"), [("a.py", "same content")])
+    results = cache.summarize_files(Path("other"), [("b.py", "same content")])
+
+    assert results[0].text == "summary:a.py"  # cached — uses first result's text
+    assert inner.file_call_count == 1  # second call hit cache
+
+
+def test_caching_client_passes_through_summarize_directory() -> None:
+    inner = _CountingClient()
+    cache = CachingLLMClient(inner)
+
+    result = cache.summarize_directory(Path("src"), [], [])
+
+    assert result.text == "dir summary"
+    assert inner.dir_call_count == 1
+
+
+def test_caching_client_handles_empty_files() -> None:
+    inner = _CountingClient()
+    cache = CachingLLMClient(inner)
+
+    results = cache.summarize_files(Path("src"), [])
+    assert results == []
+    assert inner.file_call_count == 0
