@@ -40,8 +40,8 @@ class _DebounceHandler(FileSystemEventHandler):
     def __init__(
         self,
         root: Path,
-        spec: object,
-        on_change: object,
+        spec: "pathspec.PathSpec",
+        on_change: Callable[[Path], None],
     ) -> None:
         super().__init__()
         self._root = root
