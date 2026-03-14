@@ -1,21 +1,22 @@
 ---
-generated: '2026-03-14T21:12:28Z'
-generator: ctx/0.1.0
+generated: '2026-03-14T22:42:44Z'
+generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:5c1d26a37addb53d70f6c7008dde6778105eee51e5ec8e588f61d2b13f332b2d
-files: 3
+content_hash: sha256:d7ab0013ece0eb9ab6c5ebf3897ce291f429aab03a03237570717dda62cc98ce
+files: 4
 dirs: 0
-tokens_total: 473
+tokens_total: 655
 ---
 # C:/Users/Matty/Documents/context-project/.github/workflows
 
-GitHub Actions workflow definitions for automated testing, validation, and manifest checks.
+Contains GitHub Actions workflows that automate testing, validation, and publishing for the context-project.
 
 ## Files
 
 - **ctx-check.yml** — GitHub Actions workflow that validates CTX manifest freshness on pushes and pull requests.
-- **pr-checks.yml** — GitHub Actions workflow that runs pytest tests and validates pull requests to main branch.
-- **tests.yml** — GitHub Actions workflow that tests package across multiple OS and Python versions with manifest verification.
+- **pr-checks.yml** — GitHub Actions workflow that runs tests and validates pull requests to main branch.
+- **publish.yml** — GitHub Actions workflow that builds and publishes package to PyPI on version tags.
+- **tests.yml** — GitHub Actions workflow that runs test suite across multiple OS and Python versions.
 
 ## Subdirectories
 
@@ -23,4 +24,4 @@ GitHub Actions workflow definitions for automated testing, validation, and manif
 
 ## Notes
 
-- These workflows automate CI/CD processes including test execution, manifest validation, and pull request checks across multiple environments.
+- These workflows form the CI/CD pipeline for the project, covering manifest validation, pull request checks, automated testing across environments, and package publishing.

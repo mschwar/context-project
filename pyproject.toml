@@ -20,10 +20,6 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Utilities",
 ]
-
-[project.urls]
-Homepage = "https://github.com/mschwar/context-project"
-Repository = "https://github.com/mschwar/context-project"
 dependencies = [
     "click>=8.1",
     "anthropic>=0.40",
@@ -34,6 +30,10 @@ dependencies = [
     "uvicorn>=0.29.0",
     "watchdog>=4.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/mschwar/context-project"
+Repository = "https://github.com/mschwar/context-project"
 
 [project.optional-dependencies]
 dev = [

@@ -34,7 +34,7 @@ Create `.ctxconfig` in your project root:
 
 ```yaml
 provider: anthropic        # anthropic | openai | ollama | lmstudio
-model: claude-haiku-4-5-20251001
+model: claude-3-5-haiku-20241022
 batch_size: 10             # files per LLM call (tune for local models)
 token_budget: 100000       # stop after this many tokens
 cache_path: .ctx-cache/llm_cache.json
