@@ -117,6 +117,7 @@ def test_create_client_ollama_uses_openai_with_base_url(monkeypatch) -> None:
 
     assert isinstance(client, OpenAIClient)
     assert client.model == "llama3.2"
+    assert factory.instances[0].base_url == "http://localhost:11434/v1"
 
 
 def test_create_client_lmstudio_uses_openai_with_base_url(monkeypatch) -> None:
