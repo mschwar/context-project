@@ -45,7 +45,7 @@ Each reflection should include:
 
 Implement any reflection suggestion that is in scope, low-risk, and hardens the current deliverables. If a suggestion is not implemented, record why (out of scope, blocked, too risky, deferred).
 
-### 4a. Carry unactioned suggestions into the next gate (mandatory)
+### 5. Carry unactioned suggestions into the next gate (mandatory)
 
 At the end of every reflection, produce a **Disposition table** — one row per suggestion, each marked either "Implemented this gate" or "Carry into Phase N". Then:
 
@@ -60,7 +60,7 @@ This step is **not optional**. Suggestions that are not explicitly carried forwa
 - [ ] Every "carry" item appears verbatim in the target phase's scope in `AGENTS.md` and `state.md`.
 - [ ] No suggestion is silently dropped.
 
-### 5. Update durable docs
+### 6. Update durable docs
 
 Update architecture, schema, instruction files, or runbooks if the reflection changes standing guidance.
 
