@@ -14,6 +14,9 @@ the parent is generated, so parent summaries can reference child summaries.
 from __future__ import annotations
 
 import math
+import threading
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -23,8 +26,12 @@ import pathspec
 from ctx.config import Config
 from ctx.hasher import hash_directory, is_stale
 from ctx.ignore import should_ignore
-from ctx.llm import LLMClient, FileSummary, SubdirSummary
+from ctx.llm import CachingLLMClient, LLMClient, FileSummary, SubdirSummary
 from ctx.manifest import Manifest, read_manifest, write_manifest
+
+# Cap on threads per depth level. LLM calls are I/O-bound so threads are effective,
+# but we stay conservative to avoid hammering provider rate limits.
+MAX_PARALLEL_DIRS = 4
 
 
 @dataclass
@@ -250,6 +257,32 @@ def _generate_directory_manifest(
     return len(files), binary_count, total_tokens_used
 
 
+def _process_one_directory(
+    directory: Path,
+    root: Path,
+    config: Config,
+    client: LLMClient,
+    spec: pathspec.PathSpec,
+    incremental: bool,
+) -> tuple[int, int, int, str | None]:
+    """Worker function for parallel execution within a depth level.
+
+    Returns (file_count, binary_count, tokens_used, error):
+      - error is None on success
+      - error is "skip" when the directory is fresh and was skipped
+      - error is an error string when an exception occurred
+    """
+    try:
+        if not _should_regenerate_directory(directory, root, spec, incremental=incremental):
+            return 0, 0, 0, "skip"
+        file_count, binary_count, tokens_used = _generate_directory_manifest(
+            directory, root, config, client, spec
+        )
+        return file_count, binary_count, tokens_used, None
+    except Exception as exc:
+        return 0, 0, 0, str(exc)
+
+
 def _run_generation(
     root: Path,
     config: Config,
@@ -263,36 +296,55 @@ def _run_generation(
     ordered_directories = _ordered_directories(root, spec, max_depth=config.max_depth)
     total_dirs = len(ordered_directories)
 
-    for index, directory in enumerate(ordered_directories, start=1):
+    # Group directories by depth. Siblings (same depth) are independent and can run in parallel.
+    # The bottom-up invariant is preserved by processing each depth level fully before the next.
+    levels: dict[int, list[Path]] = defaultdict(list)
+    for path in ordered_directories:
+        depth = len(path.relative_to(root).parts)
+        levels[depth].append(path)
+
+    stats_lock = threading.Lock()
+    dirs_done = 0
+
+    for depth in sorted(levels.keys(), reverse=True):  # deepest first
+        level_dirs = levels[depth]
+
+        # Token budget check at level granularity — before submitting the level.
         if config.token_budget is not None and stats.tokens_used >= config.token_budget:
-            stats.dirs_skipped += total_dirs - index + 1
+            remaining = sum(len(levels[d]) for d in levels if d <= depth)
+            stats.dirs_skipped += remaining
             stats.errors.append(
                 f"Token budget reached ({stats.tokens_used:,}/{config.token_budget:,}). "
-                f"Stopped with {total_dirs - index + 1} directories remaining."
+                f"Stopped with {remaining} directories remaining."
             )
             break
 
-        try:
-            if not _should_regenerate_directory(directory, root, spec, incremental=incremental):
-                stats.dirs_skipped += 1
-                continue
-
-            file_count, binary_count, tokens_used = _generate_directory_manifest(
-                directory,
-                root,
-                config,
-                client,
-                spec,
-            )
-            stats.dirs_processed += 1
-            stats.files_processed += file_count
-            stats.files_binary += binary_count
-            stats.tokens_used += tokens_used
-        except Exception as exc:
-            stats.errors.append(f"{directory}: {exc}")
-        finally:
-            if progress is not None:
-                progress(directory, index, total_dirs)
+        workers = min(MAX_PARALLEL_DIRS, len(level_dirs))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(
+                    _process_one_directory,
+                    directory, root, config, client, spec, incremental,
+                ): directory
+                for directory in level_dirs
+            }
+            for future in as_completed(futures):
+                directory = futures[future]
+                file_count, binary_count, tokens_used, error = future.result()
+                with stats_lock:
+                    dirs_done += 1
+                    local_done = dirs_done
+                    if error == "skip":
+                        stats.dirs_skipped += 1
+                    elif error is not None:
+                        stats.errors.append(f"{directory}: {error}")
+                    else:
+                        stats.dirs_processed += 1
+                        stats.files_processed += file_count
+                        stats.files_binary += binary_count
+                        stats.tokens_used += tokens_used
+                    if progress is not None:
+                        progress(directory, local_done, total_dirs)
 
     return stats
 
@@ -343,7 +395,7 @@ def generate_tree(
     return _run_generation(
         root,
         config,
-        client,
+        CachingLLMClient(client),
         spec,
         incremental=False,
         progress=progress,
@@ -383,7 +435,7 @@ def update_tree(
     return _run_generation(
         root,
         config,
-        client,
+        CachingLLMClient(client),
         spec,
         incremental=True,
         progress=progress,

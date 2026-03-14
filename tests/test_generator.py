@@ -124,7 +124,9 @@ def test_generate_tree_bottom_up(tmp_path) -> None:
     generate_tree(root, Config(api_key="test-key"), client, spec)
 
     call_order = [path.relative_to(root).as_posix() or "." for path, _files, _subdirs in client.directory_calls]
-    assert call_order == ["docs", "src", "."]
+    # Siblings at the same depth may complete in any order (parallel), but the root must be last.
+    assert set(call_order[:-1]) == {"docs", "src"}
+    assert call_order[-1] == "."
 
     root_call = client.directory_calls[-1]
     assert [(summary.name, summary.summary) for summary in root_call[2]] == [
