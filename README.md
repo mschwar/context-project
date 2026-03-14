@@ -5,6 +5,14 @@ agents can navigate codebases coarse-to-fine without reading every raw file.
 
 ## Install
 
+For users:
+
+```bash
+pip install .
+```
+
+For developers:
+
 ```bash
 pip install -e ".[dev]"
 ```

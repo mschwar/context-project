@@ -43,6 +43,6 @@ desktop.ini
 # ctx output (don't index your own manifests)
 CONTEXT.md
 
-# Large binary formats (still listed as [binary] in manifests, but not sent to LLM)
-# These are NOT ignored from listing — they're just noted. This section is for
-# files/dirs to skip entirely.
+# Binary files are handled by ctx itself: they stay visible in manifests as
+# `[binary: ...]` entries and are not sent to the LLM. Add patterns below only
+# for files or directories that should be skipped entirely.
