@@ -7,11 +7,11 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 
 ## Current State
 - **Core Engine**: Fully implemented with bottom-up traversal and incremental hashing.
-- **LLM Clients**: Anthropic and OpenAI supported (including Ollama and LM Studio). **BitNet is non-functional on Windows** — do not attempt to use or debug it without an explicit task scoped to that issue.
-- **Test Coverage**: 76 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, integration).
+- **LLM Clients**: Anthropic and OpenAI supported (including Ollama and LM Studio). **BitNet is deprecated** — `create_client("bitnet")` raises an informative error directing users to Ollama or LM Studio.
+- **Test Coverage**: 101 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
 
-> **Branch notice**: As of March 2026, active development lives on `feat/local-providers-token-budget`. This branch adds Ollama/LM Studio support and token budget controls, and is ahead of `main`. Branch from this branch, not `main`, until it is merged.
+> **Branch notice**: As of March 2026, Phases 1–4 are complete. `feat/phase4-prompt-quality-batch-control` is pending PR to `main`. Phase 5 work (`feat/phase5-cost-control`) should branch from `main` after that merge.
 
 ## Canonical Rules
 
@@ -136,9 +136,40 @@ Scope: make local providers robust and unlock parallelism.
 - Add LLM response caching to avoid redundant calls during iteration.
 - Resolve BitNet subprocess path issue on Windows or deprecate the provider.
 
-### Phase 3 — Ecosystem Integration
+### Phase 3 — Ecosystem Integration ✓
 Scope: connect `ctx` to the broader toolchain.
 - MCP Server support (expose manifests via Model Context Protocol).
 - Git-aware updates (detect changed files since last commit to trigger selective regeneration).
 - CI/CD Action (GitHub Action that ensures `CONTEXT.md` files stay fresh).
 - Custom prompt templates via `.ctxconfig`.
+
+### Phase 4 — Prompt Quality & Batch Control ✓
+Scope: improve output consistency and give users control over LLM call granularity.
+- Rewrite all six `DEFAULT_PROMPT_TEMPLATES` with explicit rules (20-word sentence cap, purpose-over-implementation, injection defence).
+- Add `batch_size` config key and `Config.batch_size` field for chunked file summarization.
+- Remove `bitnet` from CLI `--provider` choices; deprecation error preserved in `create_client`.
+
+### Phase 5 — Cost Control & Observability
+Scope: close gaps in token budget and caching, add a cost-preview flag before spending tokens.
+
+**Gate condition:** Phase 4 must be formally closed out (reflection filed, docs updated, PR merged) before Phase 5 work begins.
+
+**Deliverables:**
+
+#### 5.1 — Persistent LLM Cache
+- Extend `CachingLLMClient` to load/save its cache from disk (`.ctx-cache/llm_cache.json` by default).
+- New config key `cache_path`; new CLI flag `--cache-path`.
+- Cache file added to `.ctxignore.default` and `.gitignore`.
+- Files: `src/ctx/llm.py`, `src/ctx/config.py`, `src/ctx/cli.py`, `tests/test_llm.py`.
+
+#### 5.2 — Token Budget Enforcement
+- `Config.token_budget` is already wired but never enforced. Add a check in `_run_generation` that stops issuing LLM calls once `stats.tokens_used >= token_budget`.
+- Add `budget_exhausted: bool` to `GenerateStats`; surface a CLI warning when set.
+- Files: `src/ctx/generator.py`, `src/ctx/cli.py`, `tests/test_generator.py`.
+
+#### 5.3 — `--dry-run` Flag
+- Add `--dry-run` to `ctx update` and `ctx smart-update`. Lists stale directories without making LLM calls or writing files.
+- Reuses existing `is_stale()` from `hasher.py`.
+- Files: `src/ctx/cli.py`, `src/ctx/generator.py`, `tests/test_cli.py`, `tests/test_generator.py`.
+
+**Branch:** `feat/phase5-cost-control` (branch from `main` after Phase 4 merge)
