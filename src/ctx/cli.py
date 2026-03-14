@@ -176,3 +176,55 @@ def status(path: str) -> None:
         f"{counts.get('fresh', 0)} fresh, {counts.get('stale', 0)} stale, "
         f"{counts.get('missing', 0)} missing"
     )
+
+
+@cli.command()
+@click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
+@click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "lmstudio", "bitnet"]), default=None)
+@click.option("--model", default=None)
+@click.option("--token-budget", type=int, default=None, help="Max total tokens before stopping.")
+@click.option("--base-url", default=None, help="Custom API base URL.")
+def smart_update(path: str, provider: Optional[str], model: Optional[str], token_budget: Optional[int], base_url: Optional[str]) -> None:
+    """Incrementally refresh stale CONTEXT.md files, focusing on git-changed files.
+    
+    This command first identifies files that have changed in the git repository
+    since the last commit (or are staged) and then triggers a regeneration of
+    CONTEXT.md files only for the directories affected by these changes and their ancestors.
+    """
+    from ctx.git import get_changed_files # Import here to avoid circular dependencies if git depends on cli
+    
+    target_path, config, spec, client, progress_cb = _build_generation_runtime(
+        path,
+        provider=provider,
+        model=model,
+        token_budget=token_budget,
+        base_url=base_url,
+    )
+
+    click.echo(f"ctx smart-update: refreshing manifests for {target_path} based on git changes")
+    
+    changed_files = get_changed_files(target_path)
+    if not changed_files:
+        click.echo("No git-changed files detected. Nothing to update.")
+        return
+
+    click.echo(f"Detected {len(changed_files)} changed files. Processing affected directories.")
+    if config.token_budget:
+        click.echo(f"Token budget: {config.token_budget:,}")
+    stats = update_tree(target_path, config, client, spec, progress=progress_cb, changed_files=changed_files)
+    click.echo(f"Directories refreshed: {stats.dirs_processed}")
+    click.echo(f"Directories skipped: {stats.dirs_skipped}")
+    click.echo(f"Tokens used: {stats.tokens_used}")
+    click.echo(f"Errors: {len(stats.errors)}")
+    _echo_generation_errors(stats)
+
+
+@cli.command()
+@click.option("--host", default="127.0.0.1", help="Host address for the server.")
+@click.option("--port", type=int, default=8000, help="Port for the server.")
+def serve(host: str, port: int) -> None:
+    """Start the MCP server to expose CONTEXT.md manifests."""
+    click.echo(f"Starting ctx MCP server on http://{host}:{port}")
+    from ctx.server import start_server
+    start_server(host=host, port=port)
+

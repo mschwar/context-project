@@ -58,6 +58,8 @@ class Config:
     max_depth: Optional[int] = None
     token_budget: Optional[int] = None  # None = unlimited
     extensions: Optional[list[str]] = None  # None = all text files
+    prompts: dict[str, str] = field(default_factory=dict)
+
 
     # Runtime stats (populated during run, not from config)
     tokens_used: int = field(default=0, repr=False)
@@ -135,6 +137,10 @@ def load_config(
                 raise click.UsageError(
                     f"Invalid extensions in {config_path}: expected a string list or null."
                 )
+        
+        if "prompts" in data and isinstance(data["prompts"], dict):
+            config.prompts.update(data["prompts"])
+
         break
 
     env_provider = os.getenv("CTX_PROVIDER")

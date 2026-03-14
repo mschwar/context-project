@@ -19,14 +19,14 @@ def _placeholder(label: str) -> str:
 class _EndToEndFakeClient:
     model = "e2e-llm-model"
 
-    def summarize_files(self, dir_path: Path, files: list[tuple[str, str]]) -> list[LLMResult]:
+    def summarize_files(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
         return [
             LLMResult(
-                text=f"Summary for {name}",
+                text=f"Summary for {f['name']}",
                 input_tokens=3 if index == 0 else 0,
                 output_tokens=1 if index == 0 else 0,
             )
-            for index, (name, _content) in enumerate(files)
+            for index, f in enumerate(files)
         ]
 
     def summarize_directory(

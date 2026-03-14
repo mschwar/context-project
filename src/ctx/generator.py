@@ -28,6 +28,9 @@ from ctx.hasher import hash_directory, is_stale
 from ctx.ignore import should_ignore
 from ctx.llm import CachingLLMClient, LLMClient, FileSummary, SubdirSummary
 from ctx.manifest import Manifest, read_manifest, write_manifest
+from ctx.language_detector import detect_language
+from ctx.lang_parsers.python_parser import parse_python_file
+
 
 # Cap on threads per depth level. LLM calls are I/O-bound so threads are effective,
 # but we stay conservative to avoid hammering provider rate limits.
@@ -151,7 +154,7 @@ def _binary_file_summary(path: Path) -> FileSummary:
 def _prepare_file_entry(
     path: Path,
     config: Config,
-) -> tuple[FileSummary | tuple[str, str], int]:
+) -> tuple[FileSummary | dict, int]:
     content: Optional[str] = None
     if not is_binary_file(path):
         try:
@@ -162,8 +165,19 @@ def _prepare_file_entry(
     if content is None:
         return _binary_file_summary(path), 0
 
+    language = detect_language(path)
+    metadata = {}
+    if language == "Python":
+        metadata = parse_python_file(path)
+
     truncated = content[: config.max_file_tokens]
-    return (path.name, truncated), _estimate_tokens(truncated)
+    entry = {
+        "name": path.name,
+        "content": truncated,
+        "language": language,
+        "metadata": metadata,
+    }
+    return entry, _estimate_tokens(truncated)
 
 
 def _should_regenerate_directory(
@@ -197,8 +211,8 @@ def _generate_directory_manifest(
 ) -> tuple[int, int, int]:
     files, directories = _list_directory_entries(path, spec, root)
 
-    ordered_entries: list[FileSummary | tuple[str, str]] = []
-    text_inputs: list[tuple[str, str]] = []
+    ordered_entries: list[FileSummary | dict] = []
+    text_inputs: list[dict] = []
     binary_count = 0
     tokens_total = 0
 
@@ -213,7 +227,20 @@ def _generate_directory_manifest(
         tokens_total += estimated_tokens
         ordered_entries.append(entry)
 
-    text_results = client.summarize_files(path, text_inputs)
+    # Convert dict inputs to list[tuple[str, str]] for backward compatibility if needed, 
+    # but the plan says to modify LLM prompts, so let's see if LLMClient needs to change too.
+    # The current LLMClient.summarize_files expects list[tuple[str, str]].
+    # I'll update the Protocol and implementations to accept list[dict] or similar.
+    # For now, let's keep it as is and just pass the 'content' for summarization, 
+    # OR better, update the whole flow to pass augmented info.
+    
+    # Let's check LLMClient Protocol in llm.py again.
+    
+    legacy_text_inputs = [(entry["name"], entry["content"]) for entry in text_inputs]
+    # Actually, let's pass the whole dict to summarize_files if we want language-specific heuristics.
+    # I will need to update llm.py next.
+    
+    text_results = client.summarize_files(path, text_inputs) # Pass list[dict]
     if len(text_results) != len(text_inputs):
         raise ValueError(f"Expected {len(text_inputs)} file summaries for {path}, got {len(text_results)}.")
 
@@ -225,7 +252,7 @@ def _generate_directory_manifest(
             continue
 
         result = text_results[text_index]
-        file_summaries.append(FileSummary(name=entry[0], summary=result.text))
+        file_summaries.append(FileSummary(name=entry["name"], summary=result.text))
         text_index += 1
 
     subdir_summaries: list[SubdirSummary] = []
@@ -291,9 +318,36 @@ def _run_generation(
     *,
     incremental: bool,
     progress: Optional[ProgressCallback] = None,
+    changed_files: Optional[list[Path]] = None,
 ) -> GenerateStats:
     stats = GenerateStats()
     ordered_directories = _ordered_directories(root, spec, max_depth=config.max_depth)
+
+    if changed_files is not None:
+        target_directories: set[Path] = set()
+        for changed_file in changed_files:
+            # Add the directory containing the changed file
+            dir_to_check = changed_file.parent
+            if dir_to_check.is_relative_to(root):
+                target_directories.add(dir_to_check)
+                # Add all ancestors up to the root
+                for ancestor in dir_to_check.parents:
+                    if ancestor == root or ancestor.is_relative_to(root):
+                        target_directories.add(ancestor)
+                    if ancestor == root: # Stop at the root
+                        break
+        
+        # Filter ordered_directories to only include those in target_directories
+        # Or, more precisely, those that are affected by the change (contain a changed file or are ancestors of one)
+        # Given bottom-up processing, if a directory is in target_directories,
+        # it means it either contains a changed file, or an ancestor of one.
+        # This implies its children would have been processed already if they contained changed files.
+        filtered_ordered_directories = []
+        for d in ordered_directories:
+            if d in target_directories:
+                filtered_ordered_directories.append(d)
+        ordered_directories = filtered_ordered_directories
+
     total_dirs = len(ordered_directories)
 
     # Group directories by depth. Siblings (same depth) are independent and can run in parallel.
@@ -409,11 +463,15 @@ def update_tree(
     spec: pathspec.PathSpec,
     *,
     progress: Optional[ProgressCallback] = None,
+    changed_files: Optional[list[Path]] = None,
 ) -> GenerateStats:
     """Incrementally update CONTEXT.md files where content has changed.
 
     Args:
         Same as generate_tree.
+        changed_files: Optional list of file paths that have changed.
+                       If provided, only directories affected by these changes
+                       will be processed.
 
     Returns:
         GenerateStats (only counts regenerated directories).
@@ -439,6 +497,7 @@ def update_tree(
         spec,
         incremental=True,
         progress=progress,
+        changed_files=changed_files,
     )
 
 

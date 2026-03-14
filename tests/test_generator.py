@@ -22,18 +22,18 @@ class FakeLLMClient:
     model = "fake-llm-model"
 
     def __init__(self) -> None:
-        self.file_calls: list[tuple[Path, list[tuple[str, str]]]] = []
+        self.file_calls: list[tuple[Path, list[dict]]] = []
         self.directory_calls: list[tuple[Path, list[FileSummary], list[SubdirSummary]]] = []
 
-    def summarize_files(self, dir_path: Path, files: list[tuple[str, str]]) -> list[LLMResult]:
+    def summarize_files(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
         self.file_calls.append((dir_path, files))
         return [
             LLMResult(
-                text=f"Summary for {name}",
+                text=f"Summary for {f['name']}",
                 input_tokens=5 if index == 0 else 0,
                 output_tokens=2 if index == 0 else 0,
             )
-            for index, (name, _content) in enumerate(files)
+            for index, f in enumerate(files)
         ]
 
     def summarize_directory(

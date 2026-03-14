@@ -175,3 +175,26 @@ def test_load_config_token_budget_from_ctxconfig(monkeypatch, tmp_path) -> None:
     config = load_config(tmp_path)
 
     assert config.token_budget == 100000
+
+
+def test_load_config_prompts(monkeypatch, tmp_path) -> None:
+    _clear_ctx_env(monkeypatch)
+    anthropic_value = _placeholder("anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", anthropic_value)
+
+    _write_ctxconfig(
+        tmp_path,
+        {
+            "prompts": {
+                "file_summary": "Summarize this file: {json_payload}",
+                "directory_summary_system": "You are a custom directory summarizer.",
+            }
+        },
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.prompts == {
+        "file_summary": "Summarize this file: {json_payload}",
+        "directory_summary_system": "You are a custom directory summarizer.",
+    }

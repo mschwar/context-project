@@ -1,0 +1,35 @@
+name: 'CTX Check'
+description: 'Checks if CONTEXT.md files are fresh in a ctx project.'
+inputs:
+  path:
+    description: 'Path to the ctx project root.'
+    required: true
+    default: '.'
+  github_token:
+    description: 'GitHub Token for checking out the repository.'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ inputs.github_token }}
+        path: '${{ inputs.path }}' # Checkout into the specified path
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10' # Or compatible version
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: '${{ inputs.path }}'
+      run: |
+        pip install -e ".[dev]" # Install ctx and its dev dependencies
+
+    - name: Run ctx status check
+      shell: bash
+      working-directory: '${{ inputs.path }}'
+      run: |
+        python -m ctx status --check-exit-code .
