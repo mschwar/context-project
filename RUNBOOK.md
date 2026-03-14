@@ -54,6 +54,16 @@ ctx status /path/to/project
 Every roadmap phase (gate) requires a formal closeout pass.
 Follow the steps in [GATE_CLOSEOUT.md](./GATE_CLOSEOUT.md) before marking a phase as complete.
 
+## LLM Disk Cache
+
+`ctx` caches LLM summaries in `.ctx-cache/llm_cache.json` (relative to the project root). The cache key includes the model name, so switching models always produces a cache miss rather than serving stale summaries.
+
+**Resetting the cache:** delete `.ctx-cache/llm_cache.json` (or the whole `.ctx-cache/` directory). The next `ctx update` will regenerate all summaries at normal token cost.
+
+**After upgrading ctx** (or changing the `model` config key): all prior cache entries will be misses on the first run. This is intentional — the one-time regeneration cost is preferable to serving summaries from the wrong model.
+
+**Disabling the cache:** set `cache_path: ""` in `.ctxconfig`.
+
 ## Common Failure Modes
 
 ### HTTP 400 Bad Request (Context Length)

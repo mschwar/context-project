@@ -8,11 +8,12 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 ## Current State
 - **Core Engine**: Fully implemented with bottom-up traversal, incremental hashing, parallel processing, and persistent LLM disk cache.
 - **LLM Clients**: Anthropic and OpenAI supported (including Ollama and LM Studio). **BitNet is deprecated** — `create_client("bitnet")` raises an informative error directing users to Ollama or LM Studio.
-- **Language Parsers**: Python (`ast`-based), JavaScript/TypeScript (regex), Rust (regex). Wired into `generator._prepare_file_entry`; metadata is passed to the LLM prompt for richer summaries.
-- **Test Coverage**: 127 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, integration).
+- **Language Parsers**: Python (`ast`-based), JavaScript/TypeScript (regex), Rust (regex), Go (regex). Wired into `generator._prepare_file_entry`; metadata is passed to the LLM prompt for richer summaries.
+- **File Watcher**: `ctx watch` — OS-native file watcher via `watchdog`. CONTEXT.md writes excluded to prevent infinite loops. 0.5 s per-file debounce.
+- **Test Coverage**: 143 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
 
-> **Branch notice**: As of March 2026, Phases 1–6 are complete on `main`. Phase 7 is not yet scoped. New work should branch from `main`.
+> **Branch notice**: As of March 2026, Phases 1–7 are complete on `main`. Phase 8 is not yet scoped. New work should branch from `main`.
 
 > **Manifest refresh rule**: Any commit that adds or modifies source files must include a `ctx update .` pass to regenerate stale `CONTEXT.md` files before pushing. The `CTX Manifest Check` CI job enforces this and will fail otherwise.
 
@@ -169,11 +170,17 @@ Scope: richer summaries for JS/TS/Rust, fix pre-existing CI noise.
 - Rust parser (`rust_parser.py`): `pub fn/struct/enum/trait`, `mod`. Handles `pub(crate)`/`pub(super)`. 7 tests.
 - CI hygiene: `ctx-check.yml` rewritten inline; `pr-checks.yml` replaced Node/npm with Python `pytest`. All checks green.
 
-### Phase 7 — (Not Yet Scoped)
+### Phase 7 — Go Parser, ctx watch, Cache Model-Awareness ✓
 
-Candidates from Phase 6 reflection (no gate condition set yet):
-- **Go parser** — export by capitalization; natural next language.
-- **`ctx watch`** — file watcher for auto-regeneration (`watchdog`/`watchfiles`).
-- **Cache model-awareness** — include model name in disk cache key to prevent stale summaries on model switch.
+- Go parser (`go_parser.py`): exported functions/methods, types, constants (iota-safe), variables. 6 tests.
+- `ctx watch`: OS-native watcher via `watchdog`; CONTEXT.md excluded; 0.5 s debounce; hooks into `update_tree`. 8 tests.
+- Cache model-awareness: `sha256(model + ":" + file_json)` key. Model switch always produces cache miss. 2 new tests.
 
-**Branch:** `feat/phase7-*` (branch from `main` after Phase 7 is scoped)
+### Phase 8 — (Not Yet Scoped)
+
+Candidates from Phase 7 reflection:
+- **Java / C# parsers** — complete enterprise language coverage.
+- **Accurate token counting** — replace `_estimate_tokens` with `tiktoken` for budget accuracy.
+- **`watch_debounce_seconds` config** — expose debounce as a `.ctxconfig` key.
+
+**Branch:** `feat/phase8-*` (branch from `main` after Phase 8 is scoped)
