@@ -11,9 +11,10 @@ Completion requires:
 1. deliverables created and validated,
 2. reflection written,
 3. feasible in-scope reflection suggestions implemented or explicitly deferred,
-4. any resulting doc or decision updates applied,
-5. roadmap status updated,
-6. end-of-gate report delivered to the founder.
+4. carry-forward complete (all unactioned suggestions written into next phase scope),
+5. any resulting doc or decision updates applied,
+6. roadmap status updated,
+7. end-of-gate report delivered to the founder.
 
 ## Required Closeout Steps
 
@@ -64,11 +65,11 @@ This step is **not optional**. To ensure no suggestions are lost, every item mus
 
 Update architecture, schema, instruction files, or runbooks if the reflection changes standing guidance.
 
-### 6. Update the roadmap
+### 7. Update the roadmap
 
 Mark the phase as completed in the project's progress tracker and roadmap.
 
-### 7. Deliver the report and await disposition
+### 8. Deliver the report and await disposition
 
 Provide an end-of-gate report. The default founder dispositions are:
 - make changes
