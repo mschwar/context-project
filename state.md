@@ -3,9 +3,9 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable Beta. Phases 1–7 complete. Phases 8–10 scoped.
+- **Status:** Stable Beta. Phases 1–9 complete. Phase 10 scoped.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 143 tests passing across all modules.
+- **Test Coverage:** 156 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
 - **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview.
 
@@ -106,9 +106,9 @@ Make `ctx` installable via `pip install`, with automated releases and a README t
 
 Zero-friction first run and automatic manifest freshness without user effort.
 
-- [ ] **9.1 `ctx setup` command:** auto-detect provider (env vars → Ollama probe → LM Studio probe), write `.ctxconfig`, print next step.
-- [ ] **9.2 Pre-commit hook:** `.pre-commit-hooks.yaml` for standard `pre-commit` framework; runs `ctx status . --check-exit-code`.
-- [ ] **9.3 Graceful failure:** `ctx init`/`ctx update` missing-API-key errors print actionable hint pointing to `ctx setup`.
+- [x] **9.1 `ctx setup` command:** auto-detect provider (env vars → Ollama probe → LM Studio probe), write `.ctxconfig`, print next step.
+- [x] **9.2 Pre-commit hook:** `.pre-commit-hooks.yaml` for standard `pre-commit` framework; runs `ctx status . --check-exit-code`.
+- [x] **9.3 Graceful failure:** `ctx init`/`ctx update` missing-API-key errors print actionable hint pointing to `ctx setup`.
 
 **Branch:** `feat/phase9-onboarding-automation` (branch from `main` after Phase 8 merges)
 

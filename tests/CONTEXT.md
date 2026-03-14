@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T22:10:32Z'
-generator: ctx/0.1.0
+generated: '2026-03-14T22:48:26Z'
+generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:1bf5e67d51701f2dec66888bf6c76badbed635455965e554b0db6fb6c2617c9f
-files: 19
+content_hash: sha256:8372538082d4edae922e2410829e4096fa38bb6dabfbfe80dc067b9c24048035
+files: 20
 dirs: 1
-tokens_total: 16147
+tokens_total: 17749
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Test suite for the context-project, covering CLI, configuration, code parsing, Git integration, LLM clients, and manifest generation.
+Test suite for the context project covering CLI, configuration, generation engine, language parsers, Git integration, and LLM client functionality.
 
 ## Files
 
@@ -31,6 +31,7 @@ Test suite for the context-project, covering CLI, configuration, code parsing, G
 - **test_python_parser.py** — Tests for Python language parser extracting classes and functions.
 - **test_rust_parser.py** — Tests for Rust language parser extracting public items and modules.
 - **test_server.py** — Tests for MCP server endpoints serving CONTEXT.md manifests.
+- **test_setup.py** — Tests for setup command, provider detection, config writing, and graceful error handling for missing API keys.
 - **test_watcher.py** — Tests for file system watcher event filtering and debounce logic.
 
 ## Subdirectories
@@ -39,6 +40,6 @@ Test suite for the context-project, covering CLI, configuration, code parsing, G
 
 ## Notes
 
-- Tests are organized by module, with each test file corresponding to a core component (parsers, generators, CLI, etc.).
-- The `conftest.py` provides shared pytest fixtures for temporary directory management across tests.
+- Tests are organized by module, with each test file corresponding to a primary component (parsers, CLI, config, generation, etc.).
+- The `conftest.py` file provides shared pytest fixtures for temporary directory management across all tests.
 - Integration tests in `test_integration.py` validate end-to-end workflows using fixture projects.

@@ -1,23 +1,23 @@
 ---
-generated: '2026-03-14T22:42:45Z'
+generated: '2026-03-14T22:48:20Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:c1267504e89064ad948013dc9b26dc412d1682c76c155727d88d36c9bd94c0e8
+content_hash: sha256:497b559cadfbd3b6d937e61cc20d1594333dcd032d0383f5fdc19d20d18f0fa5
 files: 14
 dirs: 1
-tokens_total: 13775
+tokens_total: 13838
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
-Core module implementing a filesystem-native context layer for AI agents, providing CLI tools, LLM integration, and manifest generation.
+Core module implementing a filesystem-native context layer for AI agents, providing CLI tools and services to generate and maintain CONTEXT.md manifests across directory trees.
 
 ## Files
 
 - **.ctxignore.default** — Default ignore patterns for ctx, excluding version control, dependencies, IDE files, and temporary artifacts.
 - **__init__.py** — Package initialization defining ctx as a filesystem-native context layer for AI agents.
 - **__main__.py** — Entry point for running ctx as a Python module via `python -m ctx`.
-- **cli.py** — Click CLI with commands for init, update, status, smart_update, watch, and serve operations.
-- **config.py** — Configuration loading from environment variables, .ctxconfig files, and CLI overrides.
+- **cli.py** — Click CLI entry point providing commands to generate, update, and check CONTEXT.md manifests across directory trees.
+- **config.py** — Configuration loading and resolution from environment variables, .ctxconfig files, and CLI overrides for LLM provider settings.
 - **generator.py** — Core generation engine orchestrating directory walks, file reading, LLM calls, and manifest writing.
 - **git.py** — Utility for retrieving changed files from a git repository since last commit or staging.
 - **hasher.py** — Content hashing for staleness detection using SHA-256 with directory hash composition.
@@ -35,5 +35,5 @@ Core module implementing a filesystem-native context layer for AI agents, provid
 ## Notes
 
 - The module integrates LLM-based summarization with git-aware change detection and file system watching for incremental updates.
-- Configuration is hierarchical: environment variables, .ctxconfig files, and CLI arguments.
-- Manifest generation relies on content hashing to detect staleness and avoid unnecessary regeneration.
+- Configuration is resolved hierarchically from environment, config files, and CLI arguments.
+- Manifest staleness is tracked via content hashing to optimize regeneration.

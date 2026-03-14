@@ -6,7 +6,7 @@ Generates `CONTEXT.md` manifests for every directory in your project so AI agent
 
 ```bash
 pip install ctx-tool
-export ANTHROPIC_API_KEY=sk-...
+ctx setup        # auto-detects your LLM provider and writes .ctxconfig
 ctx init .
 ctx status .
 ```
@@ -21,6 +21,7 @@ That's it. Every directory now has a `CONTEXT.md` that summarises its contents f
 
 | Command | Description |
 |---------|-------------|
+| `ctx setup` | Auto-detect provider and write `.ctxconfig` |
 | `ctx init .` | Generate manifests for all directories |
 | `ctx update .` | Regenerate only stale manifests |
 | `ctx smart-update .` | Regenerate only directories with git-changed files |
@@ -48,6 +49,19 @@ Works with Ollama and LM Studio — no API key required.
 provider: ollama
 model: llama3.2
 base_url: http://localhost:11434/v1
+```
+
+## Pre-commit hook
+
+Keep manifests fresh automatically:
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/mschwar/context-project
+    rev: v0.8.0
+    hooks:
+      - id: ctx-check
 ```
 
 ## Links

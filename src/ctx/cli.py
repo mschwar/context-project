@@ -15,7 +15,14 @@ from typing import Callable, Optional
 import click
 
 from ctx import __version__
-from ctx.config import load_config
+from ctx.config import (
+    DEFAULT_BASE_URLS,
+    PROVIDER_DETECTED_VIA,
+    MissingApiKeyError,
+    detect_provider,
+    load_config,
+    write_default_config,
+)
 from ctx.generator import GenerateStats, check_stale_dirs, generate_tree, get_status, update_tree
 from ctx.ignore import load_ignore_patterns
 from ctx.llm import create_client
@@ -45,7 +52,14 @@ def _build_generation_runtime(
     if cache_path is not None:
         load_config_kwargs["cache_path"] = cache_path
 
-    config = load_config(target_path, **load_config_kwargs)
+    try:
+        config = load_config(target_path, **load_config_kwargs)
+    except MissingApiKeyError:
+        raise click.UsageError(
+            "ctx needs an LLM provider to generate summaries.\n"
+            "  Run `ctx setup` to auto-detect your environment and create a .ctxconfig file.\n"
+            "  Or set ANTHROPIC_API_KEY / OPENAI_API_KEY in your environment."
+        ) from None
     spec = load_ignore_patterns(target_path)
     client = create_client(config)
     progress_cb = _progress_callback()
@@ -281,6 +295,36 @@ def watch(path: str, provider: Optional[str], model: Optional[str], base_url: Op
         cache_path=cache_path,
     )
     run_watch(target_path, config, client, spec)
+
+
+@cli.command()
+@click.argument("path", default=".", required=False)
+def setup(path: str) -> None:
+    """Auto-detect LLM provider and write .ctxconfig."""
+    target_path = Path(path)
+    config_file = target_path / ".ctxconfig"
+
+    if config_file.exists():
+        click.echo(f".ctxconfig already exists:\n\n{config_file.read_text(encoding='utf-8')}")
+        if not click.confirm("Overwrite?", default=False):
+            click.echo("Cancelled.")
+            return
+
+    result = detect_provider()
+    if result is None:
+        raise click.UsageError(
+            "No LLM provider detected.\n"
+            "  Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or start Ollama / LM Studio first."
+        )
+
+    provider, model = result
+    base_url = DEFAULT_BASE_URLS.get(provider)
+    write_default_config(target_path, provider, model=model, base_url=base_url)
+
+    detected_via = PROVIDER_DETECTED_VIA.get(provider, provider)
+    click.echo(f"Detected: {provider} ({detected_via})")
+    click.echo(f"Config written to {config_file}")
+    click.echo("\nNext step: run `ctx init .` to generate manifests.")
 
 
 @cli.command()

@@ -32,6 +32,10 @@ import click
 import yaml
 
 
+class MissingApiKeyError(click.UsageError):
+    """Raised when a required LLM provider API key is not set."""
+
+
 DEFAULT_PROVIDER = "anthropic"
 DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5-20251001",
@@ -45,6 +49,14 @@ DEFAULT_BASE_URLS = {
     "lmstudio": "http://localhost:1234/v1",
 }
 LOCAL_PROVIDERS = frozenset({"ollama", "lmstudio", "bitnet"})
+
+# Human-readable detection source shown by `ctx setup`
+PROVIDER_DETECTED_VIA: dict[str, str] = {
+    "anthropic": "ANTHROPIC_API_KEY env var",
+    "openai": "OPENAI_API_KEY env var",
+    "ollama": "Ollama running on localhost:11434",
+    "lmstudio": "LM Studio running on localhost:1234",
+}
 
 
 @dataclass
@@ -72,6 +84,47 @@ class Config:
 
         provider = (self.provider or DEFAULT_PROVIDER).strip().lower() or DEFAULT_PROVIDER
         return self.model.strip() or DEFAULT_MODELS.get(provider, DEFAULT_MODELS[DEFAULT_PROVIDER])
+
+
+def detect_provider() -> tuple[str, str | None] | None:
+    """Detect an available LLM provider from env vars and local port probes.
+
+    Returns (provider, model_or_None) or None if nothing is found.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    if os.getenv("ANTHROPIC_API_KEY", "").strip():
+        return ("anthropic", None)
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        return ("openai", None)
+
+    for provider, base_url in (
+        ("ollama", "http://localhost:11434"),
+        ("lmstudio", "http://localhost:1234"),
+    ):
+        try:
+            with urllib.request.urlopen(f"{base_url}/v1/models", timeout=2) as resp:
+                data = json.loads(resp.read())
+            model: str | None = None
+            if isinstance(data.get("data"), list) and data["data"]:
+                model = data["data"][0].get("id")
+            return (provider, model)
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError):
+            pass
+
+    return None
+
+
+def write_default_config(path: Path, provider: str, model: str | None = None, base_url: str | None = None) -> None:
+    """Write a minimal .ctxconfig into *path* directory."""
+    lines = [f"provider: {provider}"]
+    if model:
+        lines.append(f"model: {model}")
+    if base_url:
+        lines.append(f"base_url: {base_url}")
+    (path / ".ctxconfig").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def load_config(
@@ -190,7 +243,7 @@ def load_config(
         api_key_env = "ANTHROPIC_API_KEY" if config.provider == "anthropic" else "OPENAI_API_KEY"
         api_key = os.getenv(api_key_env, "").strip()
         if not api_key:
-            raise click.UsageError(f"Missing required environment variable: {api_key_env}")
+            raise MissingApiKeyError(f"Missing required environment variable: {api_key_env}")
         config.api_key = api_key
 
     return config
