@@ -20,7 +20,7 @@ _EXPORTED_TYPE = re.compile(r"^export\s+type\s+(\w+)\s*[=<{]", re.MULTILINE)
 _DEFAULT_EXPORT = re.compile(r"^export\s+default\b", re.MULTILINE)
 
 
-def parse_js_ts_file(path: Path) -> Dict[str, List[str]]:
+def parse_js_ts_file(path: Path) -> Dict[str, Union[List[str], bool]]:
     """
     Parses a JS/TS file and extracts exported identifiers.
 
