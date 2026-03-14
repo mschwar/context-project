@@ -35,6 +35,7 @@ RETRY_ATTEMPTS = 3
 # Max chars to keep per summary when truncating to fit a local provider's context window.
 _SUMMARY_TRUNCATE_CHARS = 120
 BASE_RETRY_DELAY_SECONDS = 1.0
+TRANSIENT_ERROR_PREFIX = "[transient, retries exhausted]"
 
 DEFAULT_PROMPT_TEMPLATES = {
     "file_summary": """Summarize the files described in this JSON payload.
@@ -389,7 +390,7 @@ def _call_with_retries(provider: str, request: Callable[[], object]) -> object:
 
             last_error = exc
             if attempt == RETRY_ATTEMPTS:
-                raise RuntimeError(f"[transient, retries exhausted] {exc}") from exc
+                raise RuntimeError(f"{TRANSIENT_ERROR_PREFIX} {exc}") from exc
 
             delay = BASE_RETRY_DELAY_SECONDS * (2 ** (attempt - 1))
             logger.warning(
@@ -698,8 +699,8 @@ class CachingLLMClient:
             return
         with self._disk_lock:
             self._disk_cache.update(new_entries)
-            if len(self._disk_cache) > self._max_cache_entries:
-                self._disk_cache = dict(list(self._disk_cache.items())[-self._max_cache_entries:])
+            while len(self._disk_cache) > self._max_cache_entries:
+                del self._disk_cache[next(iter(self._disk_cache))]
             try:
                 self._cache_path.parent.mkdir(parents=True, exist_ok=True)
                 self._cache_path.write_text(

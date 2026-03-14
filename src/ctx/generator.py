@@ -78,7 +78,7 @@ def _estimate_tokens(text: str) -> int:
         try:
             import tiktoken
             _TIKTOKEN_ENCODER = tiktoken.get_encoding("cl100k_base")
-        except Exception:
+        except (ImportError, ValueError):
             _TIKTOKEN_ENCODER = False  # mark unavailable so we don't retry
     if _TIKTOKEN_ENCODER is False:
         return max(1, math.ceil(len(text) / 4))

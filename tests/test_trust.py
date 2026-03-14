@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import math
 from importlib import import_module
 from pathlib import Path
 from unittest.mock import patch
 
+import anthropic
+import pytest
 from click.testing import CliRunner
 
 from ctx.generator import _estimate_tokens
-from ctx.llm import CachingLLMClient
+from ctx.llm import CachingLLMClient, RETRY_ATTEMPTS, TRANSIENT_ERROR_PREFIX, _call_with_retries
 
 
 # ---------------------------------------------------------------------------
@@ -31,22 +34,14 @@ def test_estimate_tokens_uses_tiktoken_when_available() -> None:
 
 
 def test_estimate_tokens_falls_back_when_tiktoken_unavailable() -> None:
-    import ctx.generator as gen_module
-
-    original = gen_module._TIKTOKEN_ENCODER
-    try:
-        gen_module._TIKTOKEN_ENCODER = False  # simulate unavailable
+    with patch("ctx.generator._TIKTOKEN_ENCODER", False):
         result = _estimate_tokens("hello world")
         # falls back to len/4 heuristic: ceil(11/4) = 3
         assert result == 3
-    finally:
-        gen_module._TIKTOKEN_ENCODER = original
 
 
 def test_estimate_tokens_tiktoken_more_accurate_than_heuristic() -> None:
     # For a realistic code snippet, tiktoken should differ from len/4
-    import math
-
     snippet = "def foo(x: int) -> str:\n    return str(x)\n"
     tiktoken_count = _estimate_tokens(snippet)
     heuristic_count = max(1, math.ceil(len(snippet) / 4))
@@ -119,10 +114,6 @@ def test_cache_no_eviction_when_under_limit(tmp_path) -> None:
 
 
 def test_transient_error_tag_on_retry_exhaustion() -> None:
-    from ctx.llm import RETRY_ATTEMPTS, _call_with_retries
-    import anthropic
-    import pytest
-
     call_count = 0
 
     def always_fail():
@@ -138,9 +129,6 @@ def test_transient_error_tag_on_retry_exhaustion() -> None:
 
 
 def test_non_retryable_error_not_tagged() -> None:
-    from ctx.llm import _call_with_retries
-    import pytest
-
     def raises_value_error():
         raise ValueError("not a transient error")
 
@@ -169,4 +157,4 @@ def test_cli_prints_retry_tip_when_transient_error_in_stats(tmp_path, monkeypatc
 
     result = runner.invoke(cli_module.cli, ["update", str(tmp_path)])
 
-    assert "transient" in result.output.lower() or "retry" in result.output.lower()
+    assert "Tip: transient errors may resolve on retry. Run the command again." in result.output
