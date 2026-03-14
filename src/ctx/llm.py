@@ -20,7 +20,7 @@ import time
 from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, Optional, Protocol
 
 import click
 from anthropic import Anthropic
@@ -660,17 +660,50 @@ class CachingLLMClient:
     """Wraps an LLMClient and caches file summaries by content hash.
 
     Avoids redundant LLM calls when the same file content appears more than once
-    within a generation run (e.g., repeated files, iterative debugging). The cache
-    is in-memory and lives only for the duration of the wrapped call. Thread-safe.
+    within a generation run or across runs. The in-memory cache uses Futures for
+    stampede prevention. When cache_path is provided, summaries are also persisted
+    to disk so they survive process restarts. Thread-safe.
     """
 
-    def __init__(self, client: LLMClient) -> None:
+    def __init__(self, client: LLMClient, cache_path: Optional[Path] = None) -> None:
         self._client = client
         # Maps content hash → Future[str]. A Future that is not yet done means
         # another thread is currently fetching that content — callers block on
         # .result() rather than launching a duplicate LLM call.
         self._cache: dict[str, Future[str]] = {}
         self._lock = threading.Lock()
+        self._cache_path = cache_path
+        self._disk_lock = threading.Lock()
+        self._disk_cache: dict[str, str] = {}
+        if cache_path is not None and cache_path.exists():
+            try:
+                data = json.loads(cache_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self._disk_cache = {
+                        k: v for k, v in data.items()
+                        if isinstance(k, str) and isinstance(v, str)
+                    }
+            except (json.JSONDecodeError, OSError):
+                pass  # Corrupt or missing cache — start fresh
+            with self._lock:
+                for key, summary in self._disk_cache.items():
+                    fut: Future[str] = Future()
+                    fut.set_result(summary)
+                    self._cache[key] = fut
+
+    def _write_to_disk(self, key: str, summary: str) -> None:
+        if self._cache_path is None:
+            return
+        with self._disk_lock:
+            self._disk_cache[key] = summary
+            try:
+                self._cache_path.parent.mkdir(parents=True, exist_ok=True)
+                self._cache_path.write_text(
+                    json.dumps(self._disk_cache, indent=2),
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                logger.warning("Failed to write LLM cache to %s: %s", self._cache_path, exc)
 
     @property
     def model(self) -> str:
@@ -713,6 +746,7 @@ class CachingLLMClient:
                 for i, result in zip(to_fetch, new_results):
                     file_futures[i].set_result(result.text)
                     original_results[i] = result
+                    self._write_to_disk(keys[i], result.text)
             except Exception as exc:
                 for i in to_fetch:
                     if not file_futures[i].done():

@@ -847,3 +847,59 @@ def test_batch_size_larger_than_file_count_uses_single_call(monkeypatch) -> None
 
     assert [r.text for r in results] == ["Summary A"]
     assert len(factory.instances[0].calls) == 1
+
+
+# --- CachingLLMClient disk persistence ---
+
+
+def test_caching_client_saves_summaries_to_disk(tmp_path) -> None:
+    cache_file = tmp_path / "cache.json"
+    inner = _CountingClient()
+    cache = CachingLLMClient(inner, cache_path=cache_file)
+
+    cache.summarize_files(Path("src"), [{"name": "a.py", "content": "hello"}])
+
+    assert cache_file.exists()
+    import json
+    data = json.loads(cache_file.read_text())
+    assert isinstance(data, dict)
+    assert any("summary:a.py" in v for v in data.values())
+
+
+def test_caching_client_loads_summaries_from_disk(tmp_path) -> None:
+    import json, hashlib
+    cache_file = tmp_path / "cache.json"
+    file_dict = {"name": "a.py", "content": "hello"}
+    key = hashlib.sha256(json.dumps(file_dict, sort_keys=True).encode()).hexdigest()
+    cache_file.write_text(json.dumps({key: "preloaded summary"}), encoding="utf-8")
+
+    inner = _CountingClient()
+    cache = CachingLLMClient(inner, cache_path=cache_file)
+
+    results = cache.summarize_files(Path("src"), [file_dict])
+
+    assert results[0].text == "preloaded summary"
+    assert inner.file_call_count == 0  # no LLM call — loaded from disk
+
+
+def test_caching_client_no_disk_write_when_path_is_none(tmp_path) -> None:
+    inner = _CountingClient()
+    cache = CachingLLMClient(inner, cache_path=None)
+
+    cache.summarize_files(Path("src"), [{"name": "a.py", "content": "hello"}])
+
+    # No cache files should exist in tmp_path
+    assert not list(tmp_path.iterdir())
+
+
+def test_caching_client_tolerates_corrupt_cache_file(tmp_path) -> None:
+    cache_file = tmp_path / "cache.json"
+    cache_file.write_text("not valid json", encoding="utf-8")
+
+    inner = _CountingClient()
+    cache = CachingLLMClient(inner, cache_path=cache_file)  # should not raise
+
+    results = cache.summarize_files(Path("src"), [{"name": "a.py", "content": "hello"}])
+
+    assert results[0].text == "summary:a.py"
+    assert inner.file_call_count == 1  # corrupt cache → real LLM call
