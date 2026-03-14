@@ -74,6 +74,46 @@ class Config:
         return self.model.strip() or DEFAULT_MODELS.get(provider, DEFAULT_MODELS[DEFAULT_PROVIDER])
 
 
+def detect_provider() -> tuple[str, str | None] | None:
+    """Detect an available LLM provider from env vars and local port probes.
+
+    Returns (provider, model_or_None) or None if nothing is found.
+    """
+    import json
+    import urllib.request
+
+    if os.getenv("ANTHROPIC_API_KEY", "").strip():
+        return ("anthropic", None)
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        return ("openai", None)
+
+    for provider, base_url in (
+        ("ollama", "http://localhost:11434"),
+        ("lmstudio", "http://localhost:1234"),
+    ):
+        try:
+            with urllib.request.urlopen(f"{base_url}/v1/models", timeout=2) as resp:
+                data = json.loads(resp.read())
+            model: str | None = None
+            if isinstance(data.get("data"), list) and data["data"]:
+                model = data["data"][0].get("id")
+            return (provider, model)
+        except Exception:
+            pass
+
+    return None
+
+
+def write_default_config(path: Path, provider: str, model: str | None = None, base_url: str | None = None) -> None:
+    """Write a minimal .ctxconfig into *path* directory."""
+    lines = [f"provider: {provider}"]
+    if model:
+        lines.append(f"model: {model}")
+    if base_url:
+        lines.append(f"base_url: {base_url}")
+    (path / ".ctxconfig").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def load_config(
     target_path: Path,
     *,

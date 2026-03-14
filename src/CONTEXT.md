@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T22:42:46Z'
+generated: '2026-03-14T22:48:21Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:bb8d7f7b1d29bc2375d7e27d95afb0e0f31d8a46a28502724925abc6e1633be5
+content_hash: sha256:06308b73df8b0eaca836415761565451fe9ccc19fec327c0a67785cb94728b2f
 files: 0
 dirs: 1
 tokens_total: 0
 ---
 # C:/Users/Matty/Documents/context-project/src
 
-Source code directory containing the main implementation of the context project for AI agent filesystem integration.
+Source code for the context project, containing core modules and utilities for AI agent context management.
 
 ## Files
 
@@ -17,7 +17,7 @@ Source code directory containing the main implementation of the context project 
 
 ## Subdirectories
 
-- **ctx/** — Core module implementing a filesystem-native context layer for AI agents, providing CLI tools, LLM integration, and manifest generation.
+- **ctx/** — Core module implementing a filesystem-native context layer for AI agents, providing CLI tools and services to generate and maintain CONTEXT.md manifests across directory trees.
 
 ## Notes
 
