@@ -29,6 +29,15 @@ node_modules/
 *~
 .obsidian/
 
+# Temporary files and directories
+tmp/
+tmp*/
+temp/
+*.tmp
+*.temp
+*.bak
+*.swx
+
 # OS junk
 .DS_Store
 Thumbs.db

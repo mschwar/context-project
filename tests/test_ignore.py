@@ -9,10 +9,14 @@ import pytest
 from ctx.ignore import load_ignore_patterns, should_ignore
 
 
-def test_packaged_default_ignore_file_exists() -> None:
+def test_packaged_default_ignore_file_contains_expected_patterns() -> None:
     packaged_default = files("ctx").joinpath(".ctxignore.default")
+    contents = packaged_default.read_text(encoding="utf-8")
 
     assert packaged_default.is_file()
+    assert "CONTEXT.md" in contents
+    assert "tmp/" in contents
+    assert "*.tmp" in contents
 
 
 def test_load_ignore_patterns_uses_repo_default_file(tmp_path) -> None:
