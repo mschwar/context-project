@@ -131,6 +131,7 @@ def test_create_client_lmstudio_uses_openai_with_base_url(monkeypatch) -> None:
 
     assert isinstance(client, OpenAIClient)
     assert client.model == "loaded-model"
+    assert factory.instances[0].base_url == "http://localhost:1234/v1"
 
 
 def test_extract_json_array_skips_invalid_bracket_blocks() -> None:
