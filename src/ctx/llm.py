@@ -17,6 +17,7 @@ import logging
 import openai
 import threading
 import time
+from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
@@ -622,7 +623,10 @@ class CachingLLMClient:
 
     def __init__(self, client: LLMClient) -> None:
         self._client = client
-        self._cache: dict[str, str] = {}
+        # Maps content hash → Future[str]. A Future that is not yet done means
+        # another thread is currently fetching that content — callers block on
+        # .result() rather than launching a duplicate LLM call.
+        self._cache: dict[str, Future[str]] = {}
         self._lock = threading.Lock()
 
     @property
@@ -637,25 +641,44 @@ class CachingLLMClient:
 
         keys = [hashlib.sha256(content.encode()).hexdigest() for _, content in files]
 
-        with self._lock:
-            uncached_indices = [i for i, k in enumerate(keys) if k not in self._cache]
-
-        # Preserve original LLMResult (with token counts) for uncached entries.
-        # Cached entries return a new LLMResult with zero tokens (no LLM was called).
-        result_map: dict[int, LLMResult] = {}
-        if uncached_indices:
-            uncached_files = [files[i] for i in uncached_indices]
-            new_results = self._client.summarize_files(dir_path, uncached_files)
-            with self._lock:
-                for idx, result in zip(uncached_indices, new_results):
-                    self._cache[keys[idx]] = result.text
-                    result_map[idx] = result
+        # Under the lock, claim each uncached key by inserting a new (unresolved) Future.
+        # Any thread that races in and finds that Future will block on .result() below
+        # instead of issuing a duplicate LLM call.
+        file_futures: list[Future[str]] = []
+        to_fetch: list[int] = []  # indices in `files` that this thread will fetch
 
         with self._lock:
-            return [
-                result_map[i] if i in result_map else LLMResult(text=self._cache[keys[i]])
-                for i in range(len(files))
-            ]
+            for i, (_name, _content) in enumerate(files):
+                if keys[i] in self._cache:
+                    file_futures.append(self._cache[keys[i]])
+                else:
+                    fut: Future[str] = Future()
+                    self._cache[keys[i]] = fut
+                    file_futures.append(fut)
+                    to_fetch.append(i)
+
+        # Fetch outside the lock; resolve our Futures when done.
+        # Preserve the original LLMResult (with token counts) for entries we fetched.
+        original_results: dict[int, LLMResult] = {}
+        if to_fetch:
+            try:
+                new_results = self._client.summarize_files(dir_path, [files[i] for i in to_fetch])
+                for i, result in zip(to_fetch, new_results):
+                    file_futures[i].set_result(result.text)
+                    original_results[i] = result
+            except Exception as exc:
+                for i in to_fetch:
+                    if not file_futures[i].done():
+                        file_futures[i].set_exception(exc)
+                raise
+
+        # .result() returns immediately for resolved Futures; blocks for in-flight ones.
+        # Entries we fetched return the original LLMResult (preserving token counts).
+        # Cache hits return LLMResult with zero tokens (no LLM was called).
+        return [
+            original_results[i] if i in original_results else LLMResult(text=file_futures[i].result())
+            for i in range(len(files))
+        ]
 
     def summarize_directory(
         self,
