@@ -64,7 +64,7 @@ def load_ignore_patterns(
         1. Read .ctxignore.default (ship sensible defaults — see file).
         2. Read target_root / ".ctxignore" if it exists.
         3. Combine all pattern lines, filter blanks and comments.
-        4. Return pathspec.PathSpec.from_lines("gitwildmatch", combined_lines).
+        4. Return pathspec.PathSpec.from_lines("gitignore", combined_lines).
     """
     pattern_lines = _load_default_patterns(default_patterns_path)
 
@@ -72,7 +72,7 @@ def load_ignore_patterns(
     if user_patterns_path.exists():
         pattern_lines.extend(_pattern_lines(user_patterns_path.read_text(encoding="utf-8")))
 
-    return pathspec.PathSpec.from_lines("gitwildmatch", pattern_lines)
+    return pathspec.PathSpec.from_lines("gitignore", pattern_lines)
 
 
 def should_ignore(path: Path, spec: pathspec.PathSpec, target_root: Path) -> bool:

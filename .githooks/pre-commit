@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+echo "=== pre-commit: running pytest ==="
+pytest -q --tb=short
+echo "=== pre-commit: passed ==="

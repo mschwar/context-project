@@ -14,10 +14,12 @@ import pytest
 from ctx.config import Config
 from ctx.llm import (
     AnthropicClient,
+    BitNetClient,
     FileSummary,
     OpenAIClient,
     SubdirSummary,
     _extract_json_array,
+    _parse_bitnet_output,
     create_client,
 )
 
@@ -314,6 +316,41 @@ def test_openai_summarize_files_scales_output_budget_for_large_batches(monkeypat
     assert factory.instances[0].calls[0]["max_completion_tokens"] == 2816
 
 
+def test_openai_local_provider_falls_back_to_single_file_summaries_on_wrong_count(
+    monkeypatch,
+) -> None:
+    factory = _FakeOpenAIFactory(
+        [
+            SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='["only one summary"]'))],
+                usage=SimpleNamespace(prompt_tokens=20, completion_tokens=5),
+            ),
+            SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="CLI entrypoint"))],
+                usage=SimpleNamespace(prompt_tokens=6, completion_tokens=2),
+            ),
+            SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Shared utilities"))],
+                usage=SimpleNamespace(prompt_tokens=7, completion_tokens=3),
+            ),
+        ]
+    )
+    monkeypatch.setattr("ctx.llm.OpenAI", factory)
+    client = OpenAIClient(
+        Config(provider="ollama", api_key="not-needed", model="llama3.2:3b", base_url="http://localhost:11434/v1")
+    )
+
+    results = client.summarize_files(
+        Path("src"),
+        [("main.py", "print('hi')"), ("utils.py", "def helper():\n    return 1")],
+    )
+
+    assert [result.text for result in results] == ["CLI entrypoint", "Shared utilities"]
+    assert [(result.input_tokens, result.output_tokens) for result in results] == [(6, 2), (7, 3)]
+    assert len(factory.instances[0].calls) == 3
+    assert factory.instances[0].calls[1]["max_completion_tokens"] == 256
+
+
 def test_openai_summarize_directory_tracks_tokens_without_mutating_config(monkeypatch) -> None:
     factory = _FakeOpenAIFactory(
         [
@@ -385,3 +422,97 @@ def test_openai_summarize_directory_does_not_retry_non_transient_failure(monkeyp
 
     assert sleeps == []
     assert len(factory.instances[0].calls) == 1
+
+
+# --- BitNet tests ---
+
+
+def _fake_subprocess_run(stdout: str, returncode: int = 0):
+    def run(cmd, *, input, cwd, capture_output, text, timeout):
+        return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="error detail" if returncode else "")
+    return run
+
+
+def test_parse_bitnet_output_extracts_after_marker() -> None:
+    output = "some noise\nAssistant: CLI entrypoint module."
+    assert _parse_bitnet_output(output, "Assistant:") == "CLI entrypoint module."
+
+
+def test_parse_bitnet_output_falls_back_to_last_line_when_no_marker() -> None:
+    output = "some preamble\nActual answer here"
+    assert _parse_bitnet_output(output, "Summary:") == "Actual answer here"
+
+
+def test_create_client_bitnet_returns_bitnet_client() -> None:
+    client = create_client(Config(provider="bitnet", model="models/bitnet.gguf"))
+    assert isinstance(client, BitNetClient)
+
+
+def test_bitnet_summarize_files_returns_empty_for_no_files() -> None:
+    client = BitNetClient(Config(provider="bitnet", model="models/bitnet.gguf"))
+    assert client.summarize_files(Path("src"), []) == []
+
+
+def test_bitnet_summarize_files_calls_subprocess_per_file(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    def fake_run(cmd, *, input, cwd, capture_output, text, timeout):
+        calls.append({"cmd": cmd, "cwd": cwd, "input": input})
+        return SimpleNamespace(returncode=0, stdout="Assistant: CLI entrypoint.", stderr="")
+
+    monkeypatch.setattr("ctx.llm.subprocess.run", fake_run)
+    client = BitNetClient(Config(
+        provider="bitnet",
+        model="models/bitnet.gguf",
+        base_url="/path/to/bitnet",
+    ))
+
+    results = client.summarize_files(
+        Path("src"),
+        [("main.py", "print('hi')"), ("utils.py", "def helper(): pass")],
+    )
+
+    assert len(results) == 2
+    assert all(r.text == "CLI entrypoint." for r in results)
+    assert len(calls) == 2
+    assert calls[0]["cmd"][0] == "python"
+    assert calls[0]["cmd"][1].endswith("run_inference.py")
+    assert Path(calls[0]["cmd"][1]).is_absolute()
+    assert "-cnv" in calls[0]["cmd"]
+    assert "models/bitnet.gguf" in calls[0]["cmd"]
+    assert "main.py" in calls[0]["input"]
+
+
+def test_bitnet_summarize_files_raises_on_nonzero_returncode(monkeypatch) -> None:
+    monkeypatch.setattr("ctx.llm.subprocess.run", _fake_subprocess_run("", returncode=1))
+    client = BitNetClient(Config(provider="bitnet", model="models/bitnet.gguf"))
+
+    with pytest.raises(RuntimeError, match="BitNet inference failed"):
+        client.summarize_files(Path("src"), [("main.py", "x")])
+
+
+def test_bitnet_summarize_directory_extracts_output_marker(monkeypatch) -> None:
+    output = "preamble\nAssistant:\n# src\nPurpose.\n## Files\n- None\n"
+    monkeypatch.setattr("ctx.llm.subprocess.run", _fake_subprocess_run(output))
+    client = BitNetClient(Config(provider="bitnet", model="models/bitnet.gguf"))
+
+    result = client.summarize_directory(Path("src"), [], [])
+
+    assert result.text.startswith("# src")
+    assert result.input_tokens == 0
+    assert result.output_tokens == 0
+
+
+def test_bitnet_uses_base_url_as_cwd_defaulting_to_dot(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    def fake_run(cmd, *, cwd, input, **kwargs):
+        calls.append({"cwd": cwd})
+        return SimpleNamespace(returncode=0, stdout="Assistant: x.", stderr="")
+
+    monkeypatch.setattr("ctx.llm.subprocess.run", fake_run)
+    client = BitNetClient(Config(provider="bitnet", model="models/bitnet.gguf"))  # no base_url
+
+    client.summarize_files(Path("src"), [("f.py", "x")])
+
+    assert Path(calls[0]["cwd"]).is_absolute()

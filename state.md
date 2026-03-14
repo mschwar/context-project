@@ -1,0 +1,63 @@
+# State of `ctx`
+
+Current development status and upcoming milestones.
+
+## Current Health (March 2026)
+- **Status:** Stable Alpha / Beta.
+- **Core Engine:** Fully implemented with bottom-up traversal and incremental hashing.
+- **Test Coverage:** High for core components (`generator`, `hasher`, `manifest`).
+- **Binary Support:** Robust detection and metadata extraction.
+
+## Completed Milestones
+
+### Foundation
+- [x] CLI entry point with `Click`.
+- [x] Config system with `.ctxconfig` and env var support.
+- [x] Robust `.ctxignore` handling via `pathspec`.
+- [x] Content-based change detection (SHA-256).
+- [x] Canonical agent workflow defined in `AGENTS.md` (inspired by Ledger repo).
+- [x] Operational runbook defined in `RUNBOOK.md`.
+- [x] Git pre-commit hooks for automated quality checks.
+
+### LLM Integration
+- [x] `AnthropicClient` for Claude (preferred).
+- [x] `OpenAIClient` with support for OpenAI, Ollama, and LM Studio.
+- [x] `BitNetClient` for local inference using BitNet subprocesses.
+- [x] Batch file summarization to reduce API calls.
+- [x] Per-file fallback for Ollama when batch output is malformed or wrong count.
+
+### Manifest Management
+- [x] YAML frontmatter serialization.
+- [x] Markdown body generation and child summary propagation.
+- [x] Incremental updates (`ctx update`).
+- [x] Manifest health status check (`ctx status`).
+
+## Phase 1 — Hygiene & Merge Readiness
+
+Repo cleanup and branch merge. Prerequisite for all subsequent work.
+
+- [ ] Fix `pathspec` deprecation: change `"gitwildmatch"` → `"gitignore"` in `src/ctx/ignore.py`.
+- [ ] Remove stale `pytest-cache-files-*/` directories.
+- [ ] Update `.gitignore`: add `.tmp/`, `pytest-cache-files-*/`, `.worktrees/`.
+- [ ] Merge `feat/local-providers-token-budget` → `main`.
+
+## Phase 2 — Reliability & Performance
+
+Make local providers robust and unlock parallelism.
+
+- [ ] **400 context-length fallback:** Catch `openai.BadRequestError` when local provider returns HTTP 400 (`n_keep >= n_ctx`). Fall back to per-file summarization with aggressive truncation. Handle directory-level prompt truncation when combined summaries exceed context.
+- [ ] **Parallel directory processing:** `_run_generation` currently processes directories sequentially. Add async or threaded parallelism.
+- [ ] **LLM response caching:** Cache summarization results to avoid redundant API calls during iteration and debugging.
+- [ ] **BitNet subprocess resolution:** `run_inference.py` not found on Windows. Either fix path resolution or deprecate the provider.
+- [ ] Refine system prompts for more consistent summary styles.
+- [ ] Optimize batch sizes for different LLM context windows.
+
+## Phase 3 — Ecosystem Integration
+
+Connect `ctx` to the broader development toolchain.
+
+- [ ] **MCP Server Support:** Expose `ctx` manifests via the Model Context Protocol.
+- [ ] **Git-Aware Updates:** Detect changed files since last commit to trigger selective regeneration.
+- [ ] **CI/CD Action:** GitHub Action that ensures `CONTEXT.md` files are never out of sync.
+- [ ] **Custom Prompts:** Allow users to define their own summarization styles via `.ctxconfig`.
+- [ ] **Language-Specific Heuristics:** Smarter summarization by recognizing common project structures (e.g., Python, Rust, Go).

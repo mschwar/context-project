@@ -37,12 +37,13 @@ DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
     "ollama": "llama3.2",
     "lmstudio": "loaded-model",
+    "bitnet": "",  # model path is required; no default
 }
 DEFAULT_BASE_URLS = {
     "ollama": "http://localhost:11434/v1",
     "lmstudio": "http://localhost:1234/v1",
 }
-LOCAL_PROVIDERS = frozenset({"ollama", "lmstudio"})
+LOCAL_PROVIDERS = frozenset({"ollama", "lmstudio", "bitnet"})
 
 
 @dataclass
@@ -159,11 +160,15 @@ def load_config(
         raise click.UsageError(f"Unsupported provider: {config.provider}")
     config.model = config.resolved_model()
 
-    # Local providers get a default base_url and don't require an API key
+    # Local providers don't require an API key
     if config.provider in LOCAL_PROVIDERS:
-        if not config.base_url:
+        if not config.base_url and config.provider in DEFAULT_BASE_URLS:
             config.base_url = DEFAULT_BASE_URLS[config.provider]
         config.api_key = os.getenv("OPENAI_API_KEY", "not-needed").strip() or "not-needed"
+        if config.provider == "bitnet" and not config.model:
+            raise click.UsageError(
+                "--provider bitnet requires --model with the path to a .gguf file."
+            )
     else:
         api_key_env = "ANTHROPIC_API_KEY" if config.provider == "anthropic" else "OPENAI_API_KEY"
         api_key = os.getenv(api_key_env, "").strip()
