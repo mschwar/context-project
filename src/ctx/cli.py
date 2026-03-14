@@ -80,6 +80,11 @@ def _echo_generation_errors(stats: GenerateStats) -> None:
     click.echo("Errors:")
     for error in stats.errors:
         click.echo(f"  - {error}")
+    if any("[transient, retries exhausted]" in e for e in stats.errors):
+        click.echo(
+            "Tip: transient errors may resolve on retry. Run the command again.",
+            err=True,
+        )
 
 
 def _echo_stale_dirs(stale: list[Path], target_path: Path) -> None:

@@ -29,6 +29,7 @@ dependencies = [
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
     "watchdog>=4.0",
+    "tiktoken>=0.7",
 ]
 
 [project.urls]

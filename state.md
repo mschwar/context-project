@@ -3,9 +3,9 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable Beta. Phases 1–9 complete. Phase 10 scoped.
+- **Status:** Stable. Phases 1–10 complete.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 156 tests passing across all modules.
+- **Test Coverage:** 166 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
 - **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview.
 
@@ -116,8 +116,8 @@ Zero-friction first run and automatic manifest freshness without user effort.
 
 Fix the three reliability gaps that erode confidence at scale.
 
-- [ ] **10.1 Accurate token estimation:** replace `len(text) / 4` heuristic with `tiktoken` (`cl100k_base`, lazy-loaded, falls back gracefully). New dep: `tiktoken>=0.7`.
-- [ ] **10.2 Cache eviction:** cap `.ctx-cache/llm_cache.json` at 10,000 entries (trim oldest on write); `max_cache_entries` config key.
-- [ ] **10.3 Transient error transparency:** prefix `[transient, retries exhausted]` on known transient failures; CLI footer suggests retry.
+- [x] **10.1 Accurate token estimation:** replace `len(text) / 4` heuristic with `tiktoken` (`cl100k_base`, lazy-loaded, falls back gracefully). New dep: `tiktoken>=0.7`.
+- [x] **10.2 Cache eviction:** cap `.ctx-cache/llm_cache.json` at 10,000 entries (trim oldest on write); `max_cache_entries` config key.
+- [x] **10.3 Transient error transparency:** prefix `[transient, retries exhausted]` on known transient failures; CLI footer suggests retry.
 
 **Branch:** `feat/phase10-trust` (branch from `main` after Phase 9 merges)
