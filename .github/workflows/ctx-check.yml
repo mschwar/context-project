@@ -1,0 +1,23 @@
+name: CTX Manifest Check
+
+on:
+  push:
+    branches:
+      - main
+      - feat/**
+      - fix/**
+  pull_request:
+    branches:
+      - main
+      - feat/**
+      - fix/**
+
+jobs:
+  check_ctx_manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: CTX Manifest Check
+        uses: ./.github/actions/ctx-check
+        with:
+          path: .
+          github_token: ${{ secrets.GITHUB_TOKEN }}

@@ -56,8 +56,8 @@ Make local providers robust and unlock parallelism.
 
 Connect `ctx` to the broader development toolchain.
 
-- [ ] **MCP Server Support:** Expose `ctx` manifests via the Model Context Protocol.
-- [ ] **Git-Aware Updates:** Detect changed files since last commit to trigger selective regeneration.
-- [ ] **CI/CD Action:** GitHub Action that ensures `CONTEXT.md` files are never out of sync.
-- [ ] **Custom Prompts:** Allow users to define their own summarization styles via `.ctxconfig`.
-- [ ] **Language-Specific Heuristics:** Smarter summarization by recognizing common project structures (e.g., Python, Rust, Go).
+- [x] **MCP Server Support:** Expose `ctx` manifests via the Model Context Protocol.
+- [x] **Git-Aware Updates:** Detect changed files since last commit to trigger selective regeneration.
+- [x] **CI/CD Action:** GitHub Action that ensures `CONTEXT.md` files are never out of sync.
+- [x] **Custom Prompts:** Allow users to define their own summarization styles via `.ctxconfig`.
+- [x] **Language-Specific Heuristics:** Smarter summarization by recognizing common project structures (e.g., Python, Rust, Go).
