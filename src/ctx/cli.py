@@ -265,6 +265,25 @@ def smart_update(path: str, provider: Optional[str], model: Optional[str], token
 
 
 @cli.command()
+@click.argument("path", default=".")
+@click.option("--provider", default=None, help="LLM provider.")
+@click.option("--model", default=None, help="Model name.")
+@click.option("--base-url", default=None, help="Base URL for local providers.")
+@click.option("--cache-path", default=None, help="Path to LLM disk cache file.")
+def watch(path: str, provider: Optional[str], model: Optional[str], base_url: Optional[str], cache_path: Optional[str]) -> None:
+    """Watch a directory tree and regenerate manifests on file changes."""
+    from ctx.watcher import run_watch
+    target_path, config, spec, client, _ = _build_generation_runtime(
+        path,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+        cache_path=cache_path,
+    )
+    run_watch(target_path, config, client, spec)
+
+
+@cli.command()
 @click.option("--host", default="127.0.0.1", help="Host address for the server.")
 @click.option("--port", type=int, default=8000, help="Port for the server.")
 def serve(host: str, port: int) -> None:

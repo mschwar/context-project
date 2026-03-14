@@ -17,6 +17,7 @@ dependencies = [
     "pathspec>=0.12",
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
+    "watchdog>=4.0",
 ]
 
 [project.optional-dependencies]
