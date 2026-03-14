@@ -7,6 +7,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+import shutil
+
 from ctx import __version__
 from ctx.config import Config
 from ctx.generator import GenerateStats
@@ -163,3 +165,69 @@ def test_version_command_outputs_version() -> None:
 
     assert result.exit_code == 0
     assert f"ctx, version {__version__}" in result.output
+
+
+# --- dry-run ---
+
+
+def _copy_sample_project(tmp_path: Path) -> Path:
+    source = Path(__file__).parent / "fixtures" / "sample_project"
+    destination = tmp_path / "sample_project"
+    shutil.copytree(source, destination)
+    return destination
+
+
+def test_update_dry_run_lists_stale_dirs_without_llm(tmp_path) -> None:
+    """--dry-run should list stale dirs and not invoke any LLM client."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    # Remove any pre-existing CONTEXT.md files so dirs are stale
+    for ctx_file in root.rglob("CONTEXT.md"):
+        ctx_file.unlink()
+
+    result = runner.invoke(cli_module.cli, ["update", str(root), "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "would be regenerated" in result.output
+    # No CONTEXT.md files should have been written
+    assert not any(root.rglob("CONTEXT.md"))
+
+
+def test_update_dry_run_reports_nothing_when_fresh(tmp_path, monkeypatch) -> None:
+    """--dry-run should say nothing to regenerate when all manifests are fresh."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    # Fake check_stale_dirs returning empty list
+    monkeypatch.setattr(cli_module, "check_stale_dirs", lambda *a, **kw: [])
+    # Fake load_config to avoid needing API key
+    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: Config(api_key="fake"))
+
+    result = runner.invoke(cli_module.cli, ["update", str(root), "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "fresh" in result.output.lower() or "nothing" in result.output.lower()
+
+
+def test_update_surfaces_budget_warning_when_exhausted(tmp_path, monkeypatch) -> None:
+    """CLI should print a warning when token budget is exhausted."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    fake_config = Config(provider="openai", model="gpt-test", api_key="test-key", token_budget=1)
+    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
+    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        cli_module,
+        "update_tree",
+        lambda *a, **kw: GenerateStats(dirs_processed=1, dirs_skipped=2, tokens_used=1, budget_exhausted=True),
+    )
+
+    result = runner.invoke(cli_module.cli, ["update", str(root)])
+
+    assert "budget" in result.output.lower()

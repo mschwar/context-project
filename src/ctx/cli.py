@@ -16,7 +16,7 @@ import click
 
 from ctx import __version__
 from ctx.config import load_config
-from ctx.generator import GenerateStats, generate_tree, get_status, update_tree
+from ctx.generator import GenerateStats, check_stale_dirs, generate_tree, get_status, update_tree
 from ctx.ignore import load_ignore_patterns
 from ctx.llm import create_client
 
@@ -29,6 +29,7 @@ def _build_generation_runtime(
     max_depth: Optional[int] = None,
     token_budget: Optional[int] = None,
     base_url: Optional[str] = None,
+    cache_path: Optional[str] = None,
 ) -> tuple[Path, object, object, object, Callable[[Path, int, int], None]]:
     target_path = Path(path)
     load_config_kwargs: dict[str, Optional[str] | int] = {
@@ -41,6 +42,8 @@ def _build_generation_runtime(
         load_config_kwargs["token_budget"] = token_budget
     if base_url is not None:
         load_config_kwargs["base_url"] = base_url
+    if cache_path is not None:
+        load_config_kwargs["cache_path"] = cache_path
 
     config = load_config(target_path, **load_config_kwargs)
     spec = load_ignore_patterns(target_path)
@@ -65,6 +68,28 @@ def _echo_generation_errors(stats: GenerateStats) -> None:
         click.echo(f"  - {error}")
 
 
+def _echo_stale_dirs(stale: list[Path], target_path: Path) -> None:
+    """Print the list of stale directories for --dry-run output."""
+    click.echo(f"{len(stale)} director{'y' if len(stale) == 1 else 'ies'} would be regenerated:")
+    for directory in stale:
+        try:
+            rel = directory.relative_to(target_path).as_posix()
+        except ValueError:
+            rel = directory.as_posix()
+        click.echo(f"  {rel or '.'}")
+
+
+def _echo_budget_warning(stats: GenerateStats, config: object) -> None:
+    if not stats.budget_exhausted:
+        return
+    budget = getattr(config, "token_budget", None)
+    click.echo(
+        f"Warning: token budget ({budget:,}) reached after {stats.tokens_used:,} tokens. "
+        f"{stats.dirs_skipped} director{'y' if stats.dirs_skipped == 1 else 'ies'} skipped.",
+        err=True,
+    )
+
+
 def _display_status_path(path: str) -> str:
     return "." if path == "." else f"./{path}"
 
@@ -83,18 +108,9 @@ def cli() -> None:
 @click.option("--max-depth", type=int, default=None, help="Max directory depth to process.")
 @click.option("--token-budget", type=int, default=None, help="Max total tokens before stopping.")
 @click.option("--base-url", default=None, help="Custom API base URL.")
-def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Optional[int], token_budget: Optional[int], base_url: Optional[str]) -> None:
-    """Generate CONTEXT.md files for a directory tree.
-
-    Implementation:
-        1. load_config(Path(path), provider=provider, model=model, max_depth=max_depth).
-        2. load_ignore_patterns(Path(path)).
-        3. create_client(config).
-        4. Define a progress callback that prints: "  [{done}/{total}] Processing {dir_name}".
-        5. click.echo(f"ctx init: generating manifests for {path}").
-        6. stats = generate_tree(Path(path), config, client, spec, progress=progress_cb).
-        7. Print summary: dirs processed, files processed, tokens used, errors.
-    """
+@click.option("--cache-path", default=None, help="Disk cache file path. Set to '' to disable.")
+def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Optional[int], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str]) -> None:
+    """Generate CONTEXT.md files for a directory tree."""
     target_path, config, spec, client, progress_cb = _build_generation_runtime(
         path,
         provider=provider,
@@ -102,6 +118,7 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
         max_depth=max_depth,
         token_budget=token_budget,
         base_url=base_url,
+        cache_path=cache_path,
     )
 
     click.echo(f"ctx init: generating manifests for {target_path}")
@@ -113,6 +130,7 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
     click.echo(f"Tokens used: {stats.tokens_used}")
     click.echo(f"Errors: {len(stats.errors)}")
     _echo_generation_errors(stats)
+    _echo_budget_warning(stats, config)
 
 
 @cli.command()
@@ -121,20 +139,29 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
 @click.option("--model", default=None)
 @click.option("--token-budget", type=int, default=None, help="Max total tokens before stopping.")
 @click.option("--base-url", default=None, help="Custom API base URL.")
-def update(path: str, provider: Optional[str], model: Optional[str], token_budget: Optional[int], base_url: Optional[str]) -> None:
-    """Incrementally refresh stale CONTEXT.md files.
+@click.option("--cache-path", default=None, help="Disk cache file path. Set to '' to disable.")
+@click.option("--dry-run", is_flag=True, help="List stale directories without regenerating.")
+def update(path: str, provider: Optional[str], model: Optional[str], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], dry_run: bool) -> None:
+    """Incrementally refresh stale CONTEXT.md files."""
+    target_path = Path(path)
+    spec = load_ignore_patterns(target_path)
 
-    Implementation:
-        1. load_config, load_ignore_patterns, create_client (same as init).
-        2. stats = update_tree(Path(path), config, client, spec, progress=progress_cb).
-        3. Print summary: dirs refreshed, dirs skipped (fresh), tokens used.
-    """
+    if dry_run:
+        config = load_config(target_path, provider=provider, model=model, token_budget=token_budget, base_url=base_url, cache_path=cache_path, require_api_key=False)
+        stale = check_stale_dirs(target_path, config, spec)
+        if not stale:
+            click.echo("All manifests are fresh. Nothing to regenerate.")
+            return
+        _echo_stale_dirs(stale, target_path)
+        return
+
     target_path, config, spec, client, progress_cb = _build_generation_runtime(
         path,
         provider=provider,
         model=model,
         token_budget=token_budget,
         base_url=base_url,
+        cache_path=cache_path,
     )
 
     click.echo(f"ctx update: refreshing manifests for {target_path}")
@@ -146,6 +173,7 @@ def update(path: str, provider: Optional[str], model: Optional[str], token_budge
     click.echo(f"Tokens used: {stats.tokens_used}")
     click.echo(f"Errors: {len(stats.errors)}")
     _echo_generation_errors(stats)
+    _echo_budget_warning(stats, config)
 
 
 @cli.command()
@@ -190,30 +218,40 @@ def status(path: str, check_exit_code: bool) -> None:
 @click.option("--model", default=None)
 @click.option("--token-budget", type=int, default=None, help="Max total tokens before stopping.")
 @click.option("--base-url", default=None, help="Custom API base URL.")
-def smart_update(path: str, provider: Optional[str], model: Optional[str], token_budget: Optional[int], base_url: Optional[str]) -> None:
-    """Incrementally refresh stale CONTEXT.md files, focusing on git-changed files.
-    
-    This command first identifies files that have changed in the git repository
-    since the last commit (or are staged) and then triggers a regeneration of
-    CONTEXT.md files only for the directories affected by these changes and their ancestors.
-    """
-    from ctx.git import get_changed_files # Import here to avoid circular dependencies if git depends on cli
-    
+@click.option("--cache-path", default=None, help="Disk cache file path. Set to '' to disable.")
+@click.option("--dry-run", is_flag=True, help="List affected directories without regenerating.")
+def smart_update(path: str, provider: Optional[str], model: Optional[str], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], dry_run: bool) -> None:
+    """Incrementally refresh stale CONTEXT.md files, focusing on git-changed files."""
+    from ctx.git import get_changed_files
+
+    target_path = Path(path)
+    spec = load_ignore_patterns(target_path)
+
+    changed_files = get_changed_files(target_path)
+    if not changed_files:
+        click.echo("No git-changed files detected. Nothing to update.")
+        return
+
+    if dry_run:
+        config = load_config(target_path, provider=provider, model=model, token_budget=token_budget, base_url=base_url, cache_path=cache_path, require_api_key=False)
+        stale = check_stale_dirs(target_path, config, spec, changed_files=changed_files)
+        click.echo(f"Detected {len(changed_files)} changed files.")
+        if not stale:
+            click.echo("All affected manifests are fresh. Nothing to regenerate.")
+            return
+        _echo_stale_dirs(stale, target_path)
+        return
+
     target_path, config, spec, client, progress_cb = _build_generation_runtime(
         path,
         provider=provider,
         model=model,
         token_budget=token_budget,
         base_url=base_url,
+        cache_path=cache_path,
     )
 
     click.echo(f"ctx smart-update: refreshing manifests for {target_path} based on git changes")
-    
-    changed_files = get_changed_files(target_path)
-    if not changed_files:
-        click.echo("No git-changed files detected. Nothing to update.")
-        return
-
     click.echo(f"Detected {len(changed_files)} changed files. Processing affected directories.")
     if config.token_budget:
         click.echo(f"Token budget: {config.token_budget:,}")
@@ -223,6 +261,7 @@ def smart_update(path: str, provider: Optional[str], model: Optional[str], token
     click.echo(f"Tokens used: {stats.tokens_used}")
     click.echo(f"Errors: {len(stats.errors)}")
     _echo_generation_errors(stats)
+    _echo_budget_warning(stats, config)
 
 
 @cli.command()

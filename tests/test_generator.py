@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ctx.config import Config
 from ctx.generator import (
+    check_stale_dirs,
     format_binary_info,
     generate_tree,
     get_status,
@@ -217,4 +218,58 @@ def test_generate_tree_stops_at_token_budget(tmp_path) -> None:
     # First dir should process (budget checked before each dir), then budget exceeded
     assert stats.dirs_processed >= 1
     assert stats.dirs_processed < 3
-    assert any("Token budget reached" in error for error in stats.errors)
+    assert stats.budget_exhausted
+
+
+def test_budget_exhausted_false_when_budget_not_reached(tmp_path) -> None:
+    root = _copy_sample_project(tmp_path)
+    spec = load_ignore_patterns(root)
+    client = FakeLLMClient()
+    config = Config(api_key="test-key", token_budget=999_999)
+
+    stats = generate_tree(root, config, client, spec)
+
+    assert not stats.budget_exhausted
+
+
+def test_check_stale_dirs_returns_all_when_no_manifests(tmp_path) -> None:
+    root = _copy_sample_project(tmp_path)
+    # Remove any pre-existing CONTEXT.md files
+    for ctx_file in root.rglob("CONTEXT.md"):
+        ctx_file.unlink()
+    spec = load_ignore_patterns(root)
+    config = Config(api_key="test-key")
+
+    stale = check_stale_dirs(root, config, spec)
+
+    # All dirs are stale when no CONTEXT.md files exist
+    assert len(stale) > 0
+    assert root in stale
+
+
+def test_check_stale_dirs_returns_empty_after_full_generate(tmp_path) -> None:
+    root = _copy_sample_project(tmp_path)
+    spec = load_ignore_patterns(root)
+    config = Config(api_key="test-key")
+    generate_tree(root, config, FakeLLMClient(), spec)
+
+    stale = check_stale_dirs(root, config, spec)
+
+    assert stale == []
+
+
+def test_check_stale_dirs_respects_changed_files_filter(tmp_path) -> None:
+    root = _copy_sample_project(tmp_path)
+    spec = load_ignore_patterns(root)
+    config = Config(api_key="test-key")
+    generate_tree(root, config, FakeLLMClient(), spec)
+
+    # Modify a file in the docs dir
+    (root / "docs" / "guide.md").write_text("updated", encoding="utf-8")
+
+    stale = check_stale_dirs(root, config, spec, changed_files=[root / "docs" / "guide.md"])
+
+    # Only docs and root (ancestor) should be stale, not src
+    stale_names = {d.name for d in stale}
+    assert "docs" in stale_names or "." in stale_names  # docs or root
+    assert "src" not in stale_names

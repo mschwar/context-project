@@ -20,5 +20,8 @@ pytest-cache-files-*/
 # Git
 .worktrees/
 
+# ctx disk cache
+.ctx-cache/
+
 # Environment
 .env
