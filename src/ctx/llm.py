@@ -28,6 +28,10 @@ from ctx.config import LOCAL_PROVIDERS, Config
 
 
 logger = logging.getLogger(__name__)
+
+# BitNet subprocess configuration
+BITNET_TIMEOUT_SECONDS = 300
+BITNET_MAX_CONTENT_CHARS = 2000
 RETRY_ATTEMPTS = 3
 BASE_RETRY_DELAY_SECONDS = 1.0
 
@@ -618,7 +622,7 @@ class BitNetClient:
             capture_output=True,
             text=True,
             cwd=self.executable_dir,
-            timeout=300,
+            timeout=BITNET_TIMEOUT_SECONDS,
         )
         if result.returncode != 0:
             raise RuntimeError(f"BitNet inference failed: {result.stderr.strip()}")
@@ -632,7 +636,7 @@ class BitNetClient:
         results = []
         for name, content in files:
             user_message = (
-                f"File: {name}\n\n{content[:2000]}\n\n"
+                f"File: {name}\n\n{content[:BITNET_MAX_CONTENT_CHARS]}\n\n"
                 f"Write a single one-line summary of this file. No preamble."
             )
             output = self._run(

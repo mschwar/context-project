@@ -26,7 +26,7 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 
 ### When working from a scoped prompt
 1. Stay inside the stated scope.
-2. Branch from `origin/main`.
+2. Branch from the active development branch (see Branch notice in Current State above).
 3. Use `pathlib.Path` for all path handling.
 4. Run `pytest` before every commit.
 5. If the work exposes a durable workflow lesson, report it so standing docs can be updated.

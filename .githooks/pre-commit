@@ -2,6 +2,6 @@
 
 set -euo pipefail
 
-echo "=== pre-commit: === running pytest"
-pytest
-echo "=== pre-commit: === quality checks passed"
+echo "=== pre-commit: running pytest ==="
+pytest -q --tb=short
+echo "=== pre-commit: passed ==="
