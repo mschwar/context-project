@@ -1,39 +1,57 @@
 # ctx
 
-`ctx` generates `CONTEXT.md` manifests for directories in a project tree so AI
-agents can navigate codebases coarse-to-fine without reading every raw file.
+Generates `CONTEXT.md` manifests for every directory in your project so AI agents can navigate large codebases without reading every file.
 
-## Install
-
-For users:
+## Quick Start
 
 ```bash
-pip install .
+pip install ctx-tool
+export ANTHROPIC_API_KEY=sk-...
+ctx init .
+ctx status .
 ```
 
-For developers:
+That's it. Every directory now has a `CONTEXT.md` that summarises its contents for any AI tool that reads it.
 
-```bash
-pip install -e ".[dev]"
+## What it does
+
+`ctx` walks your project tree bottom-up, sends each directory's file contents to an LLM, and writes a structured `CONTEXT.md` summary. Subsequent runs only regenerate manifests whose source files have changed. The result is a persistent, always-fresh context layer that agents and humans can read at any depth.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `ctx init .` | Generate manifests for all directories |
+| `ctx update .` | Regenerate only stale manifests |
+| `ctx smart-update .` | Regenerate only directories with git-changed files |
+| `ctx status .` | Show how many manifests are stale or missing |
+| `ctx watch .` | Auto-regenerate on file save |
+| `ctx serve .` | Expose manifests via Model Context Protocol (MCP) |
+
+## Configuration
+
+Create `.ctxconfig` in your project root:
+
+```yaml
+provider: anthropic        # anthropic | openai | ollama | lmstudio
+model: claude-haiku-4-5-20251001
+batch_size: 10             # files per LLM call (tune for local models)
+token_budget: 100000       # stop after this many tokens
+cache_path: .ctx-cache/llm_cache.json
 ```
 
-On Windows, `pip --user` may place `ctx.exe` under
-`%APPDATA%\Python\Python312\Scripts`. If that directory is not on `PATH`, use
-`python -m ctx` or add the Scripts directory to `PATH`.
+## Local LLMs
 
-## Agentic SDLC
+Works with Ollama and LM Studio — no API key required.
 
-`ctx` is built with an **Agentic Software Development Life Cycle**. 
-
-- [Architecture](./architecture.md) — The bottom-up context strategy.
-- [Rules](./rules.md) — Engineering standards for humans and agents.
-- [State](./state.md) — Current development health and roadmap.
-- [Contributing](./CONTRIBUTING.md) — How to participate in the agentic workflow.
-
-## Usage
-
-```bash
-ctx init ./path/to/project
-ctx update ./path/to/project
-ctx status ./path/to/project
+```yaml
+provider: ollama
+model: llama3.2
+base_url: http://localhost:11434/v1
 ```
+
+## Links
+
+- [Architecture](./architecture.md) — bottom-up context strategy
+- [Contributing](./CONTRIBUTING.md) — agentic workflow
+- [State](./state.md) — current roadmap
