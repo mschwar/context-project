@@ -32,26 +32,32 @@ Current development status and upcoming milestones.
 - [x] Incremental updates (`ctx update`).
 - [x] Manifest health status check (`ctx status`).
 
-## In Progress
+## Phase 1 — Hygiene & Merge Readiness
 
-### Prompt Engineering
+Repo cleanup and branch merge. Prerequisite for all subsequent work.
+
+- [ ] Fix `pathspec` deprecation: change `"gitwildmatch"` → `"gitignore"` in `src/ctx/ignore.py`.
+- [ ] Remove stale `pytest-cache-files-*/` directories.
+- [ ] Update `.gitignore`: add `.tmp/`, `pytest-cache-files-*/`, `.worktrees/`.
+- [ ] Merge `feat/local-providers-token-budget` → `main`.
+
+## Phase 2 — Reliability & Performance
+
+Make local providers robust and unlock parallelism.
+
+- [ ] **400 context-length fallback:** Catch `openai.BadRequestError` when local provider returns HTTP 400 (`n_keep >= n_ctx`). Fall back to per-file summarization with aggressive truncation. Handle directory-level prompt truncation when combined summaries exceed context.
+- [ ] **Parallel directory processing:** `_run_generation` currently processes directories sequentially. Add async or threaded parallelism.
+- [ ] **LLM response caching:** Cache summarization results to avoid redundant API calls during iteration and debugging.
+- [ ] **BitNet subprocess resolution:** `run_inference.py` not found on Windows. Either fix path resolution or deprecate the provider.
 - [ ] Refine system prompts for more consistent summary styles.
 - [ ] Optimize batch sizes for different LLM context windows.
 
-### Performance
-- [ ] Implement parallel processing for directory summarization (currently sequential).
-- [ ] Add caching for LLM responses to avoid redundant calls during debugging.
+## Phase 3 — Ecosystem Integration
 
-## Backlog
+Connect `ctx` to the broader development toolchain.
 
-- [ ] **Fix BitNet subprocess path resolution:** `run_inference.py` is not found even when `--base-url` points to the correct directory. Absolute path resolution was attempted but did not solve it. Needs deeper debugging of Windows subprocess `cwd` + script path handling.
-- [ ] **Add 400 context-length fallback for local providers:** When a local provider returns HTTP 400 due to `n_keep >= n_ctx`, catch `openai.BadRequestError` and fall back to per-file summarization with more aggressive truncation. Also handle directory-level prompt truncation when combined file summaries exceed the model's context window.
-
-## Roadmap
-
-### Future Enhancements
 - [ ] **MCP Server Support:** Expose `ctx` manifests via the Model Context Protocol.
-- [ ] **Git Integration:** Automatically detect changed files since last commit to trigger updates.
-- [ ] **Language-Specific Heuristics:** Smarter summarization by recognizing common project structures (e.g., Python, Rust, Go).
+- [ ] **Git-Aware Updates:** Detect changed files since last commit to trigger selective regeneration.
+- [ ] **CI/CD Action:** GitHub Action that ensures `CONTEXT.md` files are never out of sync.
 - [ ] **Custom Prompts:** Allow users to define their own summarization styles via `.ctxconfig`.
-- [ ] **CI/CD Action:** A GitHub Action that ensures `CONTEXT.md` files are never out of sync.
+- [ ] **Language-Specific Heuristics:** Smarter summarization by recognizing common project structures (e.g., Python, Rust, Go).

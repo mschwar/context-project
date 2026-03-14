@@ -10,7 +10,7 @@ import pytest
 from ctx.hasher import ERROR_HASH, SYMLINK_LOOP_HASH, hash_directory, hash_file, is_stale
 
 
-EMPTY_SPEC = pathspec.PathSpec.from_lines("gitwildmatch", [])
+EMPTY_SPEC = pathspec.PathSpec.from_lines("gitignore", [])
 
 
 def _expected_hash(data: bytes) -> str:
@@ -81,7 +81,7 @@ def test_hash_directory_ignores_patterns(tmp_path) -> None:
     (tmp_path / "kept.txt").write_text("keep me", encoding="utf-8")
     ignored_file = tmp_path / "ignored.txt"
     ignored_file.write_text("first version", encoding="utf-8")
-    spec = pathspec.PathSpec.from_lines("gitwildmatch", ["ignored.txt"])
+    spec = pathspec.PathSpec.from_lines("gitignore", ["ignored.txt"])
 
     first_hash = hash_directory(tmp_path, spec, tmp_path)
     ignored_file.write_text("second version", encoding="utf-8")

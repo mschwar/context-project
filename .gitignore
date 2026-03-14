@@ -12,5 +12,12 @@ venv/
 .claude/
 *.swp
 
+# Test artifacts
+.tmp/
+pytest-cache-files-*/
+
+# Git
+.worktrees/
+
 # Environment
 .env

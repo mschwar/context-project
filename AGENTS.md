@@ -7,9 +7,11 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 
 ## Current State
 - **Core Engine**: Fully implemented with bottom-up traversal and incremental hashing.
-- **LLM Clients**: Anthropic and OpenAI supported; BitNet support needs debugging.
-- **Test Coverage**: High for core modules; some stubs remain in the CLI and config layers.
-- **Documentation**: `architecture.md`, `rules.md`, and `state.md` define the system.
+- **LLM Clients**: Anthropic and OpenAI supported (including Ollama and LM Studio). **BitNet is non-functional on Windows** — do not attempt to use or debug it without an explicit task scoped to that issue.
+- **Test Coverage**: 76 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, integration).
+- **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
+
+> **Branch notice**: As of March 2026, active development lives on `feat/local-providers-token-budget`. This branch adds Ollama/LM Studio support and token budget controls, and is ahead of `main`. Branch from this branch, not `main`, until it is merged.
 
 ## Canonical Rules
 
@@ -86,3 +88,27 @@ Stop and ask for clarification if:
 | `claude` | High-judgment reasoning, complex refactors, architectural planning. |
 | `codex` | Local implementation, unit tests, CLI wiring. |
 | `gemini` | Large-context synthesis, documentation review, roadmap planning. |
+
+## Development Phases
+
+Active roadmap. See `state.md` for detailed status of each item.
+
+### Phase 1 — Hygiene & Merge Readiness
+Scope: repo cleanup and getting `feat/local-providers-token-budget` merged to `main`.
+- Fix `pathspec` deprecation (`"gitwildmatch"` → `"gitignore"` in `ignore.py`).
+- Remove stale build artifacts; update `.gitignore` for `.tmp/`, `pytest-cache-files-*/`, `.worktrees/`.
+- Merge current feature branch to `main`.
+
+### Phase 2 — Reliability & Performance
+Scope: make local providers robust and unlock parallelism.
+- Implement 400 context-length fallback for local providers (catch `openai.BadRequestError`, fall back to per-file with truncation).
+- Add parallel directory processing (currently sequential in `_run_generation`).
+- Add LLM response caching to avoid redundant calls during iteration.
+- Resolve BitNet subprocess path issue on Windows or deprecate the provider.
+
+### Phase 3 — Ecosystem Integration
+Scope: connect `ctx` to the broader toolchain.
+- MCP Server support (expose manifests via Model Context Protocol).
+- Git-aware updates (detect changed files since last commit to trigger selective regeneration).
+- CI/CD Action (GitHub Action that ensures `CONTEXT.md` files stay fresh).
+- Custom prompt templates via `.ctxconfig`.
