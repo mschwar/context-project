@@ -92,6 +92,5 @@ Candidates from Phase 6 reflection:
 - **Go parser** — export by capitalization convention; natural complement to JS/TS + Rust.
 - **`ctx watch`** — file watcher for auto-regeneration (`watchdog`/`watchfiles` dependency).
 - **Cache model-awareness** — key disk cache on model+hash to prevent stale summaries after model switch.
-- **Document manifest refresh requirement** — add note to `CONTRIBUTING.md`/`RUNBOOK.md` for new contributors.
 
 **Branch:** `feat/phase7-*` (branch from `main` after Phase 6 closeout)

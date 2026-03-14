@@ -1,11 +1,11 @@
 ---
-generated: '2026-03-14T21:18:28Z'
+generated: '2026-03-14T21:24:21Z'
 generator: ctx/0.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:ef65b1aa10cc7b8f1e0a138bbdbd0d53dd2d080611149408a39870ea18f9549e
+content_hash: sha256:84491a7caa837064d1c2ac8594d57bb45e4d5d714a69030b08556205f65c0c04
 files: 15
 dirs: 9
-tokens_total: 9691
+tokens_total: 9791
 ---
 # C:/Users/Matty/Documents/context-project
 
@@ -17,17 +17,17 @@ A tool that generates CONTEXT.md manifests for codebases, enabling AI agents to 
 - **.gitattributes** — Configures Git to auto-detect and normalize line endings across platforms.
 - **.gitignore** — Specifies files and directories to exclude from version control (Python, IDE, test, and cache artifacts).
 - **AGENTS.md** — Canonical onboarding and workflow contract defining mission, rules, phases, and SDLC guardrails for agents contributing to ctx.
-- **CONTRIBUTING.md** — Describes how to participate in the agentic SDLC workflow and maintain context manifests.
+- **CONTRIBUTING.md** — Guidelines for contributing to ctx, emphasizing agentic SDLC, context maintenance, and test-driven development.
 - **GATE_CLOSEOUT.md** — Specifies the required closeout sequence for completing roadmap phases with validation and reflection.
 - **README.md** — Entry point and usage guide for ctx, a tool that generates CONTEXT.md manifests for codebases.
-- **RUNBOOK.md** — Operational guide for running validation, using the CLI, and handling common failure modes.
+- **RUNBOOK.md** — Operational guide for installing, running, validating, and developing ctx with CLI commands and troubleshooting.
 - **architecture.md** — Describes the bottom-up generation strategy, component breakdown, and manifest format for ctx.
 - **commitlint.config.mjs** — Configures commitlint to enforce conventional commit message standards.
 - **package-lock.json** — Lock file specifying exact versions of npm dependencies for reproducible builds.
 - **package.json** — Defines project metadata, scripts, and npm dev dependencies for the context project.
 - **pyproject.toml** — Specifies Python package configuration, dependencies, and entry points for ctx.
 - **rules.md** — Engineering standards and agentic workflow rules for code quality and manifest generation.
-- **state.md** — Development status tracker documenting completed phases, current health, and upcoming milestones for the ctx project.
+- **state.md** — Development status and completed milestones for ctx across seven phases, from foundation through language expansion.
 
 ## Subdirectories
 
@@ -44,5 +44,5 @@ A tool that generates CONTEXT.md manifests for codebases, enabling AI agents to 
 ## Notes
 
 - This project uses both Python (pyproject.toml) and Node.js (package.json) tooling, with Git hooks managed by Husky for commit validation.
-- The AGENTS.md, CONTRIBUTING.md, and rules.md files define the agentic SDLC workflow and contribution standards.
-- State tracking and roadmap closeout procedures are documented in state.md and GATE_CLOSEOUT.md respectively.
+- The AGENTS.md and CONTRIBUTING.md files establish agentic workflows and development standards; refer to these for contribution guidelines.
+- Architecture and state documentation provide roadmap context; see state.md for current phase status.

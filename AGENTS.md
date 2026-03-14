@@ -175,6 +175,5 @@ Candidates from Phase 6 reflection (no gate condition set yet):
 - **Go parser** — export by capitalization; natural next language.
 - **`ctx watch`** — file watcher for auto-regeneration (`watchdog`/`watchfiles`).
 - **Cache model-awareness** — include model name in disk cache key to prevent stale summaries on model switch.
-- **Document manifest refresh** — add `ctx update .` requirement to `CONTRIBUTING.md`/`RUNBOOK.md`.
 
 **Branch:** `feat/phase7-*` (branch from `main` after Phase 7 is scoped)

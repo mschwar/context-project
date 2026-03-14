@@ -41,6 +41,8 @@ Update stale manifests based on content changes.
 ctx update /path/to/project
 ```
 
+> **Before pushing:** always run `ctx update .` and commit the resulting `CONTEXT.md` changes alongside your code. The `CTX Manifest Check` CI job runs `ctx status . --check-exit-code` and will fail the PR if any manifests are stale.
+
 ### Check status
 See how many manifests are stale or missing.
 ```bash
