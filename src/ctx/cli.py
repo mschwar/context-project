@@ -305,18 +305,23 @@ def watch(path: str, provider: Optional[str], model: Optional[str], base_url: Op
 
 @cli.command()
 @click.argument("path", default=".", required=False)
-def setup(path: str) -> None:
+@click.option("--check", "check_only", is_flag=True, help="Print detected provider without writing config.")
+def setup(path: str, check_only: bool) -> None:
     """Auto-detect LLM provider and write .ctxconfig."""
     target_path = Path(path)
     config_file = target_path / ".ctxconfig"
 
-    if config_file.exists():
+    def _probe_msg(provider: str) -> None:
+        label = {"ollama": "Ollama", "lmstudio": "LM Studio"}.get(provider, provider)
+        click.echo(f"Probing {label}...")
+
+    if not check_only and config_file.exists():
         click.echo(f".ctxconfig already exists:\n\n{config_file.read_text(encoding='utf-8')}")
         if not click.confirm("Overwrite?", default=False):
             click.echo("Cancelled.")
             return
 
-    result = detect_provider()
+    result = detect_provider(_probe_callback=_probe_msg)
     if result is None:
         raise click.UsageError(
             "No LLM provider detected.\n"
@@ -324,11 +329,14 @@ def setup(path: str) -> None:
         )
 
     provider, model = result
-    base_url = DEFAULT_BASE_URLS.get(provider)
-    write_default_config(target_path, provider, model=model, base_url=base_url)
-
     detected_via = PROVIDER_DETECTED_VIA.get(provider, provider)
     click.echo(f"Detected: {provider} ({detected_via})")
+
+    if check_only:
+        return
+
+    base_url = DEFAULT_BASE_URLS.get(provider)
+    write_default_config(target_path, provider, model=model, base_url=base_url)
     click.echo(f"Config written to {config_file}")
     click.echo("\nNext step: run `ctx init .` to generate manifests.")
 

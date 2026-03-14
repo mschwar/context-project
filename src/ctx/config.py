@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import click
 import yaml
@@ -74,6 +74,7 @@ class Config:
     extensions: Optional[list[str]] = None  # None = all text files
     cache_path: Optional[str] = None  # None = default .ctx-cache/llm_cache.json; "" = disable
     max_cache_entries: int = 10_000  # trim disk cache when it exceeds this many entries
+    watch_debounce_seconds: float = 0.5  # per-file debounce window for ctx watch
     prompts: dict[str, str] = field(default_factory=dict)
 
 
@@ -87,7 +88,9 @@ class Config:
         return self.model.strip() or DEFAULT_MODELS.get(provider, DEFAULT_MODELS[DEFAULT_PROVIDER])
 
 
-def detect_provider() -> tuple[str, str | None] | None:
+def detect_provider(
+    _probe_callback: "Callable[[str], None] | None" = None,
+) -> tuple[str, str | None] | None:
     """Detect an available LLM provider from env vars and local port probes.
 
     Returns (provider, model_or_None) or None if nothing is found.
@@ -105,6 +108,8 @@ def detect_provider() -> tuple[str, str | None] | None:
         ("ollama", "http://localhost:11434"),
         ("lmstudio", "http://localhost:1234"),
     ):
+        if _probe_callback:
+            _probe_callback(provider)
         try:
             with urllib.request.urlopen(f"{base_url}/v1/models", timeout=2) as resp:
                 data = json.loads(resp.read())
@@ -186,6 +191,8 @@ def load_config(
             config.batch_size = None if data["batch_size"] is None else int(data["batch_size"])
         if "max_cache_entries" in data and data["max_cache_entries"] is not None:
             config.max_cache_entries = int(data["max_cache_entries"])
+        if "watch_debounce_seconds" in data and data["watch_debounce_seconds"] is not None:
+            config.watch_debounce_seconds = float(data["watch_debounce_seconds"])
         if "cache_path" in data:
             config.cache_path = None if data["cache_path"] is None else str(data["cache_path"])
         if "base_url" in data and data["base_url"] is not None:

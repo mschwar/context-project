@@ -200,3 +200,13 @@ Scope: fix the three reliability gaps that erode confidence at scale.
 - Transient error transparency: prefix `[transient, retries exhausted]` on known transient failures; CLI footer suggests retry.
 
 **Branch:** `feat/phase10-trust` (branch from `main` after Phase 9 merges)
+
+### Phase 11 — Completeness
+Scope: close all open suggestions accumulated across Phases 4–10 reflections.
+- Prompt regression tests for all six `DEFAULT_PROMPT_TEMPLATES` (Phase 4 backlog).
+- `watch_debounce_seconds` config key (Phase 7 backlog).
+- `ctx setup` UX: probing messages + `--check` flag (Phases 9–10 backlog).
+- Java parser: `public class/interface/enum/record`, `public` methods.
+- C# parser: `public class/interface/enum/struct/record`, `public` methods.
+
+**Branch:** `feat/phase11-completeness`
