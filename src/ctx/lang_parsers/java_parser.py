@@ -5,7 +5,7 @@ from typing import Dict, List
 
 # Matches: public class/interface/enum/record Foo
 _PUBLIC_TYPE = re.compile(
-    r"^[ \t]*(?:(?:abstract|final|sealed|non-sealed)\s+)*public\s+(?:(?:abstract|final|sealed|non-sealed)\s+)*"
+    r"^[ \t]*(?:(?:abstract|final|sealed|non-sealed|static)\s+)*public\s+(?:(?:abstract|final|sealed|non-sealed|static)\s+)*"
     r"(class|interface|enum|record)\s+(\w+)",
     re.MULTILINE,
 )

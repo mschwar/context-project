@@ -97,6 +97,19 @@ def test_missing_file(tmp_path):
     }
 
 
+def test_public_static_nested_class(tmp_path):
+    src = """\
+public class Outer {
+    public static class Nested {}
+}
+"""
+    f = tmp_path / "Outer.java"
+    f.write_text(src, encoding="utf-8")
+    result = parse_java_file(f)
+    assert "Outer" in result["classes"]
+    assert "Nested" in result["classes"]
+
+
 def test_generic_return_type_method(tmp_path):
     src = """\
 public class Repo<T> {
