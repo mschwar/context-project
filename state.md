@@ -3,7 +3,8 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable Beta. All four phases complete.
+- **Status:** Stable Beta. Phases 1–4 complete. Phase 5 scoped and ready to begin after Gate 4 closeout.
+- **Active Branch:** `feat/phase4-prompt-quality-batch-control` (pending PR → `main`)
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing.
 - **Test Coverage:** 101 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
@@ -69,3 +70,13 @@ Improve output consistency and give users control over LLM call granularity.
 - [x] **Refined system prompts:** All six `DEFAULT_PROMPT_TEMPLATES` rewritten with explicit rules — 20-word sentence cap, purpose-over-implementation guidance, exact markdown structure for directory summaries, consistent prompt-injection defence phrasing.
 - [x] **`batch_size` config:** New `.ctxconfig` key and `Config.batch_size` field. When set, `summarize_files` splits the file list into chunks of that size and makes one LLM call per chunk. Lets users tune call granularity for small-context local models without hitting 400 errors.
 - [x] **Remove `bitnet` from CLI choices:** `--provider bitnet` no longer appears in `--help`. Users who set it via env/config still get the informative deprecation error from `create_client`.
+
+## Phase 5 — Cost Control & Observability
+
+Close the gaps between wired-up config fields and actual runtime behaviour; add a dry-run preview before spending tokens.
+
+**Gate condition:** Phase 4 gate closeout (reflection + PR merge) must complete before work begins.
+
+- [ ] **5.1 Persistent LLM Cache:** Extend `CachingLLMClient` to load/save its cache to disk (`.ctx-cache/llm_cache.json`). New `cache_path` config key and `--cache-path` CLI flag. Survives process restarts — repeated runs on unchanged trees cost zero tokens.
+- [ ] **5.2 Token Budget Enforcement:** `Config.token_budget` is wired but never enforced. Add a check in `_run_generation` that stops LLM calls when `stats.tokens_used >= token_budget`. Add `budget_exhausted` flag to `GenerateStats`; surface a warning in CLI output.
+- [ ] **5.3 `--dry-run` Flag:** Add `--dry-run` to `ctx update` and `ctx smart-update`. Lists stale directories without making LLM calls or writing files. Reuses existing `is_stale()` from `hasher.py`.
