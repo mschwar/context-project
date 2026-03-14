@@ -3,11 +3,11 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable Beta. Phases 1–6 complete. Phase 7 not yet scoped.
-- **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent LLM cache.
-- **Test Coverage:** 127 tests passing across all modules.
+- **Status:** Stable Beta. Phases 1–7 complete. Phase 8 not yet scoped.
+- **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
+- **Test Coverage:** 143 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
-- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), CI/CD GitHub Action, JS/TS + Rust + Python language parsers, disk cache, token budget enforcement, `--dry-run` preview.
+- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview.
 
 ## Completed Milestones
 
@@ -86,11 +86,17 @@ Richer summaries for the most common open-source language mix; fix pre-existing 
 - [x] **6.2 Rust parser:** `rust_parser.py` — extracts `pub fn`, `pub struct`, `pub enum`, `pub trait`, `mod` (all visibility modifiers). Wired in for `.rs` files. 7 tests.
 - [x] **6.3 CI hygiene:** `ctx-check.yml` rewritten inline (removed missing composite-action reference). `pr-checks.yml` replaced Node/npm template with Python `pytest`. Both checks now pass.
 
-## Phase 7 — (Not Yet Scoped)
+## Phase 7 — Go Parser, ctx watch, Cache Model-Awareness ✓
 
-Candidates from Phase 6 reflection:
-- **Go parser** — export by capitalization convention; natural complement to JS/TS + Rust.
-- **`ctx watch`** — file watcher for auto-regeneration (`watchdog`/`watchfiles` dependency).
-- **Cache model-awareness** — key disk cache on model+hash to prevent stale summaries after model switch.
+- [x] **Go parser:** `go_parser.py` — exported functions (including receiver methods), types, constants (including iota-style), variables. 6 tests.
+- [x] **`ctx watch`:** `watcher.py` — OS-native file watcher via `watchdog`. CONTEXT.md writes excluded (infinite-loop prevention). 0.5 s per-file debounce. Hooks into `update_tree`. 8 tests.
+- [x] **Cache model-awareness:** `CachingLLMClient` now keys on `sha256(model + ":" + file_json)`. Switching models always produces cache misses. Existing cache files are invalidated on first run (one-time regeneration cost).
 
-**Branch:** `feat/phase7-*` (branch from `main` after Phase 6 closeout)
+## Phase 8 — (Not Yet Scoped)
+
+Candidates from Phase 7 reflection:
+- **Java / C# parsers** — complete enterprise language coverage.
+- **Accurate token counting** — replace character-based `_estimate_tokens` with `tiktoken` for budget accuracy.
+- **`watch_debounce_seconds` config** — expose debounce window as a `.ctxconfig` key.
+
+**Branch:** `feat/phase8-*` (branch from `main` after Phase 7 closeout)
