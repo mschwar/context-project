@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T21:40:37Z'
+generated: '2026-03-14T21:47:58Z'
 generator: ctx/0.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:5807accdd14c22c73be70948245ee0bf51cd2113f46c54fb0e67e19d6de2d1bd
+content_hash: sha256:15ffaa2ba7f669a1a35b817aa814e6aca8147a24b8fbc61421f5d20e7a50d1de
 files: 18
 dirs: 1
-tokens_total: 15112
+tokens_total: 15144
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Test suite for the context project, covering CLI, configuration, generation engine, language parsers, and LLM integration.
+Test suite for the context project, covering CLI, configuration, generation engine, language parsers, Git integration, and LLM providers.
 
 ## Files
 
@@ -38,6 +38,6 @@ Test suite for the context project, covering CLI, configuration, generation engi
 
 ## Notes
 
-- Tests are organized by module, with each test file corresponding to a major component (parsers, CLI, config, generation, etc.).
+- Tests are organized by module, with each test file corresponding to a core component (parsers, generators, CLI, etc.).
 - The `conftest.py` provides shared pytest fixtures for temporary workspace isolation.
 - Integration tests in `test_integration.py` validate end-to-end workflows using fixture projects.

@@ -13,8 +13,12 @@ _EXPORTED_FUNC = re.compile(
 )
 # Matches: type ExportedName struct/interface/...
 _EXPORTED_TYPE = re.compile(r"^type\s+([A-Z]\w*)\s+\w+", re.MULTILINE)
-# Matches: const ExportedName or const ( ExportedName on its own line
-_EXPORTED_CONST = re.compile(r"^\s*([A-Z]\w*)\s+.*=|^const\s+([A-Z]\w*)\b", re.MULTILINE)
+# Matches: const ExportedName (single-line form)
+_SINGLE_CONST = re.compile(r"^const\s+([A-Z]\w*)\b", re.MULTILINE)
+# Matches the body of a const (...) block; avoids re.DOTALL by excluding ')'
+_CONST_BLOCK = re.compile(r"^const\s*\(([^)]*)\)", re.MULTILINE)
+# Matches exported names inside a const block (first identifier on each line)
+_CONST_IN_BLOCK = re.compile(r"^\s*([A-Z]\w*)", re.MULTILINE)
 # Matches: var ExportedName
 _EXPORTED_VAR = re.compile(r"^var\s+([A-Z]\w*)\b", re.MULTILINE)
 
@@ -34,14 +38,9 @@ def parse_go_file(path: Path) -> Dict[str, List[str]]:
     except (OSError, UnicodeDecodeError):
         return _empty()
 
-    # For constants, use a more robust multi-step parsing.
-    const_block_re = re.compile(r"^const\s*\((.*?)\)", re.DOTALL | re.MULTILINE)
-    const_in_block_re = re.compile(r"^\s*([A-Z]\w*)", re.MULTILINE)
-    single_const_re = re.compile(r"^const\s+([A-Z]\w*)\b", re.MULTILINE)
-
-    const_matches = single_const_re.findall(content)
-    for block_content in const_block_re.findall(content):
-        const_matches.extend(const_in_block_re.findall(block_content))
+    const_matches = _SINGLE_CONST.findall(content)
+    for block_content in _CONST_BLOCK.findall(content):
+        const_matches.extend(_CONST_IN_BLOCK.findall(block_content))
 
     return {
         "functions": _EXPORTED_FUNC.findall(content),

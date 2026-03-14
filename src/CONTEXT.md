@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T21:40:34Z'
+generated: '2026-03-14T21:47:56Z'
 generator: ctx/0.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:120aaa2c8a26d8fa0a5f55ae18e7281e7f7afcf068d7e6532aae22d42157a41a
+content_hash: sha256:e3d271f8e38fb593bf04660b78e770f9fa54a58cfcfb68865b430ec06097c55e
 files: 0
 dirs: 1
 tokens_total: 0
 ---
 # C:/Users/Matty/Documents/context-project/src
 
-Source code directory containing the main implementation of the context project for generating and maintaining directory documentation.
+Source code for the context project, containing core modules for generating and managing directory manifests.
 
 ## Files
 
@@ -17,7 +17,7 @@ Source code directory containing the main implementation of the context project 
 
 ## Subdirectories
 
-- **ctx/** — Core module providing CLI tools and generation engine for creating and maintaining CONTEXT.md directory manifests with LLM-generated summaries.
+- **ctx/** — Core module for generating and managing CONTEXT.md directory manifests with LLM-powered summaries and git-aware change tracking.
 
 ## Notes
 

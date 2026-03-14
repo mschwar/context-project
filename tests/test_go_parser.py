@@ -44,17 +44,20 @@ const MaxRetries = 3
 const minDelay = 10
 
 const (
-    StatusOK    = 200
-    statusError = 500
+    StatusOK      = 200
+    statusError   = 500
+    StatusCreated         // iota-style: no explicit assignment
 )
+
+var AVariable = 1
 """
     f = tmp_path / "config.go"
     f.write_text(src, encoding="utf-8")
     result = parse_go_file(f)
-    assert "MaxRetries" in result["constants"]
-    assert "StatusOK" in result["constants"]
+    assert set(result["constants"]) == {"MaxRetries", "StatusOK", "StatusCreated"}
     assert "minDelay" not in result["constants"]
     assert "statusError" not in result["constants"]
+    assert "AVariable" not in result["constants"]
 
 
 def test_exported_variables(tmp_path):

@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-14T21:40:42Z'
+generated: '2026-03-14T21:48:03Z'
 generator: ctx/0.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:edfd89cb05eb7d9d7b6bda0d5ef4bd29f7914d15e64b166abef0936c80b79d8c
+content_hash: sha256:f066cb70985fcd5cb62b4b11838724e33160967b4af97e4942237a18104f7850
 files: 15
 dirs: 9
 tokens_total: 9791
@@ -38,11 +38,11 @@ A tool that generates CONTEXT.md manifests for codebases, enabling AI agents to 
 - **.pytest_cache/** — Pytest cache directory storing test execution metadata and diagnostic information.
 - **.worktrees/** — Git worktrees configuration and management directory for the context-project.
 - **archive/** — Archived design documents and analysis for ctx, a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
-- **src/** — Source code directory containing the main implementation of the context project for generating and maintaining directory documentation.
-- **tests/** — Test suite for the context project, covering CLI, configuration, generation engine, language parsers, and LLM integration.
+- **src/** — Source code for the context project, containing core modules for generating and managing directory manifests.
+- **tests/** — Test suite for the context project, covering CLI, configuration, generation engine, language parsers, Git integration, and LLM providers.
 
 ## Notes
 
 - This project uses conventional commits (enforced via commitlint) and Git hooks (Husky) for quality assurance.
-- Python and Node.js tooling coexist; the primary implementation is in src/ with supporting npm scripts.
-- Agent-driven development is central to the project's philosophy; see AGENTS.md and CONTRIBUTING.md for workflow expectations.
+- Python and Node.js tooling are both configured, indicating a polyglot development environment.
+- The archive directory preserves historical design decisions and analysis for reference.

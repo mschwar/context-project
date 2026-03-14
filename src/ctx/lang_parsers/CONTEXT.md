@@ -1,11 +1,11 @@
 ---
-generated: '2026-03-14T21:40:27Z'
+generated: '2026-03-14T21:47:51Z'
 generator: ctx/0.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:98b2fb1502247120df822ec95dba5bc98921fce82518fcc5e02b530e79593a0c
+content_hash: sha256:016707ce172612c4e34857b3fc5e3a786dba0191cca9465ceeb218beb0ee12e4
 files: 4
 dirs: 0
-tokens_total: 1478
+tokens_total: 1530
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx/lang_parsers
 

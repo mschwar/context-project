@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T21:40:33Z'
+generated: '2026-03-14T21:47:54Z'
 generator: ctx/0.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:a09671bc6b7d3ac53cfbe087b53132365c7d0dfa922fdc0a95b42ea523599225
+content_hash: sha256:b48dddbebbf84d5a67b66aa7e03d85ed76312f251b0c472801aa46d0416217ef
 files: 13
 dirs: 1
 tokens_total: 12587
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
-Core module providing CLI tools and generation engine for creating and maintaining CONTEXT.md directory manifests with LLM-generated summaries.
+Core module for generating and managing CONTEXT.md directory manifests with LLM-powered summaries and git-aware change tracking.
 
 ## Files
 
@@ -33,6 +33,6 @@ Core module providing CLI tools and generation engine for creating and maintaini
 
 ## Notes
 
-- The generator.py module orchestrates the core workflow, coordinating with llm.py for summaries, ignore.py for filtering, and manifest.py for output.
-- Configuration flows through config.py and is consumed by cli.py and generator.py.
-- Language detection and parsing support multi-language projects via language_detector.py and lang_parsers/.
+- The generator.py module orchestrates the manifest creation pipeline using components from config, ignore, hasher, language_detector, and llm modules.
+- Git integration (git.py) enables smart_update to track only changed files since the last commit.
+- LLM implementations (llm.py) support multiple providers for flexible summarization backends.
