@@ -150,7 +150,8 @@ def update(path: str, provider: Optional[str], model: Optional[str], token_budge
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True), default=".", required=False)
-def status(path: str) -> None:
+@click.option("--check-exit-code", is_flag=True, help="Exit with code 1 if any manifests are stale or missing.")
+def status(path: str, check_exit_code: bool) -> None:
     """Show manifest health across a directory tree.
 
     Implementation:
@@ -162,6 +163,7 @@ def status(path: str) -> None:
            stale    ./src/routes
            missing  ./tests
         4. Print summary counts: N fresh, N stale, N missing.
+        5. If check_exit_code is True and stale or missing > 0, sys.exit(1).
     """
     target_path = Path(path)
     spec = load_ignore_patterns(target_path)
@@ -176,6 +178,10 @@ def status(path: str) -> None:
         f"{counts.get('fresh', 0)} fresh, {counts.get('stale', 0)} stale, "
         f"{counts.get('missing', 0)} missing"
     )
+
+    if check_exit_code and (counts.get("stale", 0) > 0 or counts.get("missing", 0) > 0):
+        import sys
+        sys.exit(1)
 
 
 @cli.command()
