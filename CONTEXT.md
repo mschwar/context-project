@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T21:24:21Z'
+generated: '2026-03-14T21:48:03Z'
 generator: ctx/0.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:84491a7caa837064d1c2ac8594d57bb45e4d5d714a69030b08556205f65c0c04
+content_hash: sha256:f066cb70985fcd5cb62b4b11838724e33160967b4af97e4942237a18104f7850
 files: 15
 dirs: 9
 tokens_total: 9791
 ---
 # C:/Users/Matty/Documents/context-project
 
-A tool that generates CONTEXT.md manifests for codebases, enabling AI agents to navigate and understand project structure through hierarchical documentation.
+A tool that generates CONTEXT.md manifests for codebases, enabling AI agents to navigate and understand directory structures through hierarchical documentation.
 
 ## Files
 
@@ -35,14 +35,14 @@ A tool that generates CONTEXT.md manifests for codebases, enabling AI agents to 
 - **.githooks/** — Git hooks directory for automated pre-commit testing and validation.
 - **.github/** — GitHub configuration directory containing workflow automation and action definitions for the context-project repository.
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
-- **.pytest_cache/** — Pytest cache directory storing test execution metadata, results, and configuration to optimize test runs.
+- **.pytest_cache/** — Pytest cache directory storing test execution metadata and diagnostic information.
 - **.worktrees/** — Git worktrees configuration and management directory for the context-project.
 - **archive/** — Archived design documents and analysis for ctx, a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
-- **src/** — Source code directory containing the core implementation of the context project's CLI tools and documentation generation system.
-- **tests/** — Test suite for the context project, covering CLI, configuration, generation engine, language parsers, LLM integration, and manifest handling.
+- **src/** — Source code for the context project, containing core modules for generating and managing directory manifests.
+- **tests/** — Test suite for the context project, covering CLI, configuration, generation engine, language parsers, Git integration, and LLM providers.
 
 ## Notes
 
-- This project uses both Python (pyproject.toml) and Node.js (package.json) tooling, with Git hooks managed by Husky for commit validation.
-- The AGENTS.md and CONTRIBUTING.md files establish agentic workflows and development standards; refer to these for contribution guidelines.
-- Architecture and state documentation provide roadmap context; see state.md for current phase status.
+- This project uses conventional commits (enforced via commitlint) and Git hooks (Husky) for quality assurance.
+- Python and Node.js tooling are both configured, indicating a polyglot development environment.
+- The archive directory preserves historical design decisions and analysis for reference.
