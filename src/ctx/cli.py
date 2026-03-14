@@ -381,14 +381,15 @@ def diff(path: str) -> None:
     except (subprocess.CalledProcessError, FileNotFoundError):
         raise click.UsageError("ctx diff requires git to be available and the path to be inside a git repository.")
 
-    all_changed = sorted(set(changed + new_files))
+    new_files_set = set(new_files)
+    all_changed = sorted(set(changed) | new_files_set)
     if not all_changed:
         click.echo("No CONTEXT.md files changed since last commit.")
         return
 
     click.echo(f"{len(all_changed)} CONTEXT.md file{'s' if len(all_changed) != 1 else ''} changed:")
     for f in all_changed:
-        prefix = "new" if f in new_files else "mod"
+        prefix = "new" if f in new_files_set else "mod"
         click.echo(f"  [{prefix}] {f}")
 
 
