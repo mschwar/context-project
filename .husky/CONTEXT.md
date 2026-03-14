@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T06:44:44Z'
+generated: '2026-03-14T21:12:36Z'
 generator: ctx/0.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:0333a238af1fee76238a8b85fd9452011f247813d7da15c17ee6fdc4547875d4
+content_hash: sha256:a2431413ad3eac49579ba6cff51e5f71bcbb877f13d2412901d76fbdad40a1ba
 files: 3
-dirs: 1
+dirs: 0
 tokens_total: 174
 ---
-# ./.husky
+# C:/Users/Matty/Documents/context-project/.husky
 
-Configuration directory for Husky git hooks that enforce commit message standards and branch protection rules.
+Husky configuration directory containing Git hooks for commit message validation and branch protection.
 
 ## Files
 
@@ -19,8 +19,8 @@ Configuration directory for Husky git hooks that enforce commit message standard
 
 ## Subdirectories
 
-- **_/** — Contains git hook implementations managed by husky for automated validation and operations throughout the git workflow.
+- None
 
 ## Notes
 
-- These hooks enforce code quality and workflow standards by intercepting git operations at key points in the development process.
+- These hooks enforce commit message standards and protect primary branches from direct modifications.
