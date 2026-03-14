@@ -11,6 +11,7 @@ venv/
 .obsidian/
 .claude/
 *.swp
+node_modules/
 
 # Test artifacts
 .tmp/
