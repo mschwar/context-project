@@ -53,7 +53,7 @@ At the end of every reflection, produce a **Disposition table** — one row per 
 2. For every suggestion marked "Carry into Phase N", add it as a numbered deliverable under that phase's section.
 3. If Phase N does not yet exist, create a stub section for it.
 
-This step is **not optional**. Suggestions that are not explicitly carried forward or explicitly deferred are considered lost. The carry-forward is the automation — it must happen before the gate can be marked closed.
+This step is **not optional**. To ensure no suggestions are lost, every item must be given a disposition in the table. The carry-forward mechanism automates tracking unactioned items between phases.
 
 **Checklist before closing any gate:**
 - [ ] Reflection disposition table is complete (no row left blank).
