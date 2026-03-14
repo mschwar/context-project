@@ -1,0 +1,48 @@
+# Default ignore patterns for ctx
+# These are always applied. Users can add more via .ctxignore in their project root.
+
+# Version control
+.git/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+.eggs/
+*.egg-info/
+dist/
+build/
+
+# Node.js
+node_modules/
+.npm/
+.yarn/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.obsidian/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# ctx output (don't index your own manifests)
+CONTEXT.md
+
+# Binary files are handled by ctx itself: they stay visible in manifests as
+# `[binary: ...]` entries and are not sent to the LLM. Add patterns below only
+# for files or directories that should be skipped entirely.
