@@ -5,10 +5,11 @@ We embrace an **Agentic SDLC**. This means the codebase is designed to be co-aut
 ## The Agentic Workflow
 
 ### 1. Context Maintenance
-Every PR that adds or modifies a directory MUST update the corresponding `CONTEXT.md` files. 
+Every PR that adds or modifies a directory MUST update the corresponding `CONTEXT.md` files.
 - Use `ctx update .` before committing your changes.
 - Ensure the `content_hash` in the frontmatter is updated to reflect the new state.
 - Verification: Running `ctx status` should return `fresh` for all directories in the project.
+- **CI enforcement:** The `CTX Manifest Check` workflow runs `ctx status . --check-exit-code` on every push and PR. It will fail if any manifests are stale or missing. Always run `ctx update .` locally and include the updated `CONTEXT.md` files in your commit before pushing.
 
 ### 2. Implementation Blocks
 New functions and classes should include an `Implementation:` block in their docstrings. This provides clear, step-by-step instructions for subsequent agents to follow when filling in stubs or refactoring.

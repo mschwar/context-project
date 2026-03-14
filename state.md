@@ -3,11 +3,11 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable Beta. Phases 1–5 complete. Phase 6 scoped and ready to begin.
+- **Status:** Stable Beta. Phases 1–6 complete. Phase 7 not yet scoped.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent LLM cache.
-- **Test Coverage:** 112 tests passing across all modules.
+- **Test Coverage:** 127 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
-- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), CI/CD GitHub Action, language heuristics, disk cache, token budget enforcement, `--dry-run` preview.
+- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), CI/CD GitHub Action, JS/TS + Rust + Python language parsers, disk cache, token budget enforcement, `--dry-run` preview.
 
 ## Completed Milestones
 
@@ -78,28 +78,19 @@ Close the gaps between wired-up config fields and actual runtime behaviour; add 
 - [x] **5.2 Token Budget Enforcement:** `_run_generation` stops LLM calls when `stats.tokens_used >= token_budget`. `GenerateStats.budget_exhausted` flag added; CLI prints a dedicated warning.
 - [x] **5.3 `--dry-run` Flag:** `ctx update --dry-run` and `ctx smart-update --dry-run` list stale directories without LLM calls or file writes. Backed by new `check_stale_dirs()` function.
 
-## Phase 6 — Language Expansion & CI Hygiene
+## Phase 6 — Language Expansion & CI Hygiene ✓
 
 Richer summaries for the most common open-source language mix; fix pre-existing CI noise.
 
-**Gate condition:** Phase 5 gate closeout (reflection + PR merge) must complete before work begins.
+- [x] **6.1 JS/TS parser:** `js_ts_parser.py` — regex extraction of exported functions (named + arrow), classes, interfaces, type aliases, default export. Wired into `generator._prepare_file_entry` for `.js`, `.ts`, `.jsx`, `.tsx`. 8 tests.
+- [x] **6.2 Rust parser:** `rust_parser.py` — extracts `pub fn`, `pub struct`, `pub enum`, `pub trait`, `mod` (all visibility modifiers). Wired in for `.rs` files. 7 tests.
+- [x] **6.3 CI hygiene:** `ctx-check.yml` rewritten inline (removed missing composite-action reference). `pr-checks.yml` replaced Node/npm template with Python `pytest`. Both checks now pass.
 
-**Deliverables:**
+## Phase 7 — (Not Yet Scoped)
 
-#### 6.1 — JavaScript / TypeScript Parser
-- Add `src/ctx/lang_parsers/js_ts_parser.py` using `tree-sitter` or regex-based AST extraction.
-- Extract: exported functions, classes, interfaces, type aliases, default export.
-- Wire into `generator.py` alongside the existing Python parser path.
-- Files: `src/ctx/lang_parsers/js_ts_parser.py`, `src/ctx/generator.py`, `tests/test_js_ts_parser.py`.
+Candidates from Phase 6 reflection:
+- **Go parser** — export by capitalization convention; natural complement to JS/TS + Rust.
+- **`ctx watch`** — file watcher for auto-regeneration (`watchdog`/`watchfiles` dependency).
+- **Cache model-awareness** — key disk cache on model+hash to prevent stale summaries after model switch.
 
-#### 6.2 — Rust Parser
-- Add `src/ctx/lang_parsers/rust_parser.py`.
-- Extract: `pub fn`, `pub struct`, `pub enum`, `pub trait`, `mod` declarations.
-- Files: `src/ctx/lang_parsers/rust_parser.py`, `src/ctx/generator.py`, `tests/test_rust_parser.py`.
-
-#### 6.3 — Fix Pre-existing CI Failures (chore)
-- Fix CTX Manifest Check: create `.github/actions/ctx-check/action.yml` or update `.github/workflows/ctx-manifest-check.yml` to use `ctx status --check-exit-code` inline.
-- Fix PR Checks / Validate PR: update workflow to use Python's `pytest` instead of `npm run test`.
-- Files: `.github/workflows/pr-checks.yml`, `.github/workflows/ctx-manifest-check.yml`, `.github/actions/ctx-check/action.yml` (new, if composite-action approach chosen).
-
-**Branch:** `feat/phase6-language-expansion` (branch from `main` after Phase 5 closeout)
+**Branch:** `feat/phase7-*` (branch from `main` after Phase 6 closeout)
