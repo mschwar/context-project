@@ -3,7 +3,7 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable Beta. Phases 1–7 complete. Phase 8 not yet scoped.
+- **Status:** Stable Beta. Phases 1–7 complete. Phases 8–10 scoped.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
 - **Test Coverage:** 143 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
@@ -92,11 +92,32 @@ Richer summaries for the most common open-source language mix; fix pre-existing 
 - [x] **`ctx watch`:** `watcher.py` — OS-native file watcher via `watchdog`. CONTEXT.md writes excluded (infinite-loop prevention). 0.5 s per-file debounce. Hooks into `update_tree`. 8 tests.
 - [x] **Cache model-awareness:** `CachingLLMClient` now keys on `sha256(model + ":" + file_json)`. Switching models always produces cache misses. Existing cache files are invalidated on first run (one-time regeneration cost).
 
-## Phase 8 — (Not Yet Scoped)
+## Phase 8 — Ship It
 
-Candidates from Phase 7 reflection:
-- **Java / C# parsers** — complete enterprise language coverage.
-- **Accurate token counting** — replace character-based `_estimate_tokens` with `tiktoken` for budget accuracy.
-- **`watch_debounce_seconds` config** — expose debounce window as a `.ctxconfig` key.
+Make `ctx` installable via `pip install`, with automated releases and a README that gets someone from zero to working in 60 seconds.
 
-**Branch:** `feat/phase8-*` (branch from `main` after Phase 7 closeout)
+- [ ] **8.1 PyPI-ready packaging:** verify name availability; update `pyproject.toml` classifiers/URLs; bump `__version__` to `"0.8.0"`.
+- [ ] **8.2 Publish workflow:** `.github/workflows/publish.yml` — tag `v*` → run tests → build + publish via OIDC trusted publishing.
+- [ ] **8.3 README rewrite:** ~100 lines; one-line tagline, 4-command quick start, commands table, inline `.ctxconfig` example, local LLM notes.
+
+**Branch:** `feat/phase8-distribution` (branch from `main`)
+
+## Phase 9 — Automate It
+
+Zero-friction first run and automatic manifest freshness without user effort.
+
+- [ ] **9.1 `ctx setup` command:** auto-detect provider (env vars → Ollama probe → LM Studio probe), write `.ctxconfig`, print next step.
+- [ ] **9.2 Pre-commit hook:** `.pre-commit-hooks.yaml` for standard `pre-commit` framework; runs `ctx status . --check-exit-code`.
+- [ ] **9.3 Graceful failure:** `ctx init`/`ctx update` missing-API-key errors print actionable hint pointing to `ctx setup`.
+
+**Branch:** `feat/phase9-onboarding-automation` (branch from `main` after Phase 8 merges)
+
+## Phase 10 — Trust It
+
+Fix the three reliability gaps that erode confidence at scale.
+
+- [ ] **10.1 Accurate token estimation:** replace `len(text) / 4` heuristic with `tiktoken` (`cl100k_base`, lazy-loaded, falls back gracefully). New dep: `tiktoken>=0.7`.
+- [ ] **10.2 Cache eviction:** cap `.ctx-cache/llm_cache.json` at 10,000 entries (trim oldest on write); `max_cache_entries` config key.
+- [ ] **10.3 Transient error transparency:** prefix `[transient, retries exhausted]` on known transient failures; CLI footer suggests retry.
+
+**Branch:** `feat/phase10-trust` (branch from `main` after Phase 9 merges)
