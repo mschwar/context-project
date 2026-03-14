@@ -7,7 +7,7 @@ files: 3
 dirs: 1
 tokens_total: 174
 ---
-# C:/Users/Matty/Documents/context-project/.husky
+# .husky
 
 Configuration directory for Husky git hooks that enforce commit message standards and branch protection rules.
 
