@@ -14,10 +14,18 @@ async def read_root():
 
 @app.get("/mcp/context/{file_path:path}")
 async def get_mcp_context(file_path: str):
-    # Ensure the path is relative to the current working directory or project root
-    # For simplicity, let's assume `file_path` is relative to the project root for now.
-    # A more robust solution might involve validating `file_path` against known project paths.
-    full_path = Path(file_path)
+    # Ensure the path is relative to the current working directory and not a directory traversal attempt.
+    try:
+        project_root = Path.cwd().resolve()
+        # Resolve the path safely, ensuring it's within the project root
+        full_path = (project_root / file_path).resolve(strict=True)
+        
+        # Security: Check that the resolved path is still within the project root.
+        if not full_path.is_relative_to(project_root):
+            raise HTTPException(status_code=403, detail="Access denied: path is outside the project root.")
+            
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(status_code=404, detail="Invalid or non-existent path.")
 
     if not full_path.is_dir():
         raise HTTPException(status_code=404, detail=f"Path '{file_path}' is not a directory.")
