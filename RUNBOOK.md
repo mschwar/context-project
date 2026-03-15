@@ -18,7 +18,7 @@ pip install -e ".[dev]"
 ### Full Test Suite
 Run the full pytest suite before every commit.
 ```bash
-pytest
+python -m pytest
 ```
 
 ### Type Checking (Future)
@@ -49,6 +49,14 @@ See how many manifests are stale or missing.
 ctx status /path/to/project
 ```
 
+### Serve manifests
+Serve manifests over HTTP.
+```bash
+ctx serve
+```
+
+Current behavior: until the explicit serve-root gate lands, run `ctx serve` from the tree you want to expose.
+
 ## Publishing a Release
 
 The publish workflow (`.github/workflows/publish.yml`) triggers on any `v*` tag and publishes to PyPI via OIDC trusted publishing.
@@ -70,6 +78,14 @@ git push --tags
 Every roadmap phase (gate) requires a formal closeout pass.
 Follow the steps in [GATE_CLOSEOUT.md](./GATE_CLOSEOUT.md) before marking a phase as complete.
 
+## Phase 16 Handoff
+
+Phase 16 work is intentionally split into small gates for narrower models.
+
+- Read [PHASE16_HANDOFF.md](./PHASE16_HANDOFF.md) before picking up any Phase 16 task.
+- Use one gate per branch and one gate per PR.
+- Keep the gate's file list, validation commands, and acceptance criteria in the working prompt.
+
 ## LLM Disk Cache
 
 `ctx` caches LLM summaries in `.ctx-cache/llm_cache.json` (relative to the project root). The cache key includes the model name, so switching models always produces a cache miss rather than serving stale summaries.
@@ -82,13 +98,17 @@ Follow the steps in [GATE_CLOSEOUT.md](./GATE_CLOSEOUT.md) before marking a phas
 
 ## Common Failure Modes
 
-### HTTP 400 Bad Request (Context Length)
-**Symptom**: LLM returns 400 when processing a large directory.
-**Fix**: The tool currently processes files in batches. If the batch or the resulting summaries exceed context limits, it may fail. Implementation of 400 context-length fallback is in the backlog.
+### `ctx status .` or `ctx update . --dry-run` fails on workspace cache directories
+**Symptom**: A local workspace cache such as `.pytest_cache/` causes `PermissionError` during traversal.
+**Fix**: Current default ignores skip `.pytest_cache/`, `.worktrees/`, and `.tmp/`. If a custom cache directory is still surfacing, add it to `.ctxignore`.
 
-### BitNet Subprocess Not Found
-**Symptom**: `BitNetClient` fails because it can't find `run_inference.py`.
-**Fix**: Ensure the `--base-url` points to the directory containing the BitNet scripts. This is a known issue on Windows.
+### Local Provider Still Hits Context Limits
+**Symptom**: A local OpenAI-compatible provider still returns HTTP 400 on a large directory.
+**Fix**: `ctx` already retries local providers with smaller fallbacks. If it still fails, lower `batch_size` or `max_file_tokens` in `.ctxconfig`.
+
+### `pytest` Command Not Found
+**Symptom**: `pytest` is missing from the shell.
+**Fix**: Install the dev extras with `pip install -e ".[dev]"` and run tests with `python -m pytest`.
 
 ### Inconsistent Summary Styles
 **Symptom**: Manifests have mixed summary lengths or tones.

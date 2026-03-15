@@ -25,6 +25,13 @@ def test_load_ignore_patterns_uses_repo_default_file(tmp_path) -> None:
     assert spec.match_file("CONTEXT.md")
 
 
+@pytest.mark.parametrize("relative_path", [".pytest_cache/", ".worktrees/", ".tmp/"])
+def test_load_ignore_patterns_ignores_workspace_noise_by_default(tmp_path, relative_path: str) -> None:
+    spec = load_ignore_patterns(tmp_path)
+
+    assert spec.match_file(relative_path)
+
+
 def test_load_ignore_patterns_merges_default_and_user(tmp_path) -> None:
     default_patterns = tmp_path / ".ctxignore.default"
     default_patterns.write_text("# defaults\nnode_modules/\n*.pyc\n", encoding="utf-8")

@@ -7,7 +7,7 @@ Current development status and upcoming milestones.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
 - **Test Coverage:** 249 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
-- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby + Elixir language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view (with `--format json`, `--quiet`, `--since`), `ctx export` (with `--filter`, `--depth`), `ctx stats` (with `--verbose`), `ctx clean`.
+- **Ecosystem:** manifest server (`ctx serve`), git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby + Elixir language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view (with `--format json`, `--quiet`, `--since`), `ctx export` (with `--filter`, `--depth`), `ctx stats` (with `--verbose`), `ctx clean`.
 
 ## Completed Milestones
 
@@ -40,7 +40,7 @@ Repo cleanup and branch merge.
 
 - [x] Fix `pathspec` deprecation: changed `"gitwildmatch"` → `"gitignore"` in `src/ctx/ignore.py`.
 - [x] Remove stale `pytest-cache-files-*/` directories.
-- [x] Update `.gitignore`: added `.tmp/`, `pytest-cache-files-*/`, `.worktrees/`.
+- [x] Update `.gitignore`: added `.pytest_cache/`, `.tmp/`, `pytest-cache-files-*/`, `.worktrees/`.
 - [x] Merge `feat/local-providers-token-budget` → `main`.
 
 ## Phase 2 — Reliability & Performance ✓
@@ -186,11 +186,17 @@ Close all suggestions from the Phase 14 reflection.
 
 ## Phase 16 — Observability & Consistency
 
-Close all suggestions from the Phase 15 reflection.
+Close all suggestions from the Phase 15 reflection and the March 14, 2026 repo findings review.
 
-- [ ] **16.1 `ctx stats --format json`** — add `--format json` flag (aggregate and `--verbose` modes) for machine-readable coverage reports; enables dashboards and CI scripts without parsing table text.
-- [ ] **16.2 `ctx clean --dry-run`** — preview which `CONTEXT.md` files would be deleted without removing them; mirrors the `ctx update --dry-run` pattern.
-- [ ] **16.3 `ctx export` respects `.ctxignore`** — thread the `pathspec`-based ignore logic through the `rglob` walk in `export.py` so directories excluded from `ctx update` are also excluded from `ctx export`.
-- [ ] **16.4 `ctx watch` stale count on update** — after each debounced `update_tree` call, print a one-line stats summary (stale/covered counts) so users get continuous coverage feedback without running a separate command.
-- [ ] **16.5 `ctx verify` command** — check each `CONTEXT.md` frontmatter for required fields (`generated`, `generator`, `model`, `content_hash`, `files`, `dirs`, `tokens_total`) and report manifests with missing or malformed fields.
-- [ ] **16.6 `ctx diff --stat`** — print a one-line summary count (`N modified, N new, N stale`) rather than the full file list; mirrors `git diff --stat` semantics.
+Execution order: one gate per branch/PR. See `PHASE16_HANDOFF.md` for file lists, tests, and acceptance criteria.
+
+- [x] **Gate 16A — docs truth sync and handoff prep** — align standing docs with repo truth and publish the Phase 16 execution contract.
+- [x] **Gate 16B — default ignore hygiene** — default ignore rules now skip `.pytest_cache/`, `.worktrees/`, and `.tmp/` so manifests stay high-signal and local traversal avoids unreadable workspace noise.
+- [ ] **Gate 16C — `ctx clean --dry-run`** — preview which `CONTEXT.md` files would be deleted without removing them; mirrors the `ctx update --dry-run` pattern.
+- [ ] **Gate 16D — `ctx export` respects `.ctxignore`** — thread the `pathspec`-based ignore logic through the export walk so ignored directories never appear in exported manifests.
+- [ ] **Gate 16E — `ctx verify` command** — check each `CONTEXT.md` frontmatter for required fields (`generated`, `generator`, `model`, `content_hash`, `files`, `dirs`, `tokens_total`) and report manifests with missing or malformed fields.
+- [ ] **Gate 16F — explicit `ctx serve` root scoping** — stop relying on process `cwd`; serve a chosen tree explicitly and keep traversal protection intact.
+- [ ] **Gate 16G — `ctx stats --format json`** — add `--format json` flag (aggregate and `--verbose` modes) for machine-readable coverage reports; enables dashboards and CI scripts without parsing table text.
+- [ ] **Gate 16H — `ctx diff --stat`** — print a one-line summary count (`N modified, N new, N stale`) rather than the full file list; mirrors `git diff --stat` semantics.
+- [ ] **Gate 16I — `ctx watch` stale count on update** — after each debounced `update_tree` call, print a one-line stats summary (stale/covered counts) so users get continuous coverage feedback without running a separate command.
+- [ ] **Gate 16Z — manifest refresh and closeout** — rerun validation, regenerate manifests, file the reflection artifact, and update roadmap status before closing Phase 16.
