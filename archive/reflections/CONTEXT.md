@@ -1,21 +1,22 @@
 ---
-generated: '2026-03-15T03:43:45Z'
+generated: '2026-03-15T04:13:30Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:e66952a09c23a755aaf92ad0a0cf60912a38f3a43486507403b370576e0d4b06
-files: 9
+content_hash: sha256:ad24a46004dd6ac75cef997f2051483bc0b631038dc6882611a7306cefb28f83
+files: 10
 dirs: 0
-tokens_total: 7477
+tokens_total: 8688
 ---
 # C:/Users/Matty/Documents/context-project/archive/reflections
 
-A collection of phase-by-phase project reflections documenting the evolution, achievements, and recommendations for the context-project from Phase 4 through Phase 12.
+A collection of phase-by-phase project reflections documenting development progress, achievements, friction points, and recommendations across the context-project lifecycle.
 
 ## Files
 
 - **2026-03-14-phase10-reflection.md** — Phase 10 reflection documenting tiktoken integration, cache eviction optimization, and transient error messaging with test patterns and phase 11 candidates.
 - **2026-03-14-phase11-reflection.md** — Phase 11 project reflection documenting completeness achievements, friction points, test growth, and six prioritized suggestions for Phase 12 development.
 - **2026-03-14-phase12-reflection.md** — Phase 12 project reflection documenting language parser improvements, CLI ergonomics, test growth, and suggestions for Phase 13 development.
+- **2026-03-14-phase14-reflection.md** — Phase 14 reflection documenting CLI completeness achievements, friction points, and six suggestions for Phase 15 development.
 - **2026-03-14-phase4-reflection.md** — Phase 4 reflection documenting prompt template improvements, batch size control, and SDLC bootstrap with recommendations for Phase 5.
 - **2026-03-14-phase5-reflection.md** — Phase 5 reflection covering persistent disk cache, token budget enforcement, and dry-run flag implementation with observations on cache design.
 - **2026-03-14-phase6-reflection.md** — Phase 6 reflection detailing JavaScript/TypeScript and Rust parsers, CI workflow fixes, and manifest validation closure.
@@ -29,6 +30,6 @@ A collection of phase-by-phase project reflections documenting the evolution, ac
 
 ## Notes
 
-- All reflections are dated 2026-03-14 and follow a consistent naming pattern of `YYYY-MM-DD-phaseN-reflection.md`.
-- Reflections document feature implementations, test coverage growth, friction points, and forward-looking recommendations for subsequent phases.
-- The archive spans Phase 4 through Phase 12, providing a historical record of project progression and decision-making.
+- Reflections span phases 4 through 14 (phase 13 is absent from this collection).
+- Each reflection follows a consistent pattern of documenting achievements, friction points, and forward-looking recommendations.
+- Files are dated 2026-03-14, suggesting they were generated or compiled on the same date.

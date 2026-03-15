@@ -3,11 +3,11 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–12 complete.
+- **Status:** Stable. Phases 1–14 complete.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 213 tests passing across all modules.
+- **Test Coverage:** 237 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
-- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view.
+- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby + Elixir language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view (with `--format json`), `ctx export`, `ctx stats`.
 
 ## Completed Milestones
 
@@ -147,14 +147,39 @@ Close all suggestions from the Phase 11 reflection. Expand language coverage and
 
 **Branch:** `feat/phase12-language-depth`
 
-## Phase 13 — Extended Language Support & CLI Polish
+## Phase 13 — Extended Language Support & CLI Polish ✓
 
 Close all suggestions from the Phase 12 reflection.
 
-- [ ] **13.1 PHP parser** — `public function`, `class`, `interface`, `trait`, `enum`. Wired for `.php` files.
-- [ ] **13.2 Swift parser** — `func`, `class`, `struct`, `protocol`, `enum`. Wired for `.swift` files.
-- [ ] **13.3 `ctx diff --since <ref>`** — accept a git ref (branch, commit, tag) to show changes since a specific point, not just since `HEAD`.
-- [ ] **13.4 Non-git fallback for `ctx diff`** — when outside a git repo, compare `CONTEXT.md` mtimes against source file mtimes.
-- [ ] **13.5 `ctx init` idempotency docs** — clarify in README that `ctx init` regenerates unconditionally; promote `ctx init --no-overwrite` for incremental use.
+- [x] **13.1 PHP parser** — `public function`, `class`, `interface`, `trait`, `enum`. Wired for `.php` files.
+- [x] **13.2 Swift parser** — `func`, `class`, `struct`, `protocol`, `enum`. Wired for `.swift` files.
+- [x] **13.3 `ctx diff --since <ref>`** — accept a git ref (branch, commit, tag) to show changes since a specific point, not just since `HEAD`.
+- [x] **13.4 Non-git fallback for `ctx diff`** — when outside a git repo, compare `CONTEXT.md` mtimes against source file mtimes.
+- [x] **13.5 `ctx init` idempotency docs** — clarify in README that `ctx init` regenerates unconditionally; promote `ctx init --no-overwrite` for incremental use.
 
 **Branch:** `feat/phase13-extended-language-support`
+
+## Phase 14 — CLI Completeness ✓
+
+Close all suggestions from the Phase 13 reflection. Deliver unified diff vocabulary, JSON output, export, stats, and Elixir parser.
+
+- [x] **14.1 Unified diff vocabulary** — `[mod]`/`[new]` (git path) and `[stale]` (mtime fallback path) labels standardised across `ctx diff` output.
+- [x] **14.2 `ctx diff --format json`** — git path emits `{"modified":[…],"new":[…]}`; mtime path emits `{"stale":[…]}`.
+- [x] **14.3 `ctx export`** — walks `rglob("CONTEXT.md")`, concatenates with `# path/CONTEXT.md` headers to stdout or `--output` file.
+- [x] **14.4 `ctx stats`** — prints dirs/covered/missing/stale/tokens aggregate coverage table.
+- [x] **14.5 Elixir parser** — `def` (public), `defmodule`, `defstruct`; wired for `.ex`/`.exs`. 24 new tests (213 → 237).
+
+**Branch:** `feat/phase14-cli-completeness`
+
+## Phase 15 — CLI Power-User Features
+
+Close all suggestions from the Phase 14 reflection.
+
+- [ ] **15.1 `ctx stats --verbose`** — per-directory breakdown table (path, covered/missing/stale status, token count) in addition to aggregate totals.
+- [ ] **15.2 `ctx export --filter stale`** — `--filter` option accepting `stale`, `missing`, or `all` (default) to export only manifests that need attention.
+- [ ] **15.3 `ctx diff --quiet` exit-code mode** — suppress output and exit 1 if any changes are found; enables zero-config CI gating without JSON parsing.
+- [ ] **15.4 Elixir `@type`/`@spec`/`@callback` extraction** — extend the Elixir parser to capture module-level attributes for full library API surface coverage.
+- [ ] **15.5 `ctx clean` command** — remove all `CONTEXT.md` files under a directory tree; provides a quick "reset to zero" before regenerating.
+- [ ] **15.6 `ctx export --depth N`** — limit the rglob to N nesting levels; useful for exporting only top-level or mid-level manifests.
+
+**Branch:** `feat/phase15-cli-power-user`

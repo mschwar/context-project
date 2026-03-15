@@ -1,11 +1,11 @@
 ---
-generated: '2026-03-15T03:50:44Z'
+generated: '2026-03-15T04:13:46Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:36fb697db540e82b12ac3b8716e1d3b37c0c28d2affc911b6b740570afb6b558
+content_hash: sha256:6630b518b5d932799ec17dc0cf8d6a8797dc03bfc8e7d77465adc3a24f79c86e
 files: 17
 dirs: 9
-tokens_total: 12131
+tokens_total: 12142
 ---
 # C:/Users/Matty/Documents/context-project
 
@@ -39,12 +39,12 @@ A tool that generates CONTEXT.md manifests for project directories to help AI ag
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
 - **.pytest_cache/** — Pytest cache directory storing test execution metadata, results, and configuration to optimize test runs.
 - **.worktrees/** — Git worktrees configuration and management directory for the context-project.
-- **archive/** — Historical documentation and design analysis for the ctx tool, a filesystem-native manifest system enabling hierarchical directory navigation for AI agents.
+- **archive/** — Archive of design documents, analyses, and reflections for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
 - **src/** — Source code directory containing the main implementation of the context project.
-- **tests/** — Comprehensive test suite covering CLI, configuration, language parsers, Git integration, LLM clients, and manifest generation for the context project.
+- **tests/** — Test suite for the context-project, covering CLI operations, language parsers, configuration, Git integration, LLM clients, and manifest generation.
 
 ## Notes
 
-- This project uses Python (pyproject.toml) and Node.js (package.json) tooling with pre-commit hooks and Husky for automated validation.
-- The AGENTS.md, CONTRIBUTING.md, GATE_CLOSEOUT.md, and rules.md files define the agentic SDLC workflow and governance model.
-- Architecture and operational details are documented in architecture.md and RUNBOOK.md respectively.
+- This project implements an agentic SDLC workflow with mandatory phase closeout procedures and agent contribution guidelines.
+- Configuration spans Python (pyproject.toml), Node.js (package.json), and Git hooks (Husky, pre-commit) for integrated tooling.
+- The archive directory preserves design history and rationale for the manifest system architecture.

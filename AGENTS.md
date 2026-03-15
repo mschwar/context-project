@@ -10,10 +10,10 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 - **LLM Clients**: Anthropic and OpenAI supported (including Ollama and LM Studio). **BitNet is deprecated** — `create_client("bitnet")` raises an informative error directing users to Ollama or LM Studio.
 - **Language Parsers**: Python (`ast`-based), JavaScript/TypeScript (regex), Rust (regex), Go (regex). Wired into `generator._prepare_file_entry`; metadata is passed to the LLM prompt for richer summaries.
 - **File Watcher**: `ctx watch` — OS-native file watcher via `watchdog`. CONTEXT.md writes excluded to prevent infinite loops. 0.5 s per-file debounce.
-- **Test Coverage**: 166 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, integration).
+- **Test Coverage**: 237 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, `java_parser`, `csharp_parser`, `kotlin_parser`, `ruby_parser`, `php_parser`, `swift_parser`, `elixir_parser`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
 
-> **Branch notice**: As of March 2026, Phases 1–12 are complete on `main`. Phase 13 is the active development phase. New work should branch from `main`.
+> **Branch notice**: As of March 2026, Phases 1–14 are complete on `main`. Phase 15 is the active development phase. New work should branch from `main`.
 
 > **Manifest refresh rule**: Any commit that adds or modifies source files must include a `ctx update .` pass to regenerate stale `CONTEXT.md` files before pushing. The `CTX Manifest Check` CI job enforces this and will fail otherwise.
 
@@ -223,7 +223,7 @@ Scope: close all suggestions from the Phase 11 reflection; expand language cover
 
 **Branch:** `feat/phase12-language-depth`
 
-### Phase 13 — Extended Language Support & CLI Polish
+### Phase 13 — Extended Language Support & CLI Polish ✓
 Scope: close all suggestions from the Phase 12 reflection.
 - PHP parser: `public function`, `class`, `interface`, `trait`, `enum`. Wired for `.php`.
 - Swift parser: `func`, `class`, `struct`, `protocol`, `enum`. Wired for `.swift`.
@@ -232,3 +232,24 @@ Scope: close all suggestions from the Phase 12 reflection.
 - `ctx init` idempotency docs: README clarification + promote `--no-overwrite`.
 
 **Branch:** `feat/phase13-extended-language-support`
+
+### Phase 14 — CLI Completeness ✓
+Scope: unified diff vocabulary, JSON output, export, stats, and Elixir parser.
+- Unified diff vocabulary: `[mod]`/`[new]` (git path), `[stale]` (mtime fallback path).
+- `ctx diff --format json`: git path → `{"modified":[…],"new":[…]}`; mtime path → `{"stale":[…]}`.
+- `ctx export`: walks `rglob("CONTEXT.md")`, writes with `# path/CONTEXT.md` headers.
+- `ctx stats`: coverage table (dirs/covered/missing/stale/tokens).
+- Elixir parser: `def` (public), `defmodule`, `defstruct`; wired for `.ex`/`.exs`. 24 new tests.
+
+**Branch:** `feat/phase14-cli-completeness`
+
+### Phase 15 — CLI Power-User Features
+Scope: close all suggestions from the Phase 14 reflection.
+- `ctx stats --verbose`: per-directory breakdown table in addition to aggregate totals.
+- `ctx export --filter stale`: export only manifests needing attention (`stale`, `missing`, or `all`).
+- `ctx diff --quiet` exit-code mode: exit 1 if any changes found; enables zero-config CI gating.
+- Elixir `@type`/`@spec`/`@callback` extraction: full library API surface in the Elixir parser.
+- `ctx clean` command: remove all `CONTEXT.md` files under a directory tree (reset to zero).
+- `ctx export --depth N`: limit rglob to N nesting levels.
+
+**Branch:** `feat/phase15-cli-power-user`
