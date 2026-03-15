@@ -256,9 +256,9 @@ Scope: close all suggestions from the Phase 14 reflection.
 
 ### Phase 16 — Observability & Consistency
 Scope: close all suggestions from the Phase 15 reflection.
-- `ctx stats --format json`: machine-readable JSON output for aggregate and `--verbose` modes; enables dashboards and CI scripts.
-- `ctx clean --dry-run`: preview which `CONTEXT.md` files would be deleted without removing them; mirrors `ctx update --dry-run`.
-- `ctx export` respects `.ctxignore`: thread `pathspec`-based ignore logic through the `rglob` walk so excluded directories are consistently excluded from both `update` and `export`.
-- `ctx watch` stale count on update: after each debounced `update_tree` call, print a one-line stats summary so users get continuous coverage feedback.
-- `ctx verify` command: check each `CONTEXT.md` frontmatter for all required fields; report manifests with missing or malformed fields.
+- `ctx stats --format json`: add `--format json` flag (aggregate and `--verbose` modes) for machine-readable coverage reports; enables dashboards and CI scripts without parsing table text.
+- `ctx clean --dry-run`: preview which `CONTEXT.md` files would be deleted without removing them; mirrors the `ctx update --dry-run` pattern.
+- `ctx export` respects `.ctxignore`: thread the `pathspec`-based ignore logic through the `rglob` walk so directories excluded from `ctx update` are also excluded from `ctx export`.
+- `ctx watch` stale count on update: after each debounced `update_tree` call, print a one-line stats summary (stale/covered counts) so users get continuous coverage feedback without running a separate command.
+- `ctx verify` command: check each `CONTEXT.md` frontmatter for required fields (`generated`, `generator`, `model`, `content_hash`, `files`, `dirs`, `tokens_total`) and report manifests with missing or malformed fields.
 - `ctx diff --stat`: print a one-line summary count (`N modified, N new, N stale`) rather than the full file list; mirrors `git diff --stat` semantics.
