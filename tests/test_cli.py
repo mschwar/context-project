@@ -574,3 +574,245 @@ def test_stats_no_manifests(tmp_path) -> None:
     assert result.exit_code == 0
     assert "covered: 0" in result.output
     assert "tokens:  0" in result.output
+
+
+# --- 15.1: ctx stats --verbose ---
+
+
+def test_stats_verbose_shows_per_dir_table(tmp_path) -> None:
+    """ctx stats --verbose should show a per-directory breakdown table."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+
+    # dir1 with a manifest
+    dir1 = root / "alpha"
+    dir1.mkdir()
+    (dir1 / "CONTEXT.md").write_text(
+        "---\ntokens_total: 100\n---\n# Alpha\n", encoding="utf-8"
+    )
+
+    # dir2 with a manifest
+    dir2 = root / "beta"
+    dir2.mkdir()
+    (dir2 / "CONTEXT.md").write_text(
+        "---\ntokens_total: 200\n---\n# Beta\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(cli_module.cli, ["stats", "--verbose", str(root)])
+
+    assert result.exit_code == 0
+    assert "Directory" in result.output
+    assert "status" in result.output
+    assert "tokens" in result.output
+    assert "alpha" in result.output
+    assert "beta" in result.output
+    assert "covered" in result.output
+
+
+# --- 15.2: ctx export --filter ---
+
+
+def test_export_filter_all_default(tmp_path) -> None:
+    """ctx export --filter all (default) should export all CONTEXT.md files."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "CONTEXT.md").write_text("root content", encoding="utf-8")
+    sub = root / "sub"
+    sub.mkdir()
+    (sub / "CONTEXT.md").write_text("sub content", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["export", "--filter", "all", str(root)])
+
+    assert result.exit_code == 0
+    assert "root content" in result.output
+    assert "sub content" in result.output
+
+
+def test_export_filter_stale(tmp_path) -> None:
+    """ctx export --filter stale should only export manifests older than a source file."""
+    import os
+    import time
+
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+
+    # fresh dir — manifest is newer than source file
+    fresh_dir = root / "fresh"
+    fresh_dir.mkdir()
+    (fresh_dir / "main.py").write_text("x = 1", encoding="utf-8")
+    fresh_manifest = fresh_dir / "CONTEXT.md"
+    fresh_manifest.write_text("fresh content", encoding="utf-8")
+    # Make source file older than manifest
+    os.utime(str(fresh_dir / "main.py"), (time.time() - 20, time.time() - 20))
+    os.utime(str(fresh_manifest), (time.time(), time.time()))
+
+    # stale dir — manifest is older than source file
+    stale_dir = root / "stale"
+    stale_dir.mkdir()
+    (stale_dir / "main.py").write_text("y = 2", encoding="utf-8")
+    stale_manifest = stale_dir / "CONTEXT.md"
+    stale_manifest.write_text("stale content", encoding="utf-8")
+    # Make manifest older than source file
+    os.utime(str(stale_manifest), (time.time() - 20, time.time() - 20))
+    os.utime(str(stale_dir / "main.py"), (time.time(), time.time()))
+
+    result = runner.invoke(cli_module.cli, ["export", "--filter", "stale", str(root)])
+
+    assert result.exit_code == 0
+    assert "stale content" in result.output
+    assert "fresh content" not in result.output
+
+
+# --- 15.3: ctx diff --quiet ---
+
+
+def test_diff_quiet_exits_0_when_clean(tmp_path, monkeypatch) -> None:
+    """ctx diff --quiet should exit 0 and produce no output when no changes."""
+    import subprocess
+
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    def fake_run(cmd, **kwargs):
+        class R:
+            stdout = ""
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", "--quiet", str(root)])
+
+    assert result.exit_code == 0
+    assert result.output == ""
+
+
+def test_diff_quiet_exits_1_when_changes(tmp_path, monkeypatch) -> None:
+    """ctx diff --quiet should exit 1 when changes are detected."""
+    import subprocess
+
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    call_count = 0
+
+    def fake_run(cmd, **kwargs):
+        nonlocal call_count
+        call_count += 1
+
+        class R:
+            returncode = 0
+
+        r = R()
+        if call_count == 1:
+            r.stdout = "src/CONTEXT.md\n"
+        else:
+            r.stdout = ""
+        return r
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", "--quiet", str(root)])
+
+    assert result.exit_code == 1
+    assert result.output == ""
+
+
+# --- 15.5: ctx clean ---
+
+
+def test_clean_removes_manifests_with_yes_flag(tmp_path) -> None:
+    """ctx clean --yes should remove all CONTEXT.md files without prompting."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "CONTEXT.md").write_text("root", encoding="utf-8")
+    sub = root / "sub"
+    sub.mkdir()
+    (sub / "CONTEXT.md").write_text("sub", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["clean", "--yes", str(root)])
+
+    assert result.exit_code == 0
+    assert "Removed 2 CONTEXT.md file(s)." in result.output
+    assert not list(root.rglob("CONTEXT.md"))
+
+
+def test_clean_aborts_without_confirmation(tmp_path) -> None:
+    """ctx clean should abort when user answers 'n' to the confirmation prompt."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "CONTEXT.md").write_text("root", encoding="utf-8")
+
+    # Provide 'n' as the user input
+    result = runner.invoke(cli_module.cli, ["clean", str(root)], input="n\n")
+
+    assert result.exit_code == 0
+    assert "Aborted" in result.output
+    # File should still exist
+    assert (root / "CONTEXT.md").exists()
+
+
+# --- 15.6: ctx export --depth ---
+
+
+def test_export_depth_0_only_root(tmp_path) -> None:
+    """ctx export --depth 0 should only include root CONTEXT.md."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "CONTEXT.md").write_text("root content", encoding="utf-8")
+    sub = root / "sub"
+    sub.mkdir()
+    (sub / "CONTEXT.md").write_text("sub content", encoding="utf-8")
+    deep = sub / "deep"
+    deep.mkdir()
+    (deep / "CONTEXT.md").write_text("deep content", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["export", "--depth", "0", str(root)])
+
+    assert result.exit_code == 0
+    assert "root content" in result.output
+    assert "sub content" not in result.output
+    assert "deep content" not in result.output
+
+
+def test_export_depth_1_includes_one_level(tmp_path) -> None:
+    """ctx export --depth 1 should include root and one level deep."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "CONTEXT.md").write_text("root content", encoding="utf-8")
+    sub = root / "sub"
+    sub.mkdir()
+    (sub / "CONTEXT.md").write_text("sub content", encoding="utf-8")
+    deep = sub / "deep"
+    deep.mkdir()
+    (deep / "CONTEXT.md").write_text("deep content", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["export", "--depth", "1", str(root)])
+
+    assert result.exit_code == 0
+    assert "root content" in result.output
+    assert "sub content" in result.output
+    assert "deep content" not in result.output

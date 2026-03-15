@@ -104,7 +104,7 @@ end
 def test_empty_file_returns_empty(tmp_path: Path) -> None:
     src = _write(tmp_path, "empty.ex", "")
     result = parse_elixir_file(src)
-    assert result == {"functions": [], "modules": [], "structs": []}
+    assert result == {"functions": [], "modules": [], "structs": [], "types": [], "specs": [], "callbacks": []}
 
 
 # ---------------------------------------------------------------------------
@@ -129,3 +129,56 @@ end
     assert "WithStruct" in result["structs"]
     assert "greet" in result["functions"]
     assert "make" in result["functions"]
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — @type annotations are extracted
+# ---------------------------------------------------------------------------
+
+def test_type_annotations_extracted(tmp_path: Path) -> None:
+    src = _write(tmp_path, "types.ex", """\
+defmodule MyTypes do
+  @type name :: String.t()
+  @type age :: non_neg_integer()
+  @type user :: %{name: name(), age: age()}
+end
+""")
+    result = parse_elixir_file(src)
+    assert "name" in result["types"]
+    assert "age" in result["types"]
+    assert "user" in result["types"]
+
+
+# ---------------------------------------------------------------------------
+# Test 8 — @spec annotations are extracted
+# ---------------------------------------------------------------------------
+
+def test_spec_annotations_extracted(tmp_path: Path) -> None:
+    src = _write(tmp_path, "specs.ex", """\
+defmodule MyModule do
+  @spec add(integer(), integer()) :: integer()
+  def add(a, b), do: a + b
+
+  @spec greet(String.t()) :: String.t()
+  def greet(name), do: "Hello, " <> name
+end
+""")
+    result = parse_elixir_file(src)
+    assert "add" in result["specs"]
+    assert "greet" in result["specs"]
+
+
+# ---------------------------------------------------------------------------
+# Test 9 — @callback annotations are extracted
+# ---------------------------------------------------------------------------
+
+def test_callback_annotations_extracted(tmp_path: Path) -> None:
+    src = _write(tmp_path, "behaviour.ex", """\
+defmodule MyBehaviour do
+  @callback init(term()) :: {:ok, term()} | {:error, term()}
+  @callback handle_call(term(), term(), term()) :: {:reply, term(), term()}
+end
+""")
+    result = parse_elixir_file(src)
+    assert "init" in result["callbacks"]
+    assert "handle_call" in result["callbacks"]
