@@ -280,8 +280,8 @@ See `PHASE16_HANDOFF.md` for the full contract.
 - Gate 16B — Default ignore hygiene. ✓ Completed in the handoff-prep pass.
 - Gate 16C — `ctx clean --dry-run`. ✓
 - Gate 16D — `ctx export` respects `.ctxignore`. ✓
-- Gate 16E — `ctx verify`.
-- Gate 16F — Explicit `ctx serve` root scoping.
+- Gate 16E — `ctx verify`. ✓
+- Gate 16F — Explicit `ctx serve` root scoping. ✓
 - Gate 16G — `ctx stats --format json`.
 - Gate 16H — `ctx diff --stat`.
 - Gate 16I — `ctx watch` coverage line.

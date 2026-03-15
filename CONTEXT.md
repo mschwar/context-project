@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-15T05:51:35Z'
+generated: '2026-03-15T06:40:28Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:d7531ce6321ca7f9413a10f232dc085e648718b5f601f3c286dc4e20128ce7db
+content_hash: sha256:17d0b04374e9820eeed8d7c2f0f5cbadaa9a94d8be473bbea5613399af970d47
 files: 18
 dirs: 7
-tokens_total: 14824
+tokens_total: 14914
 ---
 # C:/Users/Matty/Documents/context-project
 
-A filesystem-native context layer tool (ctx) that enables AI agents to navigate and understand codebases through hierarchical CONTEXT.md manifests.
+A filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
 
 ## Files
 
@@ -21,9 +21,9 @@ A filesystem-native context layer tool (ctx) that enables AI agents to navigate 
 - **AGENTS.md** — Canonical onboarding and workflow contract for agents contributing to ctx.
 - **CONTRIBUTING.md** — Guidelines for contributing to ctx with agentic SDLC principles and test-driven development.
 - **GATE_CLOSEOUT.md** — Defines the mandatory closeout sequence for each project phase, including validation, reflection, suggestion disposition, and founder sign-off.
-- **PHASE16_HANDOFF.md** — Phase 16 execution contract defining gates, tasks, and acceptance criteria for current development.
-- **README.md** — Quick-start guide and command reference for the ctx filesystem-native context layer tool.
-- **RUNBOOK.md** — Operational procedures for running, validating, developing, and releasing ctx.
+- **PHASE16_HANDOFF.md** — Phase 16 execution contract defining gates, scope, tasks, and guardrails for narrower model compatibility.
+- **README.md** — Project overview, quick start guide, command reference, and configuration instructions for the ctx tool.
+- **RUNBOOK.md** — Operational guide covering testing, CLI usage, release publishing, cache management, and development tasks.
 - **architecture.md** — System design overview covering bottom-up generation, content hashing, and component responsibilities.
 - **commitlint.config.mjs** — Configuration file specifying commitlint extends conventional commit rules.
 - **package-lock.json** — Dependency lock file for Node.js packages including commitlint and Husky.
@@ -39,11 +39,11 @@ A filesystem-native context layer tool (ctx) that enables AI agents to navigate 
 - **.github/** — GitHub configuration and automation for the context-project repository.
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
 - **archive/** — Archive of design documents, analyses, and reflections for the ctx project.
-- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer for AI agents.
-- **tests/** — Comprehensive test suite covering CLI, parsers, configuration, Git integration, LLM clients, and core generation engine functionality.
+- **src/** — Source code directory containing the main implementation of the context project.
+- **tests/** — Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM clients, and core generation engine functionality.
 
 ## Notes
 
-- The project uses both Node.js (commitlint, Husky) and Python (pyproject.toml) tooling for development and validation.
-- Phase-based execution contracts (PHASE16_HANDOFF.md, GATE_CLOSEOUT.md) indicate structured agentic development workflow.
-- Pre-commit hooks and manifest freshness checks enforce protocol compliance across the codebase.
+- The project uses both Node.js (commitlint, Husky) and Python (pyproject.toml) tooling.
+- Git hooks and pre-commit validation enforce manifest freshness and conventional commits.
+- Phase-based execution contracts (PHASE16_HANDOFF.md, GATE_CLOSEOUT.md) indicate structured agentic workflow governance.
