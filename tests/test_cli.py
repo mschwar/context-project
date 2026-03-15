@@ -853,3 +853,68 @@ def test_export_depth_1_includes_one_level(tmp_path) -> None:
     assert "root content" in result.output
     assert "sub content" in result.output
     assert "deep content" not in result.output
+
+
+def test_export_respects_ctxignore(tmp_path) -> None:
+    """ctx export should exclude CONTEXT.md files in ignored directories."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "CONTEXT.md").write_text("root content", encoding="utf-8")
+
+    # Create an ignored directory with a CONTEXT.md
+    ignored = root / ".pytest_cache"
+    ignored.mkdir()
+    (ignored / "CONTEXT.md").write_text("ignored content", encoding="utf-8")
+
+    # Create a normal subdirectory with a CONTEXT.md
+    sub = root / "sub"
+    sub.mkdir()
+    (sub / "CONTEXT.md").write_text("sub content", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["export", str(root)])
+
+    assert result.exit_code == 0
+    assert "# CONTEXT.md" in result.output
+    assert "root content" in result.output
+    assert "# sub/CONTEXT.md" in result.output
+    assert "sub content" in result.output
+    # Ignored directory should not appear
+    assert ".pytest_cache" not in result.output
+    assert "ignored content" not in result.output
+
+
+def test_export_respects_custom_ctxignore(tmp_path) -> None:
+    """ctx export should respect custom .ctxignore patterns."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "CONTEXT.md").write_text("root content", encoding="utf-8")
+
+    # Create a custom .ctxignore file
+    (root / ".ctxignore").write_text("build/\n", encoding="utf-8")
+
+    # Create an ignored directory with a CONTEXT.md
+    build = root / "build"
+    build.mkdir()
+    (build / "CONTEXT.md").write_text("build content", encoding="utf-8")
+
+    # Create a normal subdirectory with a CONTEXT.md
+    sub = root / "sub"
+    sub.mkdir()
+    (sub / "CONTEXT.md").write_text("sub content", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["export", str(root)])
+
+    assert result.exit_code == 0
+    assert "# CONTEXT.md" in result.output
+    assert "root content" in result.output
+    assert "# sub/CONTEXT.md" in result.output
+    assert "sub content" in result.output
+    # Ignored directory should not appear
+    assert "build/" not in result.output
+    assert "build content" not in result.output

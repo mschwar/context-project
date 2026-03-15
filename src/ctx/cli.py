@@ -505,8 +505,11 @@ def export(path: str, output: Optional[str], filter_mode: str, depth: Optional[i
 
     Each manifest is prefixed with a header line:
         # path/to/CONTEXT.md
+
+    Respects .ctxignore patterns (same as ctx init/update).
     """
     root = Path(path).resolve()
+    spec = load_ignore_patterns(root)
 
     if filter_mode == "missing":
         missing_dirs = _missing_dir_labels(root)
@@ -519,7 +522,10 @@ def export(path: str, output: Optional[str], filter_mode: str, depth: Optional[i
             click.echo(content, nl=False)
         return
 
-    files = sorted(root.rglob("CONTEXT.md"))
+    all_files = sorted(root.rglob("CONTEXT.md"))
+    # Filter out CONTEXT.md files in ignored directories.
+    # We check the parent directory, not the file itself (since CONTEXT.md is in default ignore).
+    files = [f for f in all_files if not should_ignore(f.parent, spec, root)]
 
     if depth is not None:
         files = [f for f in files if len(f.relative_to(root).parts) - 1 <= depth]

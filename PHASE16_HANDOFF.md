@@ -10,7 +10,7 @@ The March 14, 2026 repo review surfaced four gaps that must be closed in additio
 
 1. Generated manifests previously surfaced low-signal workspace noise such as `.pytest_cache/` and `.worktrees/`. This was closed in the handoff-prep pass.
 2. `ctx serve` relies on process `cwd` instead of an explicit served root.
-3. `ctx export` does not yet respect `.ctxignore`, so export output can drift from generation/update output.
+3. `ctx export` does not yet respect `.ctxignore`, so export output can drift from generation/update output. **Closed in Gate 16D.**
 4. Core docs had drifted from repo truth (provider support, command surface, current roadmap focus).
 
 ## Read Order
@@ -37,10 +37,10 @@ Read these files before starting any Phase 16 gate:
 
 | Gate | Recommended Branch | Primary Outcome |
 |------|--------------------|-----------------|
-| `16A` | `docs/phase16a-handoff` | Docs match repo truth and the handoff contract is published. |
-| `16B` | `feat/phase16b-ignore-hygiene` | Completed in the handoff-prep pass; default ignore rules now skip obvious workspace noise. |
-| `16C` | `feat/phase16c-clean-dry-run` | `ctx clean --dry-run` previews deletions without removing files. |
-| `16D` | `feat/phase16d-export-ignore` | `ctx export` respects `.ctxignore` in every export mode. |
+| `16A` | `docs/phase16a-handoff` | Docs match repo truth and the handoff contract is published. ✓ |
+| `16B` | `feat/phase16b-ignore-hygiene` | Completed in the handoff-prep pass; default ignore rules now skip obvious workspace noise. ✓ |
+| `16C` | `feat/phase16c-clean-dry-run` | `ctx clean --dry-run` previews deletions without removing files. ✓ |
+| `16D` | `feat/phase16d-export-ignore` | `ctx export` respects `.ctxignore` in every export mode. ✓ |
 | `16E` | `feat/phase16e-verify` | `ctx verify` reports malformed or incomplete manifests. |
 | `16F` | `feat/phase16f-serve-root` | `ctx serve` serves an explicit root instead of implicit `cwd`. |
 | `16G` | `feat/phase16g-stats-json` | `ctx stats --format json` emits stable machine-readable output. |
