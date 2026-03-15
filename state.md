@@ -3,11 +3,11 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–12 complete.
+- **Status:** Stable. Phases 1–13 complete.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 213 tests passing across all modules.
+- **Test Coverage:** 225 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
-- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view.
+- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby + PHP + Swift language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` (git + mtime fallback, `--since <ref>`).
 
 ## Completed Milestones
 
@@ -147,14 +147,26 @@ Close all suggestions from the Phase 11 reflection. Expand language coverage and
 
 **Branch:** `feat/phase12-language-depth`
 
-## Phase 13 — Extended Language Support & CLI Polish
+## Phase 13 — Extended Language Support & CLI Polish ✓
 
 Close all suggestions from the Phase 12 reflection.
 
-- [ ] **13.1 PHP parser** — `public function`, `class`, `interface`, `trait`, `enum`. Wired for `.php` files.
-- [ ] **13.2 Swift parser** — `func`, `class`, `struct`, `protocol`, `enum`. Wired for `.swift` files.
-- [ ] **13.3 `ctx diff --since <ref>`** — accept a git ref (branch, commit, tag) to show changes since a specific point, not just since `HEAD`.
-- [ ] **13.4 Non-git fallback for `ctx diff`** — when outside a git repo, compare `CONTEXT.md` mtimes against source file mtimes.
-- [ ] **13.5 `ctx init` idempotency docs** — clarify in README that `ctx init` regenerates unconditionally; promote `ctx init --no-overwrite` for incremental use.
+- [x] **13.1 PHP parser** — `public function`, global functions, `class`, `interface`, `trait`, `enum`. 5 tests.
+- [x] **13.2 Swift parser** — `public`/`open`/`internal` `func`, `class`, `struct`, `protocol`, `enum`. 5 tests.
+- [x] **13.3 `ctx diff --since <ref>`** — custom git ref passed to `git diff`; output labels the ref. 1 test.
+- [x] **13.4 Non-git fallback** — mtime comparison when git unavailable; `[stale]` prefix; warning to stderr. 1 test.
+- [x] **13.5 `ctx init` idempotency docs** — README commands table updated with `--no-overwrite` and `ctx diff`.
 
 **Branch:** `feat/phase13-extended-language-support`
+
+## Phase 14 — CLI Completeness & Elixir
+
+Close all suggestions from the Phase 13 reflection.
+
+- [ ] **14.1 Unified `ctx diff` output format** — consistent `[mod]`/`[new]`/`[stale]` prefix across git and mtime paths.
+- [ ] **14.2 `ctx diff --format json`** — machine-readable JSON output for CI pipelines.
+- [ ] **14.3 `ctx export` command** — concatenate all `CONTEXT.md` files to stdout or a file for one-shot LLM prompts.
+- [ ] **14.4 `ctx stats` command** — coverage summary: total dirs, covered, missing, stale, total tokens from frontmatter.
+- [ ] **14.5 Elixir parser** — `def`/`defp`, `defmodule`, `defstruct`. Wired for `.ex`/`.exs` files.
+
+**Branch:** `feat/phase14-cli-completeness`

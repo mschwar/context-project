@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-15T03:50:22Z'
+generated: '2026-03-15T04:04:23Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:a6440416164a8adb368c67d2c1a0e1f68fe0d578e9423b7129db87f73f9cd27b
+content_hash: sha256:f437731aeb1a275d2ed0d3ee98640edbe17f71e3b054a0b9cb48eb7ab7253d0c
 files: 10
 dirs: 0
-tokens_total: 4599
+tokens_total: 4582
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx/lang_parsers
 
-Language-specific parsers that extract public APIs and definitions from source code files across multiple programming languages.
+Language-specific parsers that extract public APIs and definitions from source files across multiple programming languages.
 
 ## Files
 

@@ -1,11 +1,11 @@
 ---
-generated: '2026-03-15T03:50:44Z'
+generated: '2026-03-15T04:04:41Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:36fb697db540e82b12ac3b8716e1d3b37c0c28d2affc911b6b740570afb6b558
+content_hash: sha256:bc30d7b88e01a570f92382d1b6a71b9267133e79cb42af3fe807f87ba5b32320
 files: 17
 dirs: 9
-tokens_total: 12131
+tokens_total: 12133
 ---
 # C:/Users/Matty/Documents/context-project
 
@@ -39,12 +39,12 @@ A tool that generates CONTEXT.md manifests for project directories to help AI ag
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
 - **.pytest_cache/** — Pytest cache directory storing test execution metadata, results, and configuration to optimize test runs.
 - **.worktrees/** — Git worktrees configuration and management directory for the context-project.
-- **archive/** — Historical documentation and design analysis for the ctx tool, a filesystem-native manifest system enabling hierarchical directory navigation for AI agents.
+- **archive/** — Archive of design documents, analyses, and roadmaps for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
 - **src/** — Source code directory containing the main implementation of the context project.
-- **tests/** — Comprehensive test suite covering CLI, configuration, language parsers, Git integration, LLM clients, and manifest generation for the context project.
+- **tests/** — Comprehensive test suite covering CLI, configuration, language parsers, core generation engine, and integration scenarios.
 
 ## Notes
 
-- This project uses Python (pyproject.toml) and Node.js (package.json) tooling with pre-commit hooks and Husky for automated validation.
-- The AGENTS.md, CONTRIBUTING.md, GATE_CLOSEOUT.md, and rules.md files define the agentic SDLC workflow and governance model.
-- Architecture and operational details are documented in architecture.md and RUNBOOK.md respectively.
+- The project uses Python (pyproject.toml) and Node.js (package.json) tooling with pre-commit hooks and Husky for automation.
+- AGENTS.md, CONTRIBUTING.md, GATE_CLOSEOUT.md, and rules.md define the agentic SDLC workflow and governance model.
+- state.md tracks development progress; architecture.md documents system design; RUNBOOK.md provides operational guidance.
