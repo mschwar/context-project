@@ -726,9 +726,9 @@ def test_stats_format_json_values_match_text(tmp_path) -> None:
     
     # Parse text output to verify values match
     text_lines = text_result.output.splitlines()
-    text_dirs = int([l for l in text_lines if l.startswith("dirs:")][0].split(":")[1].strip())
-    text_covered = int([l for l in text_lines if l.startswith("covered:")][0].split(":")[1].strip())
-    text_tokens = int([l for l in text_lines if l.startswith("tokens:")][0].split(":")[1].strip())
+    text_dirs = int(next(l for l in text_lines if l.startswith("dirs:")).split(":")[1].strip())
+    text_covered = int(next(l for l in text_lines if l.startswith("covered:")).split(":")[1].strip())
+    text_tokens = int(next(l for l in text_lines if l.startswith("tokens:")).split(":")[1].strip())
     
     assert agg["dirs"] == text_dirs
     assert agg["covered"] == text_covered
