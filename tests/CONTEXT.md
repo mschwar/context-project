@@ -1,24 +1,24 @@
 ---
-generated: '2026-03-15T04:13:39Z'
+generated: '2026-03-15T04:39:14Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:46e62362d6a2805c5ed908806ccb311c5ebea2aeba0002781611316e3c1d6ba4
+content_hash: sha256:d07fdea083ad3b6d7d315dc7f8c97aa72b2258f1f7e9d3c1551f3b10ed00226a
 files: 29
 dirs: 1
-tokens_total: 23542
+tokens_total: 23936
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Test suite for the context-project, covering CLI operations, language parsers, configuration, Git integration, LLM clients, and manifest generation.
+Test suite covering CLI commands, configuration, language parsers, core generation engine, Git integration, hashing, ignore patterns, LLM client, manifest handling, and server endpoints.
 
 ## Files
 
 - **__init__.py** — Package initialization file for tests directory.
 - **conftest.py** — Pytest fixtures providing workspace-local temporary directories for tests.
-- **test_cli.py** — Tests for CLI command wiring, dependency injection, and output formatting across init, update, status, version, and diff operations.
+- **test_cli.py** — Tests for CLI command wiring, dependency injection, and output formatting across init, update, status, version, and utility commands.
 - **test_config.py** — Tests for configuration loading from files, environment variables, and CLI arguments.
 - **test_csharp_parser.py** — Tests C# parser extraction of public classes, interfaces, enums, structs, records, methods, and properties.
-- **test_elixir_parser.py** — Tests for Elixir file parser extracting module names, public functions, and struct definitions from source code.
+- **test_elixir_parser.py** — Tests for Elixir file parser extracting modules, functions, structs, type annotations, specs, and callbacks.
 - **test_generator.py** — Tests for core generation engine including tree creation, updates, and status checking.
 - **test_git.py** — Tests for Git integration to detect changed files in repositories.
 - **test_go_parser.py** — Tests for Go language parser extracting functions, types, constants, and variables.
@@ -49,6 +49,6 @@ Test suite for the context-project, covering CLI operations, language parsers, c
 
 ## Notes
 
-- Parser tests are organized by language (Python, Go, Java, C#, JavaScript/TypeScript, Kotlin, PHP, Ruby, Rust, Swift, Elixir).
-- Core functionality tests cover CLI, configuration, generation engine, Git integration, hashing, ignore patterns, and LLM clients.
-- Integration tests use fixture projects and fake LLM clients for end-to-end validation.
+- Tests are organized by functional area: parsers for each language, core features (generator, config, git, hashing), CLI/server interfaces, and integration tests.
+- Language parser tests follow a consistent pattern across multiple supported languages (Python, Go, Rust, Java, C#, JavaScript/TypeScript, PHP, Ruby, Kotlin, Swift, Elixir).
+- Integration tests use the fixtures directory for end-to-end validation.

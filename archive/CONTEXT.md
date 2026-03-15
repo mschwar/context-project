@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-15T04:13:33Z'
+generated: '2026-03-15T04:39:08Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:0579f058d615f211a432775886278e47368a1f29184fe69d30fcf26b8e92d1f4
+content_hash: sha256:9da93cd6b673cb4a1dd49739470b6113cce0169a4103db14dec5ec0cbb22e205
 files: 6
 dirs: 1
 tokens_total: 6967
@@ -22,9 +22,9 @@ Archive of design documents, analyses, and reflections for the ctx project—a f
 
 ## Subdirectories
 
-- **reflections/** — A collection of phase-by-phase project reflections documenting development progress, achievements, friction points, and recommendations across the context-project lifecycle.
+- **reflections/** — A collection of phase-by-phase project reflections documenting the evolution, achievements, and recommendations for the context-project from Phase 4 through Phase 15.
 
 ## Notes
 
-- This directory contains historical design iterations and AI model analyses that informed the final ctx architecture.
-- Documents progress from initial concept through multiple refinement cycles with different AI models.
+- This directory preserves early-stage design iterations and AI model analyses that informed the final ctx architecture.
+- Documents progress from initial concept through multiple refinement cycles with different AI models (GPT, Grok, Opus).
