@@ -455,17 +455,15 @@ def export(path: str, output: Optional[str]) -> None:
     root = Path(path).resolve()
     files = sorted(root.rglob("CONTEXT.md"))
 
-    lines = []
+    parts = []
     for f in files:
         try:
             rel = f.relative_to(root).as_posix()
         except ValueError:
             rel = f.as_posix()
-        lines.append(f"# {rel}\n\n")
-        lines.append(f.read_text(encoding="utf-8"))
-        lines.append("\n\n")
+        parts.append(f"# {rel}\n\n{f.read_text(encoding='utf-8')}")
 
-    content = "".join(lines)
+    content = "\n\n".join(parts)
 
     if output:
         Path(output).write_text(content, encoding="utf-8")
