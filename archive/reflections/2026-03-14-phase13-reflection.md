@@ -34,7 +34,7 @@
 *(None — all Phase 13 items from the Phase 12 reflection were addressed.)*
 
 ### New suggestions
-1. **Unified `ctx diff` output format** — use consistent prefixes across git and mtime paths (e.g., `[changed]` / `[new]` / `[stale]` → always one of `mod`, `new`, `stale`). Currently `[mod]`/`[new]` (git) vs. `[stale]` (mtime) are inconsistent.
+1. **Unified `ctx diff` output format** — use consistent prefixes across git and mtime paths (e.g., always use one of `[mod]`, `[new]`, `[stale]`). Currently `[mod]`/`[new]` (git) vs. `[stale]` (mtime) are inconsistent.
 2. **`ctx diff --format json`** — machine-readable output for CI pipelines and scripting.
 3. **`ctx export` command** — concatenate all `CONTEXT.md` files into a single output (stdout or file) for feeding into a one-shot LLM prompt. Common pattern in practice.
 4. **`ctx stats` command** — summary of manifest coverage: total dirs, covered, missing, stale, total tokens across all manifests (read from frontmatter).
