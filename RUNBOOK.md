@@ -80,6 +80,14 @@ ctx serve [PATH]
 
 Serves manifests from the specified PATH (default: current directory). All manifest paths are resolved relative to this root.
 
+### Watch for changes
+Watch for file changes and auto-regenerate manifests.
+```bash
+ctx watch /path/to/project
+```
+
+After each regeneration, prints a coverage summary line showing covered/stale directory counts and total tokens.
+
 ## Publishing a Release
 
 The publish workflow (`.github/workflows/publish.yml`) triggers on any `v*` tag and publishes to PyPI via OIDC trusted publishing.

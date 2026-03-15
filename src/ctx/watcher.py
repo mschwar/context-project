@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -32,6 +32,57 @@ def _should_process_event(event: FileSystemEvent, root: Path, spec: object) -> b
     if should_ignore(path, spec, root):
         return False
     return True
+
+
+def _print_coverage_summary(root: Path, spec: object) -> None:
+    """Print a one-line coverage summary after a watch refresh."""
+    import os
+    import re as _re
+
+    dirs_total = 0
+    dirs_covered = 0
+    dirs_stale = 0
+    tokens_total = 0
+
+    _tokens_re = _re.compile(r"^tokens_total:\s*(\d+)", _re.MULTILINE)
+
+    for dirpath, dirnames, _ in os.walk(root):
+        d = Path(dirpath)
+        # Prune ignored subdirectories in-place
+        dirnames[:] = [
+            dn for dn in sorted(dirnames)
+            if not should_ignore(d / dn, spec, root)
+        ]
+
+        dirs_total += 1
+        manifest = d / "CONTEXT.md"
+
+        if not manifest.exists():
+            continue
+
+        dirs_covered += 1
+        try:
+            text = manifest.read_text(encoding="utf-8")
+            m = _tokens_re.search(text)
+            if m:
+                tokens_total += int(m.group(1))
+        except (OSError, UnicodeDecodeError):
+            pass
+
+        # Check if stale using mtime comparison
+        try:
+            manifest_mtime = manifest.stat().st_mtime
+            is_stale_dir = any(
+                f.stat().st_mtime > manifest_mtime
+                for f in d.iterdir()
+                if f.is_file() and f.name != "CONTEXT.md"
+            )
+            if is_stale_dir:
+                dirs_stale += 1
+        except OSError:
+            pass
+
+    print(f"  coverage: {dirs_covered}/{dirs_total} dirs covered, {dirs_stale} stale, {tokens_total:,} tokens")
 
 
 class _DebounceHandler(FileSystemEventHandler):
@@ -126,6 +177,7 @@ def run_watch(
         if stats.errors:
             for err in stats.errors:
                 echo(f"  error: {err}")
+        _print_coverage_summary(root, spec)
 
     handler = _DebounceHandler(root, spec, on_change, debounce_seconds=config.watch_debounce_seconds)
     observer = Observer()
