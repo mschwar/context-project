@@ -39,9 +39,11 @@ tmp/
 tmp*/
 temp/
 *.tmp
+*.tmp.*
 *.temp
 *.bak
 *.swx
+*.pyc.*
 
 # OS junk
 .DS_Store

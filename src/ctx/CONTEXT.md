@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-15T07:18:00Z'
+generated: '2026-03-15T08:03:00Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:6a83ee7612fb24bb0ce2e6e6bc175828710ee38f6c27315dcd360a3ffcdf9ac6
+content_hash: sha256:34e09c5d50a5f2439a375186f7a92e706ede1e7e446fab2697ab1d13d69cddfd
 files: 14
 dirs: 1
 tokens_total: 12764
@@ -13,7 +13,7 @@ Core module providing filesystem-native context generation for AI agents through
 
 ## Files
 
-- **.ctxignore.default** — Default ignore patterns for ctx, excluding version control, dependencies, editor state, workspace caches, and temporary artifacts.
+- **.ctxignore.default** — Default ignore patterns for ctx, excluding version control, dependencies, editor state, workspace caches, temporary artifacts, and transient editor byproducts.
 - **__init__.py** — Package initialization defining ctx as a filesystem-native context layer for AI agents.
 - **__main__.py** — Entry point for running ctx as a Python module via `python -m ctx`.
 - **cli.py** — Click CLI entry point providing commands to generate, update, and manage CONTEXT.md filesystem manifests.

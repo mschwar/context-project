@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-15T07:18:00Z'
+generated: '2026-03-15T08:03:00Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:cbcbc6249c63572546a22a579d466f7835015a9385e96b1fbe34bd19cd656af2
+content_hash: sha256:3be453aeb8a327739de98a9ce7560e1597eeac7c43da86c1b70ec7a94ed5b7ae
 files: 29
 dirs: 1
 tokens_total: 23936
@@ -23,7 +23,7 @@ Test suite covering CLI commands, configuration, language parsers, core generati
 - **test_git.py** — Tests for Git integration to detect changed files in repositories.
 - **test_go_parser.py** — Tests for Go language parser extracting functions, types, constants, and variables.
 - **test_hasher.py** — Tests for file and directory content hashing with ignore pattern support.
-- **test_ignore.py** — Tests for ignore pattern loading and merging with path matching logic.
+- **test_ignore.py** — Tests for ignore pattern loading and merging with path matching logic, including workspace-noise and temp artifact defaults.
 - **test_integration.py** — End-to-end CLI tests on sample fixture project with fake LLM client.
 - **test_java_parser.py** — Tests Java parser extraction of public classes, interfaces, enums, records, and methods with modifiers.
 - **test_js_ts_parser.py** — Tests for JavaScript/TypeScript parser extracting exports and language constructs.

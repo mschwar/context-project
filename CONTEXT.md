@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-15T07:18:00Z'
+generated: '2026-03-15T08:03:00Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:5a1b3a4f43909037f9f868331206eb4bb63ccf17e3400e77a2493f10b17975d5
+content_hash: sha256:925c3e8abf50ce6e1c8ebf979110b1f682634e386a2297da4c9ab34c54f27780
 files: 18
 dirs: 7
 tokens_total: 14579
@@ -13,9 +13,9 @@ A filesystem-native context tool that generates hierarchical CONTEXT.md manifest
 
 ## Files
 
-- **.ctxignore.default** — Default ignore patterns for ctx, excluding version control, dependencies, editor state, workspace caches, and temporary artifacts.
+- **.ctxignore.default** — Default ignore patterns for ctx, excluding version control, dependencies, editor state, workspace caches, temporary artifacts, and transient editor byproducts.
 - **.gitattributes** — Configures Git to auto-detect text files and normalize line endings to LF.
-- **.gitignore** — Specifies files and directories to exclude from version control, including Python artifacts and IDE caches.
+- **.gitignore** — Specifies files and directories to exclude from version control, including Python artifacts, editor state, workspace caches, and transient temp files.
 - **.pre-commit-hooks.yaml** — Pre-commit hook configuration that checks if ctx manifests are fresh before commits.
 - **=4.0** — Empty or malformed file with no discernible purpose.
 - **AGENTS.md** — Canonical onboarding and workflow contract defining mission, rules, Phase 16 gate order, and SDLC guardrails for agents contributing to ctx.
@@ -48,4 +48,4 @@ A filesystem-native context tool that generates hierarchical CONTEXT.md manifest
 - Git hooks and pre-commit validation ensure manifest freshness and conventional commit compliance.
 - The archive directory preserves design history and rationale for the manifest system.
 - Phase 16 now has an explicit handoff document that scopes one gate per branch and adds tighter guardrails for narrower models.
-- Default ignore rules now skip workspace-noise directories such as `.pytest_cache/`, `.worktrees/`, and `.tmp/`.
+- Default ignore rules now skip workspace-noise directories such as `.pytest_cache/`, `.worktrees/`, and `.tmp/`, plus transient `*.tmp.*` and `*.pyc.*` artifacts.
