@@ -49,6 +49,13 @@ See how many manifests are stale or missing.
 ctx status /path/to/project
 ```
 
+### Verify manifests
+Check CONTEXT.md frontmatter for required fields (generated, generator, model, content_hash, files, dirs, tokens_total).
+```bash
+ctx verify /path/to/project
+```
+Exit code 0 if all valid, exit code 1 if any invalid.
+
 ### Serve manifests
 Serve manifests over HTTP.
 ```bash

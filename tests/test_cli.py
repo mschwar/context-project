@@ -918,3 +918,225 @@ def test_export_respects_custom_ctxignore(tmp_path) -> None:
     # Ignored directory should not appear
     assert "build/" not in result.output
     assert "build content" not in result.output
+
+
+# --- 16E: ctx verify ---
+
+
+def test_verify_all_valid_manifests(tmp_path) -> None:
+    """ctx verify should exit 0 when all manifests are valid."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "CONTEXT.md").write_text(
+        """---
+generated: 2026-03-15T00:00:00Z
+generator: ctx/0.8.0
+model: claude-haiku-4-5-20251001
+content_hash: sha256:abc123
+files: 1
+dirs: 0
+tokens_total: 100
+---
+# Root manifest
+""",
+        encoding="utf-8",
+    )
+
+    sub = root / "sub"
+    sub.mkdir()
+    (sub / "CONTEXT.md").write_text(
+        """---
+generated: 2026-03-15T00:00:00Z
+generator: ctx/0.8.0
+model: claude-haiku-4-5-20251001
+content_hash: sha256:def456
+files: 2
+dirs: 0
+tokens_total: 200
+---
+# Sub manifest
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli_module.cli, ["verify", str(root)])
+
+    assert result.exit_code == 0
+    assert "All manifests are valid." in result.output
+
+
+def test_verify_missing_fields(tmp_path) -> None:
+    """ctx verify should report missing required fields."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    # Missing 'model' and 'content_hash'
+    (root / "CONTEXT.md").write_text(
+        """---
+generated: 2026-03-15T00:00:00Z
+generator: ctx/0.8.0
+files: 1
+dirs: 0
+tokens_total: 100
+---
+# Root manifest
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli_module.cli, ["verify", str(root)])
+
+    assert result.exit_code == 1
+    assert "Missing required fields:" in result.output
+    assert "model, content_hash" in result.output or "content_hash, model" in result.output
+
+
+def test_verify_malformed_frontmatter(tmp_path) -> None:
+    """ctx verify should report malformed frontmatter separately."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    # Missing closing ---
+    (root / "CONTEXT.md").write_text(
+        """---
+generated: 2026-03-15T00:00:00Z
+generator: ctx/0.8.0
+model: claude-haiku-4-5-20251001
+content_hash: sha256:abc123
+files: 1
+dirs: 0
+tokens_total: 100
+# No closing ---
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli_module.cli, ["verify", str(root)])
+
+    assert result.exit_code == 1
+    assert "Malformed frontmatter:" in result.output
+
+
+def test_verify_mixed_valid_and_invalid(tmp_path) -> None:
+    """ctx verify should report both malformed and missing fields."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+
+    # Valid manifest
+    (root / "CONTEXT.md").write_text(
+        """---
+generated: 2026-03-15T00:00:00Z
+generator: ctx/0.8.0
+model: claude-haiku-4-5-20251001
+content_hash: sha256:abc123
+files: 1
+dirs: 0
+tokens_total: 100
+---
+# Root manifest
+""",
+        encoding="utf-8",
+    )
+
+    # Malformed (no closing ---)
+    malformed = root / "malformed"
+    malformed.mkdir()
+    (malformed / "CONTEXT.md").write_text(
+        """---
+generated: 2026-03-15T00:00:00Z
+generator: ctx/0.8.0
+model: claude-haiku-4-5-20251001
+content_hash: sha256:def456
+files: 1
+dirs: 0
+tokens_total: 100
+# No closing ---
+""",
+        encoding="utf-8",
+    )
+
+    # Missing fields
+    missing = root / "missing"
+    missing.mkdir()
+    (missing / "CONTEXT.md").write_text(
+        """---
+generated: 2026-03-15T00:00:00Z
+generator: ctx/0.8.0
+files: 1
+---
+# Missing model, content_hash, dirs, tokens_total
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli_module.cli, ["verify", str(root)])
+
+    assert result.exit_code == 1
+    assert "Malformed frontmatter:" in result.output
+    assert "Missing required fields:" in result.output
+    assert "Found 2 invalid manifest(s)." in result.output
+
+
+def test_verify_respects_ctxignore(tmp_path) -> None:
+    """ctx verify should skip manifests in ignored directories."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+
+    # Valid manifest at root
+    (root / "CONTEXT.md").write_text(
+        """---
+generated: 2026-03-15T00:00:00Z
+generator: ctx/0.8.0
+model: claude-haiku-4-5-20251001
+content_hash: sha256:abc123
+files: 1
+dirs: 0
+tokens_total: 100
+---
+# Root manifest
+""",
+        encoding="utf-8",
+    )
+
+    # Invalid manifest in ignored directory
+    ignored = root / ".pytest_cache"
+    ignored.mkdir()
+    (ignored / "CONTEXT.md").write_text(
+        """---
+# Missing all required fields
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli_module.cli, ["verify", str(root)])
+
+    assert result.exit_code == 0
+    assert "All manifests are valid." in result.output
+
+
+def test_verify_no_manifests(tmp_path) -> None:
+    """ctx verify should report all valid when no manifests exist."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "some_file.txt").write_text("hello", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["verify", str(root)])
+
+    assert result.exit_code == 0
+    assert "All manifests are valid." in result.output
