@@ -4,9 +4,9 @@ from typing import Dict, List
 
 
 # public [static|abstract|final] function name(
+# Matches public/global functions, excluding private/protected methods.
 _PUBLIC_FUNCTION = re.compile(
-    r"^[ \t]*(?:(?:abstract|final|static)\s+)*public\s+(?:(?:abstract|final|static)\s+)*"
-    r"function\s+(\w+)\s*\(",
+    r"^[ \t]*(?:(?:abstract|final|static)\s+)*(?!private|protected)\s*function\s+(\w+)\s*\(",
     re.MULTILINE,
 )
 # class Foo [extends|implements ...]
