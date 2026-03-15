@@ -689,6 +689,100 @@ def clean(path: str, yes: bool, dry_run: bool) -> None:
 
 
 @cli.command()
+@click.argument("path", default=".", type=click.Path(exists=True))
+def verify(path: str) -> None:
+    """Check CONTEXT.md frontmatter for required fields.
+
+    Required fields:
+      - generated
+      - generator
+      - model
+      - content_hash
+      - files
+      - dirs
+      - tokens_total
+
+    Output:
+      - One line per invalid manifest
+      - Malformed frontmatter reported separately from missing fields
+      - Exit 0 if all valid, exit 1 if any invalid
+    """
+    import sys
+
+    from ctx.manifest import read_manifest
+
+    root = Path(path).resolve()
+    spec = load_ignore_patterns(root)
+
+    required_fields = [
+        "generated",
+        "generator",
+        "model",
+        "content_hash",
+        "files",
+        "dirs",
+        "tokens_total",
+    ]
+
+    invalid_manifests: list[tuple[str, list[str]]] = []
+    malformed_manifests: list[str] = []
+
+    for dirpath, dirnames, _ in os.walk(root):
+        d = Path(dirpath)
+
+        # Prune ignored subdirectories in-place
+        dirnames[:] = [
+            dn for dn in sorted(dirnames)
+            if not should_ignore(d / dn, spec, root)
+        ]
+
+        manifest_path = d / "CONTEXT.md"
+        if not manifest_path.exists():
+            continue
+
+        try:
+            rel = d.relative_to(root).as_posix()
+        except ValueError:
+            rel = d.as_posix()
+
+        try:
+            manifest = read_manifest(d)
+        except (ValueError, OSError, UnicodeDecodeError):
+            malformed_manifests.append(rel)
+            continue
+
+        missing_fields = []
+        for field in required_fields:
+            value = getattr(manifest.frontmatter, field, None)
+            if value is None or value == "":
+                missing_fields.append(field)
+
+        if missing_fields:
+            invalid_manifests.append((rel, missing_fields))
+
+    # Report malformed first
+    if malformed_manifests:
+        click.echo("Malformed frontmatter:")
+        for rel in sorted(malformed_manifests):
+            click.echo(f"  {rel}")
+
+    # Report missing fields
+    if invalid_manifests:
+        click.echo("Missing required fields:")
+        for rel, fields in sorted(invalid_manifests):
+            field_list = ", ".join(fields)
+            click.echo(f"  {rel}: {field_list}")
+
+    total_issues = len(malformed_manifests) + len(invalid_manifests)
+    if total_issues == 0:
+        click.echo("All manifests are valid.")
+        sys.exit(0)
+    else:
+        click.echo(f"\nFound {total_issues} invalid manifest(s).")
+        sys.exit(1)
+
+
+@cli.command()
 @click.option("--host", default="127.0.0.1", help="Host address for the server.")
 @click.option("--port", type=int, default=8000, help="Port for the server.")
 def serve(host: str, port: int) -> None:

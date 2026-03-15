@@ -34,6 +34,7 @@ That's it. Every directory now has a `CONTEXT.md` that summarises its contents f
 | `ctx diff .` | Show which CONTEXT.md files changed since last commit |
 | `ctx export .` | Concatenate manifests (respects `.ctxignore`) |
 | `ctx stats .` | Show coverage totals across the tree |
+| `ctx verify .` | Check manifest frontmatter for required fields |
 | `ctx clean . --yes` | Remove all manifests under a tree |
 | `ctx clean . --dry-run` | Preview which manifests would be deleted |
 | `ctx watch .` | Auto-regenerate on file save |
