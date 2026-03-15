@@ -7,13 +7,15 @@ def test_functions(tmp_path):
 public func greet(name: String) -> String { return "Hi" }
 func internalHelper() {}
 private func secretHelper() {}
+fileprivate func alsoSecret() {}
 """
     f = tmp_path / "helpers.swift"
     f.write_text(src, encoding="utf-8")
     result = parse_swift_file(f)
     assert "greet" in result["functions"]
     assert "internalHelper" in result["functions"]
-    assert "secretHelper" in result["functions"]
+    assert "secretHelper" not in result["functions"]
+    assert "alsoSecret" not in result["functions"]
 
 
 def test_classes_and_structs(tmp_path):

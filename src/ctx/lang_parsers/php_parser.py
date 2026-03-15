@@ -3,9 +3,11 @@ from pathlib import Path
 from typing import Dict, List
 
 
-# public [static|abstract|final] function name(
+# Matches public class methods and global/free functions (implicitly public).
+# Global functions: `function name(` at any indent with no visibility keyword.
+# Class methods: `public [static|abstract|final] function name(`.
 _PUBLIC_FUNCTION = re.compile(
-    r"^[ \t]*(?:(?:abstract|final|static)\s+)*public\s+(?:(?:abstract|final|static)\s+)*"
+    r"^[ \t]*(?:(?:(?:abstract|final|static)\s+)*public\s+(?:(?:abstract|final|static)\s+)*|)"
     r"function\s+(\w+)\s*\(",
     re.MULTILINE,
 )

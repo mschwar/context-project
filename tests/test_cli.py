@@ -399,5 +399,5 @@ def test_diff_mtime_fallback(tmp_path, monkeypatch) -> None:
     result = runner.invoke(cli_module.cli, ["diff", str(project)])
 
     assert result.exit_code == 0
-    assert "stale" in result.output
     assert "[stale]" in result.output
+    assert "git not available" in result.output

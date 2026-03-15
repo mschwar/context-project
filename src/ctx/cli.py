@@ -396,6 +396,7 @@ def diff(path: str, since: Optional[str]) -> None:
             raise click.UsageError("--since requires git to be available and the path to be inside a git repository.")
 
     # --- mtime fallback (non-git repos) ---
+    click.echo("Warning: git not available. Falling back to mtime comparison.", err=True)
     stale: list[str] = []
     for manifest in sorted(target_path.rglob("CONTEXT.md")):
         try:

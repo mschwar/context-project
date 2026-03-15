@@ -5,6 +5,8 @@ from ctx.lang_parsers.php_parser import parse_php_file
 def test_public_functions(tmp_path):
     src = """\
 <?php
+function globalHelper(string $x): string { return $x; }
+
 class Service {
     public function doWork(): void {}
     public static function create(): self { return new self(); }
@@ -15,6 +17,7 @@ class Service {
     f = tmp_path / "Service.php"
     f.write_text(src, encoding="utf-8")
     result = parse_php_file(f)
+    assert "globalHelper" in result["functions"]
     assert "doWork" in result["functions"]
     assert "create" in result["functions"]
     assert "hidden" not in result["functions"]
