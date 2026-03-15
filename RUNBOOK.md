@@ -133,6 +133,17 @@ Phase 16 work is intentionally split into small gates for narrower models.
 **Symptom**: A local workspace cache such as `.pytest_cache/` causes `PermissionError` during traversal.
 **Fix**: Current default ignores skip `.pytest_cache/`, `.worktrees/`, and `.tmp/`. If a custom cache directory is still surfacing, add it to `.ctxignore`.
 
+### `ctx update .` reports provider connection errors even though `ctx setup --check` detects a provider
+**Symptom**: `ctx setup --check` detects Anthropic or OpenAI, but `ctx init` / `ctx update` still fails with connection errors.
+**Fix**: Check shell proxy env vars first. A broken `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` can break real provider calls while setup detection still looks healthy. In PowerShell, retry with:
+```powershell
+$env:HTTP_PROXY=''
+$env:HTTPS_PROXY=''
+$env:ALL_PROXY=''
+$env:NO_PROXY='*'
+python -m ctx update .
+```
+
 ### Local Provider Still Hits Context Limits
 **Symptom**: A local OpenAI-compatible provider still returns HTTP 400 on a large directory.
 **Fix**: `ctx` already retries local providers with smaller fallbacks. If it still fails, lower `batch_size` or `max_file_tokens` in `.ctxconfig`.

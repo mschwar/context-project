@@ -1,6 +1,6 @@
 # Phase 16 Handoff
 
-This file is the execution contract for the current Phase 16 work.
+This file is the execution contract that was used for Phase 16 work.
 
 It exists to make the next set of changes small, explicit, and safe for narrower models such as `kimi2.5` and `qwen`.
 
@@ -46,7 +46,7 @@ Read these files before starting any Phase 16 gate:
 | `16G` | `feat/phase16g-stats-json` | `ctx stats --format json` emits stable machine-readable output. |
 | `16H` | `feat/phase16h-diff-stat` | `ctx diff --stat` prints one-line counts instead of file lists. |
 | `16I` | `feat/phase16i-watch-status` | `ctx watch` prints a one-line coverage summary after each refresh. |
-| `16Z` | `chore/phase16-closeout` | Manifests refreshed, docs synced, validation rerun, reflection filed. |
+| `16Z` | `chore/phase16-closeout` | Manifests refreshed, docs synced, validation rerun, reflection filed. ✓ |
 
 ## Gate 16A - Docs Truth Sync And Handoff Prep
 
@@ -356,6 +356,8 @@ Done when:
 
 This gate happens only after `16B` through `16I` land.
 
+Status: complete.
+
 Files in scope:
 
 - Touched source files
@@ -370,6 +372,13 @@ Tasks:
 3. Run `ctx update .` and confirm `ctx status .` is clean.
 4. File the Phase 16 reflection artifact using `GATE_CLOSEOUT.md`.
 5. Carry any deferred work into the next phase before marking Phase 16 complete.
+
+Closeout notes from 2026-03-15:
+
+- `python -m ctx update .` initially failed twice with transient Anthropic connection errors.
+- Root cause was shell proxy state, not provider availability.
+- Clearing `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and setting `NO_PROXY='*'` allowed the bottom-up refresh to complete successfully.
+- Final validation ended with `python -m ctx status .` reporting `18 fresh, 0 stale, 0 missing`.
 
 Stop and report if:
 

@@ -3,9 +3,9 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–15 complete.
+- **Status:** Stable. Phases 1–16 complete.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 249 tests passing across all modules.
+- **Test Coverage:** 273 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
 - **Ecosystem:** manifest server (`ctx serve`), git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby + Elixir language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view (with `--format json`, `--quiet`, `--since`), `ctx export` (with `--filter`, `--depth`), `ctx stats` (with `--verbose`), `ctx clean`.
 
@@ -199,4 +199,11 @@ Execution order: one gate per branch/PR. See `PHASE16_HANDOFF.md` for file lists
 - [x] **Gate 16G — `ctx stats --format json`** — add `--format json` flag (aggregate and `--verbose` modes) for machine-readable coverage reports; enables dashboards and CI scripts without parsing table text.
 - [x] **Gate 16H — `ctx diff --stat`** — print a one-line summary count (`N modified, N new, N stale`) rather than the full file list; mirrors `git diff --stat` semantics.
 - [x] **Gate 16I — `ctx watch` stale count on update** — after each debounced `update_tree` call, print a one-line stats summary (stale/covered counts) so users get continuous coverage feedback without running a separate command.
-- [ ] **Gate 16Z — manifest refresh and closeout** — rerun validation, regenerate manifests, file the reflection artifact, and update roadmap status before closing Phase 16.
+- [x] **Gate 16Z — manifest refresh and closeout** — targeted validation, full-suite validation, manifest refresh, reflection, and carry-forward are complete. Refresh initially failed due to shell proxy state, then succeeded after clearing proxy env vars before rerunning `ctx update`.
+
+## Phase 17 — Closeout Reliability & Refresh Resilience
+
+Carry-forward items from the Phase 16 reflection.
+
+- [ ] **17.1 Non-zero exit on refresh errors** — make `ctx update` / `ctx init` fail the process when any directory regeneration errors out, including transient retry exhaustion, so CI and gate closeout cannot misread a failed refresh as success.
+- [ ] **17.2 Refresh readiness and proxy guidance** — add a closeout-grade request-readiness check and operator guidance so `ctx setup --check` / closeout validation can distinguish "env var present" from "provider calls succeed", including broken proxy env cases.

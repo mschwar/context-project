@@ -10,10 +10,10 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 - **LLM Clients**: Anthropic and OpenAI supported (including Ollama and LM Studio). **BitNet is deprecated** — `create_client("bitnet")` raises an informative error directing users to Ollama or LM Studio.
 - **Language Parsers**: Python (`ast`-based), JavaScript/TypeScript (regex), Rust (regex), Go (regex). Wired into `generator._prepare_file_entry`; metadata is passed to the LLM prompt for richer summaries.
 - **File Watcher**: `ctx watch` — OS-native file watcher via `watchdog`. CONTEXT.md writes excluded to prevent infinite loops. 0.5 s per-file debounce.
-- **Test Coverage**: 249 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, `java_parser`, `csharp_parser`, `kotlin_parser`, `ruby_parser`, `php_parser`, `swift_parser`, `elixir_parser`, integration).
+- **Test Coverage**: 273 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, `java_parser`, `csharp_parser`, `kotlin_parser`, `ruby_parser`, `php_parser`, `swift_parser`, `elixir_parser`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, `CONTRIBUTING.md`, and `PHASE16_HANDOFF.md` define the system and current execution order.
 
-> **Branch notice**: As of March 2026, Phases 1–15 are complete on `main`. Phase 16 is the active development phase. New work should branch from `main`.
+> **Branch notice**: As of March 2026, Phases 1–16 are complete on `main`. Phase 17 is the active development phase. New work should branch from `main`.
 
 > **Manifest refresh rule**: Any commit that adds or modifies source files must include a `ctx update .` pass to regenerate stale `CONTEXT.md` files before pushing. The `CTX Manifest Check` CI job enforces this and will fail otherwise.
 
@@ -285,4 +285,11 @@ See `PHASE16_HANDOFF.md` for the full contract.
 - Gate 16G — `ctx stats --format json`. ✓
 - Gate 16H — `ctx diff --stat`. ✓
 - Gate 16I — `ctx watch` coverage line. ✓
-- Gate 16Z — Manifest refresh, validation, and phase closeout.
+- Gate 16Z — Manifest refresh, validation, and phase closeout. ✓ Completed after clearing broken proxy env vars for the refresh shell.
+
+### Phase 17 — Closeout Reliability & Refresh Resilience
+Scope: harden the operator path around manifest refresh failures discovered during the Phase 16 closeout attempt.
+- `ctx update` should exit non-zero when any directory fails regeneration, including transient retry exhaustion.
+- Add a closeout-grade request-readiness check and operator guidance so gate closeout can detect broken proxy state instead of trusting env-var presence alone.
+
+**Branch:** `feat/phase17-closeout-reliability`

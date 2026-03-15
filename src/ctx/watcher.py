@@ -37,14 +37,14 @@ def _should_process_event(event: FileSystemEvent, root: Path, spec: object) -> b
 def _print_coverage_summary(root: Path, spec: object) -> None:
     """Print a one-line coverage summary after a watch refresh."""
     import os
-    import re as _re
+
+    from ctx.hasher import hash_directory, is_stale
+    from ctx.manifest import read_manifest
 
     dirs_total = 0
     dirs_covered = 0
     dirs_stale = 0
     tokens_total = 0
-
-    _tokens_re = _re.compile(r"^tokens_total:\s*(\d+)", _re.MULTILINE)
 
     for dirpath, dirnames, _ in os.walk(root):
         d = Path(dirpath)
@@ -62,25 +62,14 @@ def _print_coverage_summary(root: Path, spec: object) -> None:
 
         dirs_covered += 1
         try:
-            text = manifest.read_text(encoding="utf-8")
-            m = _tokens_re.search(text)
-            if m:
-                tokens_total += int(m.group(1))
-        except (OSError, UnicodeDecodeError):
-            pass
-
-        # Check if stale using mtime comparison
-        try:
-            manifest_mtime = manifest.stat().st_mtime
-            is_stale_dir = any(
-                f.stat().st_mtime > manifest_mtime
-                for f in d.iterdir()
-                if f.is_file() and f.name != "CONTEXT.md"
-            )
-            if is_stale_dir:
+            m_obj = read_manifest(d)
+            tokens_total += m_obj.frontmatter.tokens_total
+            current_hash = hash_directory(d, spec, root)
+            if is_stale(m_obj.frontmatter.content_hash, current_hash):
                 dirs_stale += 1
-        except OSError:
-            pass
+        except (OSError, ValueError):
+            # Error reading or parsing, count as stale
+            dirs_stale += 1
 
     print(f"  coverage: {dirs_covered}/{dirs_total} dirs covered, {dirs_stale} stale, {tokens_total:,} tokens")
 
