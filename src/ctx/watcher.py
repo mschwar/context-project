@@ -39,6 +39,9 @@ def _print_coverage_summary(root: Path, spec: object) -> None:
     import os
     import re as _re
 
+    from ctx.hasher import hash_directory, is_stale
+    from ctx.manifest import read_manifest
+
     dirs_total = 0
     dirs_covered = 0
     dirs_stale = 0
@@ -62,24 +65,18 @@ def _print_coverage_summary(root: Path, spec: object) -> None:
 
         dirs_covered += 1
         try:
-            text = manifest.read_text(encoding="utf-8")
-            m = _tokens_re.search(text)
-            if m:
-                tokens_total += int(m.group(1))
-        except (OSError, UnicodeDecodeError):
-            pass
-
-        # Check if stale using mtime comparison
-        try:
-            manifest_mtime = manifest.stat().st_mtime
-            is_stale_dir = any(
-                f.stat().st_mtime > manifest_mtime
-                for f in d.iterdir()
-                if f.is_file() and f.name != "CONTEXT.md"
-            )
-            if is_stale_dir:
+            m_obj = read_manifest(d)
+            if m_obj:
+                tokens_total += m_obj.frontmatter.tokens_total
+                current_hash = hash_directory(d, spec, root)
+                if is_stale(m_obj.frontmatter.content_hash, current_hash):
+                    dirs_stale += 1
+            else:
+                # Manifest exists but is malformed, count as stale
                 dirs_stale += 1
-        except OSError:
+        except (OSError, ValueError):
+            # Error reading or parsing, count as stale
+            dirs_stale += 1
             pass
 
     print(f"  coverage: {dirs_covered}/{dirs_total} dirs covered, {dirs_stale} stale, {tokens_total:,} tokens")

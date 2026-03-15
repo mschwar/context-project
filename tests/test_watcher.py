@@ -128,27 +128,38 @@ def test_on_moved_schedules_both_paths(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_print_coverage_summary(tmp_path, capsys):
-    """_print_coverage_summary prints coverage line."""
+    """_print_coverage_summary prints correct coverage line."""
     from ctx.watcher import _print_coverage_summary
+    from ctx.hasher import hash_directory
+    from ctx.manifest import write_manifest
     
     spec = _load_spec(tmp_path)
     
-    # Create covered dir with manifest
+    # Dir 1: covered and fresh
     covered = tmp_path / "covered"
     covered.mkdir()
-    (covered / "CONTEXT.md").write_text(
-        "---\ntokens_total: 100\n---\n# Covered\n", encoding="utf-8"
-    )
-    
-    # Create missing dir (no manifest)
+    (covered / "file.py").write_text("x=1")
+    write_manifest(covered, model="test", content_hash=hash_directory(covered, spec, tmp_path), files=1, dirs=0, tokens_total=100, body="# Covered")
+
+    # Dir 2: missing manifest
     missing = tmp_path / "missing"
     missing.mkdir()
-    (missing / "main.py").write_text("x = 1", encoding="utf-8")
-    
+    (missing / "file.py").write_text("y=1")
+
+    # Dir 3: stale manifest (wrong hash)
+    stale = tmp_path / "stale"
+    stale.mkdir()
+    (stale / "file.py").write_text("z=1")
+    write_manifest(stale, model="test", content_hash="dummy_hash", files=1, dirs=0, tokens_total=200, body="# Stale")
+
+    # Dir 0: root dir, also has a manifest and is fresh
+    write_manifest(tmp_path, model="test", content_hash=hash_directory(tmp_path, spec, tmp_path), files=0, dirs=3, tokens_total=10, body="# Root")
+
     _print_coverage_summary(tmp_path, spec)
     
     captured = capsys.readouterr()
-    assert "coverage:" in captured.out
-    assert "dirs covered" in captured.out
-    assert "stale" in captured.out
-    assert "tokens" in captured.out
+    # Dirs total: root, covered, missing, stale = 4
+    # Dirs covered: root, covered, stale = 3
+    # Dirs stale: stale = 1
+    # Tokens total: 100 (covered) + 200 (stale) + 10 (root) = 310
+    assert "coverage: 3/4 dirs covered, 1 stale, 310 tokens" in captured.out
