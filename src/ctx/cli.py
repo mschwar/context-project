@@ -522,10 +522,22 @@ def export(path: str, output: Optional[str], filter_mode: str, depth: Optional[i
             click.echo(content, nl=False)
         return
 
-    all_files = sorted(root.rglob("CONTEXT.md"))
-    # Filter out CONTEXT.md files in ignored directories.
-    # We check the parent directory, not the file itself (since CONTEXT.md is in default ignore).
-    files = [f for f in all_files if not should_ignore(f.parent, spec, root)]
+    # Use os.walk with pruning to avoid traversing ignored directories.
+    files = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        d = Path(dirpath)
+
+        # Prune traversal into ignored directories.
+        if should_ignore(d, spec, root):
+            dirnames.clear()  # Don't visit any subdirectories of an ignored directory.
+            continue
+
+        # Filter subdirectories to visit.
+        dirnames[:] = [dn for dn in sorted(dirnames) if not should_ignore(d / dn, spec, root)]
+
+        if "CONTEXT.md" in filenames:
+            files.append(d / "CONTEXT.md")
+    files.sort()
 
     if depth is not None:
         files = [f for f in files if len(f.relative_to(root).parts) - 1 <= depth]
