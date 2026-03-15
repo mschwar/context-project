@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-15T07:08:57Z'
+generated: '2026-03-15T07:16:06Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:e01e522aeadb2db9b455b42e6bfdc35e9d24d951bacbc0f31f0beee2b0eaa74e
+content_hash: sha256:ebfd9e24ba47ad1a718bca999581d08f91d9e27f953e448a51a37c0783750b17
 files: 14
 dirs: 1
-tokens_total: 12859
+tokens_total: 13228
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
-Core module implementing a filesystem-native context layer for AI agents, providing CLI tools and services to generate, manage, and serve CONTEXT.md manifests.
+Core implementation of ctx, a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agents using LLM-powered file summarization.
 
 ## Files
 
@@ -26,7 +26,7 @@ Core module implementing a filesystem-native context layer for AI agents, provid
 - **llm.py** — LLM client protocol with Anthropic and OpenAI implementations for file and directory summarization.
 - **manifest.py** — CONTEXT.md file parsing, serialization, and frontmatter management.
 - **server.py** — FastAPI server providing HTTP endpoints to read and serve CONTEXT.md manifests with security checks for path traversal.
-- **watcher.py** — Monitors directory tree for file changes and triggers incremental manifest regeneration via debounced events.
+- **watcher.py** — File watcher that monitors directory changes and triggers incremental manifest regeneration with debouncing.
 
 ## Subdirectories
 
@@ -34,6 +34,7 @@ Core module implementing a filesystem-native context layer for AI agents, provid
 
 ## Notes
 
-- The module integrates LLM-based summarization with git-aware change detection and file hashing for efficient incremental updates.
-- Configuration is resolved hierarchically from environment, config files, and CLI flags, with automatic LLM provider detection.
-- The watcher and server components enable real-time manifest updates and HTTP-based manifest serving with security validation.
+- The generator module orchestrates the full pipeline: configuration loading, directory traversal, LLM summarization, and manifest writing.
+- Multiple LLM providers (Anthropic, OpenAI) are supported via a pluggable protocol in llm.py.
+- Staleness detection and incremental updates rely on content hashing and git integration.
+- The server module exposes manifests via HTTP with built-in path traversal protection.

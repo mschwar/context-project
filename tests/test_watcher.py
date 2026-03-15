@@ -121,3 +121,34 @@ def test_on_moved_schedules_both_paths(tmp_path):
     handler.on_moved(move_event)
     time.sleep(0.8)
     assert set(calls) == {src, dest}
+
+
+# ---------------------------------------------------------------------------
+# _print_coverage_summary
+# ---------------------------------------------------------------------------
+
+def test_print_coverage_summary(tmp_path, capsys):
+    """_print_coverage_summary prints coverage line."""
+    from ctx.watcher import _print_coverage_summary
+    
+    spec = _load_spec(tmp_path)
+    
+    # Create covered dir with manifest
+    covered = tmp_path / "covered"
+    covered.mkdir()
+    (covered / "CONTEXT.md").write_text(
+        "---\ntokens_total: 100\n---\n# Covered\n", encoding="utf-8"
+    )
+    
+    # Create missing dir (no manifest)
+    missing = tmp_path / "missing"
+    missing.mkdir()
+    (missing / "main.py").write_text("x = 1", encoding="utf-8")
+    
+    _print_coverage_summary(tmp_path, spec)
+    
+    captured = capsys.readouterr()
+    assert "coverage:" in captured.out
+    assert "dirs covered" in captured.out
+    assert "stale" in captured.out
+    assert "tokens" in captured.out

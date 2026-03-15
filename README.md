@@ -39,7 +39,7 @@ That's it. Every directory now has a `CONTEXT.md` that summarises its contents f
 | `ctx verify .` | Check manifest frontmatter for required fields |
 | `ctx clean . --yes` | Remove all manifests under a tree |
 | `ctx clean . --dry-run` | Preview which manifests would be deleted |
-| `ctx watch .` | Auto-regenerate on file save |
+| `ctx watch .` | Auto-regenerate on file save with coverage summary |
 | `ctx serve [PATH]` | Serve manifests over HTTP (default: current directory) |
 
 ## Configuration

@@ -1,11 +1,11 @@
 ---
-generated: '2026-03-15T07:09:04Z'
+generated: '2026-03-15T07:16:14Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:587433c89b2464858b9295f49acb04e56e386625c2f05a933d31607d7b7bfab1
+content_hash: sha256:3b1da5f95ddb481be0844028fa9643506d2b8d412c043d90d2a929b5edb801a5
 files: 29
 dirs: 1
-tokens_total: 24595
+tokens_total: 24809
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
@@ -41,7 +41,7 @@ Comprehensive test suite covering CLI commands, language parsers, configuration,
 - **test_setup.py** — Tests for setup command, provider detection, and config file generation with various LLM providers.
 - **test_swift_parser.py** — Tests Swift parser extraction of public functions, classes, structs, protocols, and enums from Swift files.
 - **test_trust.py** — Tests for token estimation with tiktoken fallback, cache eviction with size limits, and transient error messaging.
-- **test_watcher.py** — Tests for file system watcher event filtering and debounce logic.
+- **test_watcher.py** — Tests for file system watcher event filtering, debouncing logic, and coverage summary reporting.
 
 ## Subdirectories
 
@@ -49,6 +49,6 @@ Comprehensive test suite covering CLI commands, language parsers, configuration,
 
 ## Notes
 
-- Parser tests are organized by language (Python, Go, Rust, Java, C#, JavaScript/TypeScript, Kotlin, PHP, Ruby, Swift, Elixir).
-- Integration tests use a fake LLM client to avoid external dependencies.
-- Fixtures directory provides sample projects for end-to-end testing.
+- Tests are organized by feature area: parsers for each language, core functionality (generator, config, manifest), integrations (Git, LLM, server), and end-to-end workflows.
+- Pytest fixtures in conftest.py provide isolated temporary directories and environment setup for all tests.
+- Language parser tests follow a consistent pattern across multiple supported languages (Python, Go, Rust, Java, C#, JavaScript/TypeScript, PHP, Ruby, Kotlin, Swift, Elixir).
