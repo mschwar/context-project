@@ -401,3 +401,176 @@ def test_diff_mtime_fallback(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert "[stale]" in result.output
     assert "git not available" in result.output
+
+
+# --- ctx diff --format json ---
+
+
+def test_diff_format_json_git_path(tmp_path, monkeypatch) -> None:
+    """ctx diff --format json should emit JSON with modified/new keys on git path."""
+    import json
+    import subprocess
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    call_count = 0
+
+    def fake_run(cmd, **kwargs):
+        nonlocal call_count
+        call_count += 1
+
+        class R:
+            returncode = 0
+
+        r = R()
+        if call_count == 1:
+            # git diff --name-only: returns a modified file
+            r.stdout = "src/CONTEXT.md\n"
+        else:
+            # git ls-files --others: returns a new file
+            r.stdout = "new_dir/CONTEXT.md\n"
+        return r
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", "--format", "json", str(root)])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output.strip())
+    assert "modified" in data
+    assert "new" in data
+    assert "src/CONTEXT.md" in data["modified"]
+    assert "new_dir/CONTEXT.md" in data["new"]
+
+
+def test_diff_format_json_mtime_path(tmp_path, monkeypatch) -> None:
+    """ctx diff --format json should emit JSON with stale key on mtime fallback path."""
+    import json
+    import subprocess
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    project = tmp_path / "project"
+    project.mkdir()
+    manifest = project / "CONTEXT.md"
+    manifest.write_text("# old", encoding="utf-8")
+    src = project / "main.py"
+    src.write_text("x = 1", encoding="utf-8")
+
+    import os, time
+    os.utime(str(manifest), (time.time() - 10, time.time() - 10))
+    os.utime(str(src), (time.time(), time.time()))
+
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError("git not found")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", "--format", "json", str(project)])
+
+    assert result.exit_code == 0
+    # Warnings are written to stderr but CliRunner mixes them into output by default.
+    # The JSON line is the last line of output.
+    json_line = [line for line in result.output.splitlines() if line.startswith("{")]
+    assert json_line, f"No JSON line found in output: {result.output!r}"
+    data = json.loads(json_line[-1])
+    assert "stale" in data
+    assert isinstance(data["stale"], list)
+    assert len(data["stale"]) >= 1
+
+
+# --- ctx export ---
+
+
+def test_export_stdout(tmp_path) -> None:
+    """ctx export should concatenate CONTEXT.md files with headers to stdout."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "CONTEXT.md").write_text("root content", encoding="utf-8")
+    sub = root / "sub"
+    sub.mkdir()
+    (sub / "CONTEXT.md").write_text("sub content", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["export", str(root)])
+
+    assert result.exit_code == 0
+    assert "# CONTEXT.md" in result.output
+    assert "root content" in result.output
+    assert "# sub/CONTEXT.md" in result.output
+    assert "sub content" in result.output
+
+
+def test_export_file(tmp_path) -> None:
+    """ctx export --output should write concatenated manifests to a file."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "CONTEXT.md").write_text("root manifest", encoding="utf-8")
+
+    out_file = tmp_path / "all.md"
+    result = runner.invoke(cli_module.cli, ["export", str(root), "--output", str(out_file)])
+
+    assert result.exit_code == 0
+    assert "Exported" in result.output
+    assert out_file.exists()
+    content = out_file.read_text(encoding="utf-8")
+    assert "root manifest" in content
+    assert "# CONTEXT.md" in content
+
+
+# --- ctx stats ---
+
+
+def test_stats_basic(tmp_path) -> None:
+    """ctx stats should report covered/missing/stale counts."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+
+    # covered dir with manifest
+    covered = root / "covered"
+    covered.mkdir()
+    (covered / "CONTEXT.md").write_text(
+        "---\ntokens_total: 42\n---\n# Covered\n", encoding="utf-8"
+    )
+
+    # missing dir (no manifest)
+    missing = root / "missing"
+    missing.mkdir()
+    (missing / "main.py").write_text("x = 1", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["stats", str(root)])
+
+    assert result.exit_code == 0
+    assert "dirs:" in result.output
+    assert "covered:" in result.output
+    assert "missing:" in result.output
+    assert "stale:" in result.output
+    assert "tokens:" in result.output
+    # The missing dir should appear in missing count
+    assert "1" in result.output  # at minimum 1 missing
+
+
+def test_stats_no_manifests(tmp_path) -> None:
+    """ctx stats with no CONTEXT.md files should report all dirs as missing."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "a").mkdir()
+    (root / "b").mkdir()
+
+    result = runner.invoke(cli_module.cli, ["stats", str(root)])
+
+    assert result.exit_code == 0
+    assert "covered: 0" in result.output
+    assert "tokens:  0" in result.output

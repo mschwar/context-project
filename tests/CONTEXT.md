@@ -1,23 +1,24 @@
 ---
-generated: '2026-03-15T04:04:34Z'
+generated: '2026-03-15T04:13:39Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:ba1e19647ca8c2b18f4d25102c409a0cf1c12c52bb569ce2e2bb0977b46801ea
-files: 28
+content_hash: sha256:46e62362d6a2805c5ed908806ccb311c5ebea2aeba0002781611316e3c1d6ba4
+files: 29
 dirs: 1
-tokens_total: 22738
+tokens_total: 23542
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Comprehensive test suite covering CLI, configuration, language parsers, core generation engine, and integration scenarios.
+Test suite for the context-project, covering CLI operations, language parsers, configuration, Git integration, LLM clients, and manifest generation.
 
 ## Files
 
 - **__init__.py** — Package initialization file for tests directory.
 - **conftest.py** — Pytest fixtures providing workspace-local temporary directories for tests.
-- **test_cli.py** — Tests for CLI command wiring, dependency injection, and output formatting across init, update, status, version, and dry-run operations.
+- **test_cli.py** — Tests for CLI command wiring, dependency injection, and output formatting across init, update, status, version, and diff operations.
 - **test_config.py** — Tests for configuration loading from files, environment variables, and CLI arguments.
 - **test_csharp_parser.py** — Tests C# parser extraction of public classes, interfaces, enums, structs, records, methods, and properties.
+- **test_elixir_parser.py** — Tests for Elixir file parser extracting module names, public functions, and struct definitions from source code.
 - **test_generator.py** — Tests for core generation engine including tree creation, updates, and status checking.
 - **test_git.py** — Tests for Git integration to detect changed files in repositories.
 - **test_go_parser.py** — Tests for Go language parser extracting functions, types, constants, and variables.
@@ -48,6 +49,6 @@ Comprehensive test suite covering CLI, configuration, language parsers, core gen
 
 ## Notes
 
-- Test files follow naming convention `test_*.py` and are organized by feature area (parsers, CLI, core engine, integration).
-- Parser tests cover multiple languages: Python, JavaScript/TypeScript, Go, Java, Kotlin, C#, PHP, Ruby, Rust, and Swift.
-- Integration tests use a fake LLM client to avoid external dependencies.
+- Parser tests are organized by language (Python, Go, Java, C#, JavaScript/TypeScript, Kotlin, PHP, Ruby, Rust, Swift, Elixir).
+- Core functionality tests cover CLI, configuration, generation engine, Git integration, hashing, ignore patterns, and LLM clients.
+- Integration tests use fixture projects and fake LLM clients for end-to-end validation.
