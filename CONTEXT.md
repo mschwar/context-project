@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-15T06:52:46Z'
+generated: '2026-03-15T07:09:11Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:fae0dd61866543c177c8178664eb8bdcc21e7b86c56c0bace5c5f6a549ef5262
+content_hash: sha256:80b8a14e9d2fbe59e74d42091126979c4a0d478bbcfd7d86568417a8958874dc
 files: 18
 dirs: 7
-tokens_total: 14983
+tokens_total: 15066
 ---
 # C:/Users/Matty/Documents/context-project
 
-A filesystem-native context layer tool (ctx) that generates persistent CONTEXT.md manifests to help AI agents navigate and understand large codebases.
+A filesystem-native hierarchical manifest system that generates persistent CONTEXT.md files to help AI agents navigate large codebases.
 
 ## Files
 
@@ -38,12 +38,13 @@ A filesystem-native context layer tool (ctx) that generates persistent CONTEXT.m
 - **.githooks/** — Git hooks directory for automated pre-commit testing and validation.
 - **.github/** — GitHub configuration and automation for the context-project repository.
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
-- **archive/** — Archive of design documents, analyses, and reflections for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
-- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer for AI agents.
+- **archive/** — Archive of design documents, analyses, and reflections for the ctx project.
+- **src/** — Source code for the context-project application, containing core modules and utilities.
 - **tests/** — Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM clients, and manifest generation.
 
 ## Notes
 
-- This project uses both Node.js (package.json) and Python (pyproject.toml) tooling, suggesting a polyglot development environment.
-- Git hooks (Husky, pre-commit) enforce manifest freshness and conventional commits, indicating strong process discipline.
-- The archive/ directory preserves design history and rationale for future reference and agent onboarding.
+- The project uses both Node.js (package.json, Husky) and Python (pyproject.toml) tooling.
+- Git hooks and pre-commit validation enforce manifest freshness and conventional commits.
+- Phase-based execution contracts (PHASE16_HANDOFF.md, GATE_CLOSEOUT.md) structure development workflow.
+- Archive directory preserves historical design decisions and project evolution.

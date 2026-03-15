@@ -283,6 +283,6 @@ See `PHASE16_HANDOFF.md` for the full contract.
 - Gate 16E — `ctx verify`. ✓
 - Gate 16F — Explicit `ctx serve` root scoping. ✓
 - Gate 16G — `ctx stats --format json`. ✓
-- Gate 16H — `ctx diff --stat`.
+- Gate 16H — `ctx diff --stat`. ✓
 - Gate 16I — `ctx watch` coverage line.
 - Gate 16Z — Manifest refresh, validation, and phase closeout.
