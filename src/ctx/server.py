@@ -1,26 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 import uvicorn
 from pathlib import Path
 from dataclasses import asdict
 import yaml
-from typing import Optional
 
-from ctx.manifest import read_manifest, Manifest, ManifestFrontmatter # Import Manifest and ManifestFrontmatter for reconstruction
-
-# Global variable to hold the served root directory
-_served_root: Optional[Path] = None
-
-def set_served_root(root: Path) -> None:
-    """Set the root directory for serving manifests."""
-    global _served_root
-    _served_root = root.resolve()
-
-def get_served_root() -> Path:
-    """Get the served root directory, falling back to cwd if not set."""
-    global _served_root
-    if _served_root is not None:
-        return _served_root
-    return Path.cwd().resolve()
+from ctx.manifest import read_manifest, Manifest, ManifestFrontmatter
 
 app = FastAPI()
 
@@ -29,10 +13,10 @@ async def read_root():
     return {"message": "ctx MCP Server is running"}
 
 @app.get("/mcp/context/{file_path:path}")
-async def get_mcp_context(file_path: str):
+async def get_mcp_context(file_path: str, request: Request):
     # Ensure the path is relative to the served root and not a directory traversal attempt.
     try:
-        project_root = get_served_root()
+        project_root = request.app.state.served_root
         # Resolve the path safely, ensuring it's within the project root
         full_path = (project_root / file_path).resolve(strict=True)
 
@@ -57,7 +41,7 @@ async def get_mcp_context(file_path: str):
     else:
         raise HTTPException(status_code=404, detail=f"CONTEXT.md not found in '{file_path}'")
 
-def start_server(host: str = "127.0.0.1", port: int = 8000, root: Optional[Path] = None):
+def start_server(host: str = "127.0.0.1", port: int = 8000, root: Path | None = None):
     """Start the MCP server.
     
     Args:
@@ -65,8 +49,7 @@ def start_server(host: str = "127.0.0.1", port: int = 8000, root: Optional[Path]
         port: Port number to bind to.
         root: Root directory for serving manifests. If None, uses current working directory.
     """
-    if root is not None:
-        set_served_root(root)
+    app.state.served_root = root.resolve() if root is not None else Path.cwd().resolve()
     uvicorn.run(app, host=host, port=port)
 
 if __name__ == "__main__":

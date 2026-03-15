@@ -17,9 +17,9 @@ def cli_runner():
 @pytest.fixture
 def test_client(tmp_path):
     """Create a test client with a tmp_path as the served root."""
-    from ctx.server import set_served_root, app
+    from ctx.server import app
     # Set the served root to tmp_path for all tests using this fixture
-    set_served_root(tmp_path.resolve())
+    app.state.served_root = tmp_path.resolve()
     return TestClient(app)
 
 
