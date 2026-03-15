@@ -17,12 +17,28 @@ def test_packaged_default_ignore_file_contains_expected_patterns() -> None:
     assert "CONTEXT.md" in contents
     assert "tmp/" in contents
     assert "*.tmp" in contents
+    assert "*.tmp.*" in contents
+    assert "*.pyc.*" in contents
 
 
 def test_load_ignore_patterns_uses_repo_default_file(tmp_path) -> None:
     spec = load_ignore_patterns(tmp_path)
 
     assert spec.match_file("CONTEXT.md")
+
+
+@pytest.mark.parametrize("relative_path", [".pytest_cache/", ".worktrees/", ".tmp/"])
+def test_load_ignore_patterns_ignores_workspace_noise_by_default(tmp_path, relative_path: str) -> None:
+    spec = load_ignore_patterns(tmp_path)
+
+    assert spec.match_file(relative_path)
+
+
+@pytest.mark.parametrize("relative_path", ["AGENTS.md.tmp.123", "module.pyc.456"])
+def test_load_ignore_patterns_ignores_temp_editor_artifacts_by_default(tmp_path, relative_path: str) -> None:
+    spec = load_ignore_patterns(tmp_path)
+
+    assert spec.match_file(relative_path)
 
 
 def test_load_ignore_patterns_merges_default_and_user(tmp_path) -> None:

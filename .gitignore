@@ -11,9 +11,12 @@ venv/
 .obsidian/
 .claude/
 *.swp
+*.tmp.*
+*.pyc.*
 node_modules/
 
 # Test artifacts
+.pytest_cache/
 .tmp/
 pytest-cache-files-*/
 

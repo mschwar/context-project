@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-15T04:39:14Z'
+generated: '2026-03-15T08:03:00Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:d07fdea083ad3b6d7d315dc7f8c97aa72b2258f1f7e9d3c1551f3b10ed00226a
+content_hash: sha256:3be453aeb8a327739de98a9ce7560e1597eeac7c43da86c1b70ec7a94ed5b7ae
 files: 29
 dirs: 1
 tokens_total: 23936
@@ -14,7 +14,7 @@ Test suite covering CLI commands, configuration, language parsers, core generati
 ## Files
 
 - **__init__.py** — Package initialization file for tests directory.
-- **conftest.py** — Pytest fixtures providing workspace-local temporary directories for tests.
+- **conftest.py** — Pytest fixtures that isolate ambient env state and provide workspace-local temporary directories for tests.
 - **test_cli.py** — Tests for CLI command wiring, dependency injection, and output formatting across init, update, status, version, and utility commands.
 - **test_config.py** — Tests for configuration loading from files, environment variables, and CLI arguments.
 - **test_csharp_parser.py** — Tests C# parser extraction of public classes, interfaces, enums, structs, records, methods, and properties.
@@ -23,7 +23,7 @@ Test suite covering CLI commands, configuration, language parsers, core generati
 - **test_git.py** — Tests for Git integration to detect changed files in repositories.
 - **test_go_parser.py** — Tests for Go language parser extracting functions, types, constants, and variables.
 - **test_hasher.py** — Tests for file and directory content hashing with ignore pattern support.
-- **test_ignore.py** — Tests for ignore pattern loading and merging with path matching logic.
+- **test_ignore.py** — Tests for ignore pattern loading and merging with path matching logic, including workspace-noise and temp artifact defaults.
 - **test_integration.py** — End-to-end CLI tests on sample fixture project with fake LLM client.
 - **test_java_parser.py** — Tests Java parser extraction of public classes, interfaces, enums, records, and methods with modifiers.
 - **test_js_ts_parser.py** — Tests for JavaScript/TypeScript parser extracting exports and language constructs.
@@ -52,3 +52,4 @@ Test suite covering CLI commands, configuration, language parsers, core generati
 - Tests are organized by functional area: parsers for each language, core features (generator, config, git, hashing), CLI/server interfaces, and integration tests.
 - Language parser tests follow a consistent pattern across multiple supported languages (Python, Go, Rust, Java, C#, JavaScript/TypeScript, PHP, Ruby, Kotlin, Swift, Elixir).
 - Integration tests use the fixtures directory for end-to-end validation.
+- The shared conftest now clears ambient proxy/provider env vars so local test runs stay machine-independent.

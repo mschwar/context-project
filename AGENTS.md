@@ -11,7 +11,7 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 - **Language Parsers**: Python (`ast`-based), JavaScript/TypeScript (regex), Rust (regex), Go (regex). Wired into `generator._prepare_file_entry`; metadata is passed to the LLM prompt for richer summaries.
 - **File Watcher**: `ctx watch` — OS-native file watcher via `watchdog`. CONTEXT.md writes excluded to prevent infinite loops. 0.5 s per-file debounce.
 - **Test Coverage**: 249 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, `java_parser`, `csharp_parser`, `kotlin_parser`, `ruby_parser`, `php_parser`, `swift_parser`, `elixir_parser`, integration).
-- **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
+- **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, `CONTRIBUTING.md`, and `PHASE16_HANDOFF.md` define the system and current execution order.
 
 > **Branch notice**: As of March 2026, Phases 1–15 are complete on `main`. Phase 16 is the active development phase. New work should branch from `main`.
 
@@ -126,6 +126,18 @@ Do not commit or push automatically at gate closeout. The standard user disposit
 | `claude` | High-judgment reasoning, complex refactors, architectural planning. |
 | `codex` | Local implementation, unit tests, CLI wiring. |
 | `gemini` | Large-context synthesis, documentation review, roadmap planning. |
+| `kimi` | Narrow, checklist-driven gates with explicit file lists and acceptance criteria. |
+| `qwen` | Mechanical or low-branching gates with tight scope, targeted tests, and minimal design work. |
+
+## Small-Model Guardrails
+
+Use these rules when delegating to narrower models such as `kimi2.5` or `qwen`:
+
+1. Assign exactly one named gate from `PHASE16_HANDOFF.md`.
+2. Copy the gate's file list, validation commands, and acceptance criteria into the prompt.
+3. Forbid opportunistic refactors, dependency changes, and hash/schema/prompt edits unless the gate explicitly asks for them.
+4. Stop and report if the change spreads beyond the listed files or requires a second CLI surface.
+5. End the gate with docs updates, targeted validation, manifest-refresh status, and a short handoff note.
 
 ## Development Phases
 
@@ -134,7 +146,7 @@ Active roadmap. See `state.md` for detailed status of each item.
 ### Phase 1 — Hygiene & Merge Readiness
 Scope: repo cleanup and getting `feat/local-providers-token-budget` merged to `main`.
 - Fix `pathspec` deprecation (`"gitwildmatch"` → `"gitignore"` in `ignore.py`).
-- Remove stale build artifacts; update `.gitignore` for `.tmp/`, `pytest-cache-files-*/`, `.worktrees/`.
+- Remove stale build artifacts; update `.gitignore` for `.pytest_cache/`, `.tmp/`, `pytest-cache-files-*/`, `.worktrees/`.
 - Merge current feature branch to `main`.
 
 ### Phase 2 — Reliability & Performance
@@ -255,10 +267,22 @@ Scope: close all suggestions from the Phase 14 reflection.
 **Branch:** `feat/phase15-cli-power-user`
 
 ### Phase 16 — Observability & Consistency
-Scope: close all suggestions from the Phase 15 reflection.
-- `ctx stats --format json`: add `--format json` flag (aggregate and `--verbose` modes) for machine-readable coverage reports; enables dashboards and CI scripts without parsing table text.
-- `ctx clean --dry-run`: preview which `CONTEXT.md` files would be deleted without removing them; mirrors the `ctx update --dry-run` pattern.
-- `ctx export` respects `.ctxignore`: thread the `pathspec`-based ignore logic through the `rglob` walk so directories excluded from `ctx update` are also excluded from `ctx export`.
-- `ctx watch` stale count on update: after each debounced `update_tree` call, print a one-line stats summary (stale/covered counts) so users get continuous coverage feedback without running a separate command.
-- `ctx verify` command: check each `CONTEXT.md` frontmatter for required fields (`generated`, `generator`, `model`, `content_hash`, `files`, `dirs`, `tokens_total`) and report manifests with missing or malformed fields.
-- `ctx diff --stat`: print a one-line summary count (`N modified, N new, N stale`) rather than the full file list; mirrors `git diff --stat` semantics.
+Scope: close all suggestions from the Phase 15 reflection and the March 2026 north-star findings review.
+
+Finding-driven additions:
+- Default ignore hygiene: exclude obvious workspace-noise directories (at minimum `.pytest_cache/` and `.worktrees/`) so manifests stay high-signal.
+- Explicit serve-root scoping: `ctx serve` must stop relying on process `cwd` and serve a chosen tree explicitly.
+
+Execution order: one gate per branch and one gate per PR.
+See `PHASE16_HANDOFF.md` for the full contract.
+
+- Gate 16A — Docs truth sync and handoff prep.
+- Gate 16B — Default ignore hygiene. Completed in the handoff-prep pass.
+- Gate 16C — `ctx clean --dry-run`.
+- Gate 16D — `ctx export` respects `.ctxignore`.
+- Gate 16E — `ctx verify`.
+- Gate 16F — Explicit `ctx serve` root scoping.
+- Gate 16G — `ctx stats --format json`.
+- Gate 16H — `ctx diff --stat`.
+- Gate 16I — `ctx watch` coverage line.
+- Gate 16Z — Manifest refresh, validation, and phase closeout.

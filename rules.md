@@ -8,6 +8,8 @@ Guidelines for developers and AI agents contributing to `ctx`.
 - **Surgical Changes:** Make the smallest possible change that fulfills the requirement.
 - **Test-Driven:** No logic changes without a corresponding test update.
 - **Strict Typing:** Python 3.10+ typing is mandatory.
+- **Ignore Consistency:** Any CLI path that walks directories or manifests MUST respect the same `.ctxignore` boundary as generation unless documentation explicitly says otherwise.
+- **Signal Over Noise:** Default ignore patterns should exclude obvious cache, worktree, and editor noise so manifests stay high-signal.
 
 ## Code Standards
 
