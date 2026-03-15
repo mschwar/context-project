@@ -1,7 +1,7 @@
 {
-  "name": "context-project",
+  "name": "ctx-tool",
   "version": "1.0.0",
-  "description": "`ctx` generates `CONTEXT.md` manifests for directories in a project tree so AI\r agents can navigate codebases coarse-to-fine without reading every raw file.",
+  "description": "Filesystem-native context layer for AI agents — generates CONTEXT.md manifests",
   "main": "index.js",
   "directories": {
     "test": "tests"
@@ -14,9 +14,18 @@
     "type": "git",
     "url": "git+https://github.com/mschwar/context-project.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "ai",
+    "llm",
+    "agents",
+    "context",
+    "manifest",
+    "rag",
+    "claude",
+    "openai"
+  ],
+  "author": "mschwar",
+  "license": "MIT",
   "type": "commonjs",
   "bugs": {
     "url": "https://github.com/mschwar/context-project/issues"

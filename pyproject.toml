@@ -53,3 +53,6 @@ ctx = [".ctxignore.default"]
 
 [tool.setuptools.dynamic]
 version = {attr = "ctx.__version__"}
+
+[tool.pytest.ini_options]
+addopts = "-p no:cacheprovider"
