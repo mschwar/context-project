@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-15T06:52:32Z'
+generated: '2026-03-15T07:08:57Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:5d6f9cfb891eca08989a60fa9f122c1a38cff09096cd8957f8162048d3b01ef1
+content_hash: sha256:e01e522aeadb2db9b455b42e6bfdc35e9d24d951bacbc0f31f0beee2b0eaa74e
 files: 14
 dirs: 1
 tokens_total: 12859
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
-Core implementation of ctx, a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agents using LLM-powered file summarization.
+Core module implementing a filesystem-native context layer for AI agents, providing CLI tools and services to generate, manage, and serve CONTEXT.md manifests.
 
 ## Files
 
@@ -34,7 +34,6 @@ Core implementation of ctx, a filesystem-native context layer that generates and
 
 ## Notes
 
-- The generator module orchestrates the full pipeline: configuration loading, directory traversal, LLM calls, and manifest writing.
-- Multiple LLM providers (Anthropic, OpenAI) are supported via a pluggable protocol in llm.py.
-- Ignore patterns follow gitignore conventions and are resolved from .ctxignore files in the directory tree.
-- The watcher and server modules enable real-time manifest updates and HTTP-based access to generated documentation.
+- The module integrates LLM-based summarization with git-aware change detection and file hashing for efficient incremental updates.
+- Configuration is resolved hierarchically from environment, config files, and CLI flags, with automatic LLM provider detection.
+- The watcher and server components enable real-time manifest updates and HTTP-based manifest serving with security validation.

@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-15T06:52:40Z'
+generated: '2026-03-15T07:09:04Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:3cac65a61570fcfd708a984039a4683b7e52d6480a13a1ba3b3e5d7401043734
+content_hash: sha256:587433c89b2464858b9295f49acb04e56e386625c2f05a933d31607d7b7bfab1
 files: 29
 dirs: 1
 tokens_total: 24595
@@ -15,7 +15,7 @@ Comprehensive test suite covering CLI commands, language parsers, configuration,
 
 - **__init__.py** — Package initialization file for tests directory.
 - **conftest.py** — Pytest fixtures providing isolated environment and workspace-local temporary directories for tests.
-- **test_cli.py** — Tests for CLI command wiring, dependency injection, and output formatting across init, update, status, version, and utility commands.
+- **test_cli.py** — Tests for CLI command wiring, dependency injection, and output formatting across init, update, status, diff, export, stats, clean, and verify commands.
 - **test_config.py** — Tests for configuration loading from files, environment variables, and CLI arguments.
 - **test_csharp_parser.py** — Tests C# parser extraction of public classes, interfaces, enums, structs, records, methods, and properties.
 - **test_elixir_parser.py** — Tests for Elixir file parser extracting modules, functions, structs, type annotations, specs, and callbacks.
@@ -49,6 +49,6 @@ Comprehensive test suite covering CLI commands, language parsers, configuration,
 
 ## Notes
 
-- Tests are organized by feature area: parsers for each language, core functionality (generator, config, git), CLI integration, and end-to-end scenarios.
-- conftest.py provides shared pytest fixtures for test isolation and temporary workspace management.
-- Language parser tests follow a consistent pattern across multiple supported languages (Python, Go, Rust, Java, C#, JavaScript/TypeScript, PHP, Ruby, Kotlin, Swift, Elixir).
+- Parser tests are organized by language (Python, Go, Rust, Java, C#, JavaScript/TypeScript, Kotlin, PHP, Ruby, Swift, Elixir).
+- Integration tests use a fake LLM client to avoid external dependencies.
+- Fixtures directory provides sample projects for end-to-end testing.

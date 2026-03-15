@@ -49,6 +49,14 @@ See how many manifests are stale or missing.
 ctx status /path/to/project
 ```
 
+### Show diff
+Show which CONTEXT.md files changed since last commit.
+```bash
+ctx diff /path/to/project
+ctx diff /path/to/project --stat         # summary count only
+ctx diff /path/to/project --since main   # compare against a specific ref
+```
+
 ### Verify manifests
 Check CONTEXT.md frontmatter for required fields (generated, generator, model, content_hash, files, dirs, tokens_total).
 ```bash

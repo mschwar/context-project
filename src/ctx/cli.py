@@ -354,7 +354,8 @@ def setup(path: str, check_only: bool) -> None:
 @click.option("--since", default=None, help="Git ref (branch, commit, tag) to diff against. Defaults to HEAD.")
 @click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format.")
 @click.option("--quiet", is_flag=True, help="Exit code only: exit 1 if changes, exit 0 if clean. No stdout.")
-def diff(path: str, since: Optional[str], output_format: str, quiet: bool) -> None:
+@click.option("--stat", is_flag=True, help="Print summary count only, not file list.")
+def diff(path: str, since: Optional[str], output_format: str, quiet: bool, stat: bool) -> None:
     """Show CONTEXT.md files that changed since the last generation run.
 
     Uses git when available; falls back to mtime comparison when outside a
@@ -401,6 +402,17 @@ def diff(path: str, since: Optional[str], output_format: str, quiet: bool) -> No
                 sys.exit(1)
             return
 
+        if stat:
+            mod_count = len(modified_files)
+            new_count = len(new_files_sorted)
+            parts = []
+            if mod_count:
+                parts.append(f"{mod_count} modified")
+            if new_count:
+                parts.append(f"{new_count} new")
+            click.echo(", ".join(parts) if parts else f"No CONTEXT.md files changed {label}.")
+            return
+
         if output_format == "json":
             click.echo(json.dumps({"modified": modified_files, "new": new_files_sorted}))
             return
@@ -442,6 +454,10 @@ def diff(path: str, since: Optional[str], output_format: str, quiet: bool) -> No
     if quiet:
         if stale:
             sys.exit(1)
+        return
+
+    if stat:
+        click.echo(f"{len(stale)} stale" if stale else "No CONTEXT.md files appear stale (mtime check).")
         return
 
     if output_format == "json":

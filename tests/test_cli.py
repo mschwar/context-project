@@ -372,6 +372,117 @@ def test_diff_since_flag_passes_ref_to_git(tmp_path, monkeypatch) -> None:
     assert "No CONTEXT.md files changed since main" in result.output
 
 
+# --- 16H: ctx diff --stat ---
+
+
+def test_diff_stat_git_mode(tmp_path, monkeypatch) -> None:
+    """ctx diff --stat should print summary count in git mode."""
+    import subprocess
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    call_count = 0
+
+    def fake_run(cmd, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        class R:
+            returncode = 0
+        r = R()
+        if call_count == 1:
+            r.stdout = "src/CONTEXT.md\ndocs/CONTEXT.md\n"
+        else:
+            r.stdout = "new_dir/CONTEXT.md\n"
+        return r
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", "--stat", str(root)])
+
+    assert result.exit_code == 0
+    assert "2 modified, 1 new" in result.output
+    assert "[mod]" not in result.output  # no file list
+
+
+def test_diff_stat_git_mode_no_changes(tmp_path, monkeypatch) -> None:
+    """ctx diff --stat should report no changes when none exist."""
+    import subprocess
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    def fake_run(cmd, **kwargs):
+        class R:
+            stdout = ""
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", "--stat", str(root)])
+
+    assert result.exit_code == 0
+    assert "No CONTEXT.md files changed" in result.output
+
+
+def test_diff_stat_mtime_fallback(tmp_path, monkeypatch) -> None:
+    """ctx diff --stat should work with mtime fallback."""
+    import os
+    import subprocess
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = tmp_path / "project"
+    root.mkdir()
+
+    # Create a stale manifest
+    stale_dir = root / "stale"
+    stale_dir.mkdir()
+    manifest = stale_dir / "CONTEXT.md"
+    manifest.write_text("---\ntokens_total: 100\n---\n# Stale\n", encoding="utf-8")
+    # Make manifest older than a source file
+    old_time = 1000000000
+    os.utime(manifest, (old_time, old_time))
+    source_file = stale_dir / "main.py"
+    source_file.write_text("x = 1", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError("git not found")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", "--stat", str(root)])
+
+    assert result.exit_code == 0
+    assert "1 stale" in result.output
+    assert "[stale]" not in result.output  # no file list
+
+
+def test_diff_stat_with_since_flag(tmp_path, monkeypatch) -> None:
+    """ctx diff --stat --since should work with custom ref."""
+    import subprocess
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    call_count = 0
+
+    def fake_run(cmd, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        class R:
+            stdout = "" if call_count == 1 else "src/CONTEXT.md\n"
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", "--stat", "--since", "v0.7.0", str(root)])
+
+    assert result.exit_code == 0
+    assert "1 new" in result.output
+
+
 def test_diff_mtime_fallback(tmp_path, monkeypatch) -> None:
     """ctx diff falls back to mtime comparison when git is unavailable."""
     import subprocess
