@@ -9,6 +9,7 @@ Commands:
 
 from __future__ import annotations
 
+import os
 from collections import Counter
 from pathlib import Path
 from typing import Callable, Optional
@@ -455,6 +456,40 @@ def diff(path: str, since: Optional[str], output_format: str, quiet: bool) -> No
         click.echo(f"  [stale] {f}")
 
 
+def _missing_dir_labels(root: Path) -> list[str]:
+    """Return relative labels for directories under *root* that have no CONTEXT.md."""
+    spec = load_ignore_patterns(root)
+    labels: list[str] = []
+    for dirpath, dirnames, _ in os.walk(root):
+        d = Path(dirpath)
+        dirnames[:] = [dn for dn in sorted(dirnames) if not should_ignore(d / dn, spec, root)]
+        if not (d / "CONTEXT.md").exists():
+            try:
+                rel = d.relative_to(root).as_posix()
+            except ValueError:
+                rel = d.as_posix()
+            rel_display = rel if rel != "." else ""
+            labels.append((rel_display + "/") if rel_display else "./")
+    return labels
+
+
+def _filter_stale_manifests(files: list[Path]) -> list[Path]:
+    """Return only those manifest paths whose parent dir has a newer source file."""
+    stale: list[Path] = []
+    for f in files:
+        try:
+            manifest_mtime = f.stat().st_mtime
+            if any(
+                src.stat().st_mtime > manifest_mtime
+                for src in f.parent.iterdir()
+                if src.is_file() and src.name != "CONTEXT.md"
+            ):
+                stale.append(f)
+        except OSError:
+            pass
+    return stale
+
+
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--output", "-o", default=None, help="Output file path (default: stdout).")
@@ -471,58 +506,26 @@ def export(path: str, output: Optional[str], filter_mode: str, depth: Optional[i
     Each manifest is prefixed with a header line:
         # path/to/CONTEXT.md
     """
-    import os
-
     root = Path(path).resolve()
 
     if filter_mode == "missing":
-        # Walk the tree and list directories that lack a CONTEXT.md
-        spec = load_ignore_patterns(root)
-        missing_dirs: list[str] = []
-        for dirpath, dirnames, _ in os.walk(root):
-            d = Path(dirpath)
-            dirnames[:] = [
-                dn for dn in sorted(dirnames)
-                if not should_ignore(d / dn, spec, root)
-            ]
-            if not (d / "CONTEXT.md").exists():
-                try:
-                    rel = d.relative_to(root).as_posix()
-                except ValueError:
-                    rel = d.as_posix()
-                rel_display = rel if rel != "." else ""
-                dir_label = (rel_display + "/") if rel_display else "./"
-                missing_dirs.append(dir_label)
-        content = "\n".join(f"# {missing_dir} [MISSING]" for missing_dir in missing_dirs)
+        missing_dirs = _missing_dir_labels(root)
+        content = "\n".join(f"# {d} [MISSING]" for d in missing_dirs)
         if output:
             Path(output).write_text(content, encoding="utf-8")
-            click.echo(f"Exported {len(missing_dirs)} missing director{'y' if len(missing_dirs) == 1 else 'ies'} to {output}")
-        else:
-            if content:
-                click.echo(content, nl=False)
+            n = len(missing_dirs)
+            click.echo(f"Exported {n} missing director{'y' if n == 1 else 'ies'} to {output}")
+        elif content:
+            click.echo(content, nl=False)
         return
 
     files = sorted(root.rglob("CONTEXT.md"))
 
-    # Apply depth filter
     if depth is not None:
         files = [f for f in files if len(f.relative_to(root).parts) - 1 <= depth]
 
     if filter_mode == "stale":
-        stale_files = []
-        for f in files:
-            try:
-                manifest_mtime = f.stat().st_mtime
-                is_stale = any(
-                    src.stat().st_mtime > manifest_mtime
-                    for src in f.parent.iterdir()
-                    if src.is_file() and src.name != "CONTEXT.md"
-                )
-                if is_stale:
-                    stale_files.append(f)
-            except OSError:
-                pass
-        files = stale_files
+        files = _filter_stale_manifests(files)
 
     parts = []
     for f in files:
