@@ -747,10 +747,7 @@ def verify(path: str) -> None:
 
         try:
             manifest = read_manifest(d)
-        except ValueError as e:
-            malformed_manifests.append(rel)
-            continue
-        except (OSError, UnicodeDecodeError) as e:
+        except (ValueError, OSError, UnicodeDecodeError):
             malformed_manifests.append(rel)
             continue
 
