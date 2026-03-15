@@ -639,13 +639,21 @@ def stats(path: str, verbose: bool) -> None:
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
-def clean(path: str, yes: bool) -> None:
+@click.option("--dry-run", is_flag=True, help="List CONTEXT.md files that would be deleted without removing them.")
+def clean(path: str, yes: bool, dry_run: bool) -> None:
     """Remove all CONTEXT.md files from the directory tree."""
     root = Path(path).resolve()
     manifests = sorted(root.rglob("CONTEXT.md"))
 
     if not manifests:
         click.echo("No CONTEXT.md files found.")
+        return
+
+    if dry_run:
+        click.echo(f"{len(manifests)} CONTEXT.md file(s) would be deleted:")
+        for m in manifests:
+            rel = m.relative_to(root).as_posix()
+            click.echo(f"  {rel}")
         return
 
     if not yes:
