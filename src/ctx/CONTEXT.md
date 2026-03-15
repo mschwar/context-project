@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-15T06:40:14Z'
+generated: '2026-03-15T06:52:32Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:51db63c04a52d19df8d7c5099988dcf445d50a657a50b17f1021c00721e78b65
+content_hash: sha256:5d6f9cfb891eca08989a60fa9f122c1a38cff09096cd8957f8162048d3b01ef1
 files: 14
 dirs: 1
-tokens_total: 12974
+tokens_total: 12859
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
-Core module implementing a filesystem-native context layer for AI agents, providing CLI tools, LLM integration, and manifest generation for directory documentation.
+Core implementation of ctx, a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agents using LLM-powered file summarization.
 
 ## Files
 
@@ -25,7 +25,7 @@ Core module implementing a filesystem-native context layer for AI agents, provid
 - **language_detector.py** — Detects programming language from file extensions and project configuration files.
 - **llm.py** — LLM client protocol with Anthropic and OpenAI implementations for file and directory summarization.
 - **manifest.py** — CONTEXT.md file parsing, serialization, and frontmatter management.
-- **server.py** — FastAPI server exposing MCP endpoints to read and serve CONTEXT.md manifests from a configured root directory.
+- **server.py** — FastAPI server providing HTTP endpoints to read and serve CONTEXT.md manifests with security checks for path traversal.
 - **watcher.py** — Monitors directory tree for file changes and triggers incremental manifest regeneration via debounced events.
 
 ## Subdirectories
@@ -34,6 +34,7 @@ Core module implementing a filesystem-native context layer for AI agents, provid
 
 ## Notes
 
-- The module integrates LLM providers (Anthropic, OpenAI) for intelligent summarization and supports incremental updates via git and file hashing.
-- Configuration is resolved hierarchically from environment, config files, and CLI flags; ignore patterns follow gitignore conventions.
-- The FastAPI server and watcher enable real-time manifest serving and automatic regeneration on file changes.
+- The generator module orchestrates the full pipeline: configuration loading, directory traversal, LLM calls, and manifest writing.
+- Multiple LLM providers (Anthropic, OpenAI) are supported via a pluggable protocol in llm.py.
+- Ignore patterns follow gitignore conventions and are resolved from .ctxignore files in the directory tree.
+- The watcher and server modules enable real-time manifest updates and HTTP-based access to generated documentation.

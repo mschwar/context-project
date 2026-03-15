@@ -612,6 +612,129 @@ def test_stats_verbose_shows_per_dir_table(tmp_path) -> None:
     assert "covered" in result.output
 
 
+# --- 16G: ctx stats --format json ---
+
+
+def test_stats_format_json(tmp_path) -> None:
+    """ctx stats --format json should output valid JSON with aggregate totals."""
+    import json
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+
+    # covered dir with manifest
+    covered = root / "covered"
+    covered.mkdir()
+    (covered / "CONTEXT.md").write_text(
+        "---\ntokens_total: 42\n---\n# Covered\n", encoding="utf-8"
+    )
+
+    # missing dir (no manifest)
+    missing = root / "missing"
+    missing.mkdir()
+    (missing / "main.py").write_text("x = 1", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["stats", "--format", "json", str(root)])
+
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    
+    assert "aggregate" in output
+    agg = output["aggregate"]
+    assert agg["dirs"] == 3  # root, covered, missing
+    assert agg["covered"] == 1
+    assert agg["missing"] == 2  # root + missing dir
+    assert agg["tokens"] == 42
+    assert "directories" not in output  # not verbose
+
+
+def test_stats_format_json_verbose(tmp_path) -> None:
+    """ctx stats --format json --verbose should include per-directory rows."""
+    import json
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+
+    # dir1 with a manifest
+    dir1 = root / "alpha"
+    dir1.mkdir()
+    (dir1 / "CONTEXT.md").write_text(
+        "---\ntokens_total: 100\n---\n# Alpha\n", encoding="utf-8"
+    )
+
+    # dir2 with a manifest
+    dir2 = root / "beta"
+    dir2.mkdir()
+    (dir2 / "CONTEXT.md").write_text(
+        "---\ntokens_total: 200\n---\n# Beta\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(cli_module.cli, ["stats", "--format", "json", "--verbose", str(root)])
+
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    
+    assert "aggregate" in output
+    assert "directories" in output
+    
+    agg = output["aggregate"]
+    assert agg["dirs"] == 3  # root, alpha, beta
+    assert agg["covered"] == 2
+    
+    dirs = output["directories"]
+    assert len(dirs) == 3  # root, alpha, beta
+    
+    # Find alpha and beta in the output
+    alpha_dir = next((d for d in dirs if d["path"] == "alpha"), None)
+    beta_dir = next((d for d in dirs if d["path"] == "beta"), None)
+    assert alpha_dir is not None
+    assert beta_dir is not None
+    assert alpha_dir["status"] == "covered"
+    assert beta_dir["status"] == "covered"
+    assert alpha_dir["tokens"] == 100
+    assert beta_dir["tokens"] == 200
+
+
+def test_stats_format_json_values_match_text(tmp_path) -> None:
+    """ctx stats JSON aggregate values should match text mode totals."""
+    import json
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+
+    covered = root / "covered"
+    covered.mkdir()
+    (covered / "CONTEXT.md").write_text(
+        "---\ntokens_total: 500\n---\n# Covered\n", encoding="utf-8"
+    )
+
+    # Text output
+    text_result = runner.invoke(cli_module.cli, ["stats", str(root)])
+    json_result = runner.invoke(cli_module.cli, ["stats", "--format", "json", str(root)])
+
+    assert text_result.exit_code == 0
+    assert json_result.exit_code == 0
+    
+    json_output = json.loads(json_result.output)
+    agg = json_output["aggregate"]
+    
+    # Parse text output to verify values match
+    text_lines = text_result.output.splitlines()
+    text_dirs = int([l for l in text_lines if l.startswith("dirs:")][0].split(":")[1].strip())
+    text_covered = int([l for l in text_lines if l.startswith("covered:")][0].split(":")[1].strip())
+    text_tokens = int([l for l in text_lines if l.startswith("tokens:")][0].split(":")[1].strip())
+    
+    assert agg["dirs"] == text_dirs
+    assert agg["covered"] == text_covered
+    assert agg["tokens"] == text_tokens
+
+
 # --- 15.2: ctx export --filter ---
 
 
