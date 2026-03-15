@@ -32,7 +32,7 @@ That's it. Every directory now has a `CONTEXT.md` that summarises its contents f
 | `ctx smart-update .` | Regenerate only directories with git-changed files |
 | `ctx status .` | Show how many manifests are stale or missing |
 | `ctx diff .` | Show which CONTEXT.md files changed since last commit |
-| `ctx export .` | Concatenate manifests for downstream agent ingestion |
+| `ctx export .` | Concatenate manifests (respects `.ctxignore`) |
 | `ctx stats .` | Show coverage totals across the tree |
 | `ctx clean . --yes` | Remove all manifests under a tree |
 | `ctx clean . --dry-run` | Preview which manifests would be deleted |

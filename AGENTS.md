@@ -249,7 +249,7 @@ Scope: close all suggestions from the Phase 12 reflection.
 Scope: unified diff vocabulary, JSON output, export, stats, and Elixir parser.
 - Unified diff vocabulary: `[mod]`/`[new]` (git path), `[stale]` (mtime fallback path).
 - `ctx diff --format json`: git path → `{"modified":[…],"new":[…]}`; mtime path → `{"stale":[…]}`.
-- `ctx export`: walks `rglob("CONTEXT.md")`, writes with `# path/CONTEXT.md` headers.
+- `ctx export`: walks `rglob("CONTEXT.md")`, writes with `# path/CONTEXT.md` headers (respects `.ctxignore`).
 - `ctx stats`: coverage table (dirs/covered/missing/stale/tokens).
 - Elixir parser: `def` (public), `defmodule`, `defstruct`; wired for `.ex`/`.exs`. 24 new tests.
 
@@ -276,10 +276,10 @@ Finding-driven additions:
 Execution order: one gate per branch and one gate per PR.
 See `PHASE16_HANDOFF.md` for the full contract.
 
-- Gate 16A — Docs truth sync and handoff prep.
-- Gate 16B — Default ignore hygiene. Completed in the handoff-prep pass.
-- Gate 16C — `ctx clean --dry-run`.
-- Gate 16D — `ctx export` respects `.ctxignore`.
+- Gate 16A — Docs truth sync and handoff prep. ✓
+- Gate 16B — Default ignore hygiene. ✓ Completed in the handoff-prep pass.
+- Gate 16C — `ctx clean --dry-run`. ✓
+- Gate 16D — `ctx export` respects `.ctxignore`. ✓
 - Gate 16E — `ctx verify`.
 - Gate 16F — Explicit `ctx serve` root scoping.
 - Gate 16G — `ctx stats --format json`.
