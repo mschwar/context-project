@@ -59,10 +59,10 @@ Exit code 0 if all valid, exit code 1 if any invalid.
 ### Serve manifests
 Serve manifests over HTTP.
 ```bash
-ctx serve
+ctx serve [PATH]
 ```
 
-Current behavior: until the explicit serve-root gate lands, run `ctx serve` from the tree you want to expose.
+Serves manifests from the specified PATH (default: current directory). All manifest paths are resolved relative to this root.
 
 ## Publishing a Release
 

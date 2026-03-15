@@ -783,11 +783,20 @@ def verify(path: str) -> None:
 
 
 @cli.command()
+@click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, resolve_path=True))
 @click.option("--host", default="127.0.0.1", help="Host address for the server.")
 @click.option("--port", type=int, default=8000, help="Port for the server.")
-def serve(host: str, port: int) -> None:
-    """Start the MCP server to expose CONTEXT.md manifests."""
-    click.echo(f"Starting ctx MCP server on http://{host}:{port}")
+def serve(path: str, host: str, port: int) -> None:
+    """Start the MCP server to expose CONTEXT.md manifests.
+    
+    Serves manifests from the specified PATH (default: current directory).
+    All manifest paths are resolved relative to this root.
+    """
+    from pathlib import Path
     from ctx.server import start_server
-    start_server(host=host, port=port)
+    
+    root = Path(path).resolve()
+    click.echo(f"Starting ctx MCP server on http://{host}:{port}")
+    click.echo(f"Serving manifests from: {root}")
+    start_server(host=host, port=port, root=root)
 

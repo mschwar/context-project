@@ -38,7 +38,7 @@ That's it. Every directory now has a `CONTEXT.md` that summarises its contents f
 | `ctx clean . --yes` | Remove all manifests under a tree |
 | `ctx clean . --dry-run` | Preview which manifests would be deleted |
 | `ctx watch .` | Auto-regenerate on file save |
-| `ctx serve` | Serve manifests over HTTP |
+| `ctx serve [PATH]` | Serve manifests over HTTP (default: current directory) |
 
 ## Configuration
 
