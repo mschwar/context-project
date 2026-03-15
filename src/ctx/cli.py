@@ -394,6 +394,8 @@ def diff(path: str, since: Optional[str]) -> None:
     except (subprocess.CalledProcessError, FileNotFoundError):
         if since is not None:
             raise click.UsageError("--since requires git to be available and the path to be inside a git repository.")
+        else:
+            click.echo("Warning: git not available or command failed. Falling back to mtime comparison.", err=True)
 
     # --- mtime fallback (non-git repos) ---
     click.echo("Warning: git not available. Falling back to mtime comparison.", err=True)
