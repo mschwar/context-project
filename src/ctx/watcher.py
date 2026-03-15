@@ -37,7 +37,6 @@ def _should_process_event(event: FileSystemEvent, root: Path, spec: object) -> b
 def _print_coverage_summary(root: Path, spec: object) -> None:
     """Print a one-line coverage summary after a watch refresh."""
     import os
-    import re as _re
 
     from ctx.hasher import hash_directory, is_stale
     from ctx.manifest import read_manifest
@@ -46,8 +45,6 @@ def _print_coverage_summary(root: Path, spec: object) -> None:
     dirs_covered = 0
     dirs_stale = 0
     tokens_total = 0
-
-    _tokens_re = _re.compile(r"^tokens_total:\s*(\d+)", _re.MULTILINE)
 
     for dirpath, dirnames, _ in os.walk(root):
         d = Path(dirpath)
@@ -66,18 +63,13 @@ def _print_coverage_summary(root: Path, spec: object) -> None:
         dirs_covered += 1
         try:
             m_obj = read_manifest(d)
-            if m_obj:
-                tokens_total += m_obj.frontmatter.tokens_total
-                current_hash = hash_directory(d, spec, root)
-                if is_stale(m_obj.frontmatter.content_hash, current_hash):
-                    dirs_stale += 1
-            else:
-                # Manifest exists but is malformed, count as stale
+            tokens_total += m_obj.frontmatter.tokens_total
+            current_hash = hash_directory(d, spec, root)
+            if is_stale(m_obj.frontmatter.content_hash, current_hash):
                 dirs_stale += 1
         except (OSError, ValueError):
             # Error reading or parsing, count as stale
             dirs_stale += 1
-            pass
 
     print(f"  coverage: {dirs_covered}/{dirs_total} dirs covered, {dirs_stale} stale, {tokens_total:,} tokens")
 
