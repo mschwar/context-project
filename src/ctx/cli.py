@@ -352,7 +352,8 @@ def setup(path: str, check_only: bool) -> None:
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True), default=".", required=False)
 @click.option("--since", default=None, help="Git ref (branch, commit, tag) to diff against. Defaults to HEAD.")
 @click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format.")
-def diff(path: str, since: Optional[str], output_format: str) -> None:
+@click.option("--quiet", is_flag=True, help="Exit code only: exit 1 if changes, exit 0 if clean. No stdout.")
+def diff(path: str, since: Optional[str], output_format: str, quiet: bool) -> None:
     """Show CONTEXT.md files that changed since the last generation run.
 
     Uses git when available; falls back to mtime comparison when outside a
@@ -365,6 +366,7 @@ def diff(path: str, since: Optional[str], output_format: str) -> None:
     """
     import json
     import subprocess
+    import sys
 
     target_path = Path(path)
     ref = since or "HEAD"
@@ -392,6 +394,11 @@ def diff(path: str, since: Optional[str], output_format: str) -> None:
         new_files_sorted = sorted(new_files_set)
         all_changed = sorted(set(changed) | new_files_set)
         label = f"since {ref}"
+
+        if quiet:
+            if all_changed:
+                sys.exit(1)
+            return
 
         if output_format == "json":
             click.echo(json.dumps({"modified": modified_files, "new": new_files_sorted}))
@@ -431,6 +438,11 @@ def diff(path: str, since: Optional[str], output_format: str) -> None:
         except OSError:
             continue
 
+    if quiet:
+        if stale:
+            sys.exit(1)
+        return
+
     if output_format == "json":
         click.echo(json.dumps({"stale": stale}))
         return
@@ -446,14 +458,71 @@ def diff(path: str, since: Optional[str], output_format: str) -> None:
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--output", "-o", default=None, help="Output file path (default: stdout).")
-def export(path: str, output: Optional[str]) -> None:
+@click.option(
+    "--filter", "filter_mode",
+    type=click.Choice(["all", "stale", "missing"]),
+    default="all",
+    help="Which manifests to export: all (default), stale, or missing.",
+)
+@click.option("--depth", type=int, default=None, help="Limit export to N levels of nesting (0 = root only).")
+def export(path: str, output: Optional[str], filter_mode: str, depth: Optional[int]) -> None:
     """Concatenate all CONTEXT.md files to stdout or a file.
 
     Each manifest is prefixed with a header line:
         # path/to/CONTEXT.md
     """
+    import os
+
     root = Path(path).resolve()
+
+    if filter_mode == "missing":
+        # Walk the tree and list directories that lack a CONTEXT.md
+        spec = load_ignore_patterns(root)
+        missing_dirs: list[str] = []
+        for dirpath, dirnames, _ in os.walk(root):
+            d = Path(dirpath)
+            dirnames[:] = [
+                dn for dn in sorted(dirnames)
+                if not should_ignore(d / dn, spec, root)
+            ]
+            if not (d / "CONTEXT.md").exists():
+                try:
+                    rel = d.relative_to(root).as_posix()
+                except ValueError:
+                    rel = d.as_posix()
+                rel_display = rel if rel != "." else ""
+                dir_label = (rel_display + "/") if rel_display else "./"
+                missing_dirs.append(dir_label)
+        content = "\n".join(f"# {d} [MISSING]" for d in missing_dirs)
+        if output:
+            Path(output).write_text(content, encoding="utf-8")
+            click.echo(f"Exported {len(missing_dirs)} missing director{'y' if len(missing_dirs) == 1 else 'ies'} to {output}")
+        else:
+            if content:
+                click.echo(content, nl=False)
+        return
+
     files = sorted(root.rglob("CONTEXT.md"))
+
+    # Apply depth filter
+    if depth is not None:
+        files = [f for f in files if len(f.relative_to(root).parts) - 1 <= depth]
+
+    if filter_mode == "stale":
+        stale_files = []
+        for f in files:
+            try:
+                manifest_mtime = f.stat().st_mtime
+                is_stale = any(
+                    src.stat().st_mtime > manifest_mtime
+                    for src in f.parent.iterdir()
+                    if src.is_file() and src.name != "CONTEXT.md"
+                )
+                if is_stale:
+                    stale_files.append(f)
+            except OSError:
+                pass
+        files = stale_files
 
     parts = []
     for f in files:
@@ -474,7 +543,8 @@ def export(path: str, output: Optional[str]) -> None:
 
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
-def stats(path: str) -> None:
+@click.option("--verbose", "-v", is_flag=True, help="Show per-directory breakdown table.")
+def stats(path: str, verbose: bool) -> None:
     """Show coverage summary across all directories.
 
     Reports:
@@ -498,6 +568,9 @@ def stats(path: str) -> None:
 
     _tokens_re = _re.compile(r"^tokens_total:\s*(\d+)", _re.MULTILINE)
 
+    # Per-directory rows for --verbose
+    dir_rows: list[tuple[str, str, Optional[int]]] = []  # (rel_path, status, tokens)
+
     for dirpath, dirnames, _ in os.walk(root):
         d = Path(dirpath)
         # Prune ignored subdirectories in-place to avoid descending into them
@@ -508,17 +581,28 @@ def stats(path: str) -> None:
 
         dirs_total += 1
         manifest = d / "CONTEXT.md"
+
+        try:
+            rel = d.relative_to(root).as_posix()
+        except ValueError:
+            rel = d.as_posix()
+
         if not manifest.exists():
             dirs_missing += 1
+            if verbose:
+                dir_rows.append((rel, "missing", None))
         else:
             dirs_covered += 1
+            dir_tokens: Optional[int] = None
             try:
                 text = manifest.read_text(encoding="utf-8")
                 m = _tokens_re.search(text)
                 if m:
-                    tokens_total += int(m.group(1))
+                    dir_tokens = int(m.group(1))
+                    tokens_total += dir_tokens
             except (OSError, UnicodeDecodeError):
                 pass
+            is_stale_dir = False
             try:
                 manifest_mtime = manifest.stat().st_mtime
                 is_stale_dir = any(
@@ -530,12 +614,49 @@ def stats(path: str) -> None:
                     dirs_stale += 1
             except OSError:
                 pass
+            if verbose:
+                status = "stale" if is_stale_dir else "covered"
+                dir_rows.append((rel, status, dir_tokens))
 
     click.echo(f"dirs:    {dirs_total}")
     click.echo(f"covered: {dirs_covered}")
     click.echo(f"missing: {dirs_missing}")
     click.echo(f"stale:   {dirs_stale}")
     click.echo(f"tokens:  {tokens_total}")
+
+    if verbose and dir_rows:
+        click.echo("")
+        click.echo(f"{'Directory':<32} {'status':<9} {'tokens'}")
+        click.echo(f"{'-'*32} {'-'*9} {'-'*6}")
+        for rel_path, status, tok in dir_rows:
+            tok_str = str(tok) if tok is not None else "-"
+            click.echo(f"{rel_path:<32} {status:<9} {tok_str}")
+
+
+@cli.command()
+@click.argument("path", default=".", type=click.Path(exists=True))
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
+def clean(path: str, yes: bool) -> None:
+    """Remove all CONTEXT.md files from the directory tree."""
+    root = Path(path).resolve()
+    manifests = sorted(root.rglob("CONTEXT.md"))
+
+    if not manifests:
+        click.echo("No CONTEXT.md files found.")
+        return
+
+    if not yes:
+        confirmed = click.confirm(
+            f"Found {len(manifests)} CONTEXT.md file(s). Delete all?", default=False
+        )
+        if not confirmed:
+            click.echo("Aborted.")
+            return
+
+    for m in manifests:
+        m.unlink()
+
+    click.echo(f"Removed {len(manifests)} CONTEXT.md file(s).")
 
 
 @cli.command()

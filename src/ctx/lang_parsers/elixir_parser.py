@@ -10,6 +10,12 @@ _DEF = re.compile(r"^[ \t]*def\s+(\w+)\s*[\(,\n]", re.MULTILINE)
 _DEFMODULE = re.compile(r"^[ \t]*defmodule\s+([\w.]+)", re.MULTILINE)
 # Struct definitions (marks the module as defining a struct)
 _DEFSTRUCT = re.compile(r"^[ \t]*defstruct\b", re.MULTILINE)
+# Type annotations: @type name :: ...
+_TYPE = re.compile(r"^[ \t]*@type\s+(\w+)", re.MULTILINE)
+# Spec annotations: @spec name(args) :: return
+_SPEC = re.compile(r"^[ \t]*@spec\s+(\w+)", re.MULTILINE)
+# Callback annotations: @callback name(args) :: return
+_CALLBACK = re.compile(r"^[ \t]*@callback\s+(\w+)", re.MULTILINE)
 
 
 def parse_elixir_file(path: Path) -> Dict[str, List[str]]:
@@ -22,6 +28,9 @@ def parse_elixir_file(path: Path) -> Dict[str, List[str]]:
         ``functions`` — list of public function names (deduplicated, order preserved)
         ``modules``   — list of module names from ``defmodule``
         ``structs``   — list of module names that contain a ``defstruct``
+        ``types``     — list of type names from ``@type``
+        ``specs``     — list of function names from ``@spec``
+        ``callbacks`` — list of callback names from ``@callback``
     """
     try:
         content = path.read_text(encoding="utf-8")
@@ -38,6 +47,9 @@ def parse_elixir_file(path: Path) -> Dict[str, List[str]]:
         "functions": list(dict.fromkeys(_DEF.findall(content))),
         "modules": modules,
         "structs": structs,
+        "types": list(dict.fromkeys(_TYPE.findall(content))),
+        "specs": list(dict.fromkeys(_SPEC.findall(content))),
+        "callbacks": list(dict.fromkeys(_CALLBACK.findall(content))),
     }
 
 
@@ -46,4 +58,7 @@ def _empty() -> Dict[str, List[str]]:
         "functions": [],
         "modules": [],
         "structs": [],
+        "types": [],
+        "specs": [],
+        "callbacks": [],
     }
