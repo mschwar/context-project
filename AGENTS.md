@@ -225,11 +225,11 @@ Scope: close all suggestions from the Phase 11 reflection; expand language cover
 
 ### Phase 13 — Extended Language Support & CLI Polish ✓
 Scope: close all suggestions from the Phase 12 reflection.
-- PHP parser: `public function`, `class`, `interface`, `trait`, `enum`. Wired for `.php`.
-- Swift parser: `func`, `class`, `struct`, `protocol`, `enum`. Wired for `.swift`.
-- `ctx diff --since <ref>`: accept a git ref to scope the diff beyond `HEAD`.
-- Non-git fallback for `ctx diff`: mtime-based comparison when outside a git repo.
-- `ctx init` idempotency docs: README clarification + promote `--no-overwrite`.
+- PHP parser: `public function`, global functions, `class`, `interface`, `trait`, `enum`. 5 tests.
+- Swift parser: `public`/`open`/`internal` `func`, `class`, `struct`, `protocol`, `enum`. 5 tests.
+- `ctx diff --since <ref>`: custom git ref passed to `git diff`. 1 test.
+- Non-git fallback: mtime comparison + `[stale]` prefix + stderr warning. 1 test.
+- README: `ctx init` idempotency note, `--no-overwrite` and `ctx diff` in commands table.
 
 **Branch:** `feat/phase13-extended-language-support`
 
