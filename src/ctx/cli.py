@@ -641,7 +641,8 @@ def stats(path: str, verbose: bool, output_format: str) -> None:
                 status = "stale" if is_stale_dir else "covered"
                 dir_rows.append((rel, status, dir_tokens))
 
-    if output_format == "json":
+    def _render_json() -> None:
+        """Render stats in JSON format."""
         output: dict = {
             "aggregate": {
                 "dirs": dirs_total,
@@ -657,7 +658,9 @@ def stats(path: str, verbose: bool, output_format: str) -> None:
                 for rel, status, tok in dir_rows
             ]
         click.echo(json.dumps(output, indent=2))
-    else:
+
+    def _render_text() -> None:
+        """Render stats in text format."""
         click.echo(f"dirs:    {dirs_total}")
         click.echo(f"covered: {dirs_covered}")
         click.echo(f"missing: {dirs_missing}")
@@ -671,6 +674,11 @@ def stats(path: str, verbose: bool, output_format: str) -> None:
             for rel_path, status, tok in dir_rows:
                 tok_str = str(tok) if tok is not None else "-"
                 click.echo(f"{rel_path:<32} {status:<9} {tok_str}")
+
+    if output_format == "json":
+        _render_json()
+    else:
+        _render_text()
 
 
 @cli.command()
