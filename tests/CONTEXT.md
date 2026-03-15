@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-15T06:40:22Z'
+generated: '2026-03-15T06:52:40Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:974a185f4143e153c94f1452ceaf9ef45bbe54a497d28d31b03b875e604361bb
+content_hash: sha256:3cac65a61570fcfd708a984039a4683b7e52d6480a13a1ba3b3e5d7401043734
 files: 29
 dirs: 1
-tokens_total: 24598
+tokens_total: 24595
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM clients, and core generation engine functionality.
+Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM clients, and manifest generation.
 
 ## Files
 
@@ -37,7 +37,7 @@ Comprehensive test suite covering CLI commands, language parsers, configuration,
 - **test_python_parser.py** — Tests for Python language parser extracting classes and functions.
 - **test_ruby_parser.py** — Tests Ruby parser extraction of methods, classes, and modules from source files.
 - **test_rust_parser.py** — Tests for Rust language parser extracting public items and modules.
-- **test_server.py** — Tests for MCP server command integration, manifest serving endpoints, and path resolution for context retrieval.
+- **test_server.py** — Tests for MCP server functionality including serve command invocation and manifest context retrieval via HTTP endpoints.
 - **test_setup.py** — Tests for setup command, provider detection, and config file generation with various LLM providers.
 - **test_swift_parser.py** — Tests Swift parser extraction of public functions, classes, structs, protocols, and enums from Swift files.
 - **test_trust.py** — Tests for token estimation with tiktoken fallback, cache eviction with size limits, and transient error messaging.
@@ -49,6 +49,6 @@ Comprehensive test suite covering CLI commands, language parsers, configuration,
 
 ## Notes
 
-- Tests are organized by feature area: parsers for each supported language, core functionality (generator, config, manifest), integrations (Git, LLM, MCP server), and CLI/setup workflows.
-- Pytest fixtures in conftest.py provide isolated test environments and temporary workspace directories.
-- Integration tests validate end-to-end workflows using sample fixture projects and mock LLM clients.
+- Tests are organized by feature area: parsers for each language, core functionality (generator, config, git), CLI integration, and end-to-end scenarios.
+- conftest.py provides shared pytest fixtures for test isolation and temporary workspace management.
+- Language parser tests follow a consistent pattern across multiple supported languages (Python, Go, Rust, Java, C#, JavaScript/TypeScript, PHP, Ruby, Kotlin, Swift, Elixir).

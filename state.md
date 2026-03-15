@@ -196,7 +196,7 @@ Execution order: one gate per branch/PR. See `PHASE16_HANDOFF.md` for file lists
 - [x] **Gate 16D — `ctx export` respects `.ctxignore`** — thread the `pathspec`-based ignore logic through the export walk so ignored directories never appear in exported manifests.
 - [x] **Gate 16E — `ctx verify` command** — check each `CONTEXT.md` frontmatter for required fields (`generated`, `generator`, `model`, `content_hash`, `files`, `dirs`, `tokens_total`) and report manifests with missing or malformed fields.
 - [x] **Gate 16F — explicit `ctx serve` root scoping** — stop relying on process `cwd`; serve a chosen tree explicitly and keep traversal protection intact.
-- [ ] **Gate 16G — `ctx stats --format json`** — add `--format json` flag (aggregate and `--verbose` modes) for machine-readable coverage reports; enables dashboards and CI scripts without parsing table text.
+- [x] **Gate 16G — `ctx stats --format json`** — add `--format json` flag (aggregate and `--verbose` modes) for machine-readable coverage reports; enables dashboards and CI scripts without parsing table text.
 - [ ] **Gate 16H — `ctx diff --stat`** — print a one-line summary count (`N modified, N new, N stale`) rather than the full file list; mirrors `git diff --stat` semantics.
 - [ ] **Gate 16I — `ctx watch` stale count on update** — after each debounced `update_tree` call, print a one-line stats summary (stale/covered counts) so users get continuous coverage feedback without running a separate command.
 - [ ] **Gate 16Z — manifest refresh and closeout** — rerun validation, regenerate manifests, file the reflection artifact, and update roadmap status before closing Phase 16.

@@ -565,7 +565,8 @@ def export(path: str, output: Optional[str], filter_mode: str, depth: Optional[i
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--verbose", "-v", is_flag=True, help="Show per-directory breakdown table.")
-def stats(path: str, verbose: bool) -> None:
+@click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format.")
+def stats(path: str, verbose: bool, output_format: str) -> None:
     """Show coverage summary across all directories.
 
     Reports:
@@ -575,6 +576,7 @@ def stats(path: str, verbose: bool) -> None:
       stale       — directories whose CONTEXT.md is older than a source file
       tokens      — sum of tokens_total from all manifest frontmatters
     """
+    import json
     import os
     import re as _re
 
@@ -639,19 +641,44 @@ def stats(path: str, verbose: bool) -> None:
                 status = "stale" if is_stale_dir else "covered"
                 dir_rows.append((rel, status, dir_tokens))
 
-    click.echo(f"dirs:    {dirs_total}")
-    click.echo(f"covered: {dirs_covered}")
-    click.echo(f"missing: {dirs_missing}")
-    click.echo(f"stale:   {dirs_stale}")
-    click.echo(f"tokens:  {tokens_total}")
+    def _render_json() -> None:
+        """Render stats in JSON format."""
+        output: dict = {
+            "aggregate": {
+                "dirs": dirs_total,
+                "covered": dirs_covered,
+                "missing": dirs_missing,
+                "stale": dirs_stale,
+                "tokens": tokens_total,
+            },
+        }
+        if verbose and dir_rows:
+            output["directories"] = [
+                {"path": rel, "status": status, "tokens": tok}
+                for rel, status, tok in dir_rows
+            ]
+        click.echo(json.dumps(output, indent=2))
 
-    if verbose and dir_rows:
-        click.echo("")
-        click.echo(f"{'Directory':<32} {'status':<9} {'tokens'}")
-        click.echo(f"{'-'*32} {'-'*9} {'-'*6}")
-        for rel_path, status, tok in dir_rows:
-            tok_str = str(tok) if tok is not None else "-"
-            click.echo(f"{rel_path:<32} {status:<9} {tok_str}")
+    def _render_text() -> None:
+        """Render stats in text format."""
+        click.echo(f"dirs:    {dirs_total}")
+        click.echo(f"covered: {dirs_covered}")
+        click.echo(f"missing: {dirs_missing}")
+        click.echo(f"stale:   {dirs_stale}")
+        click.echo(f"tokens:  {tokens_total}")
+
+        if verbose and dir_rows:
+            click.echo("")
+            click.echo(f"{'Directory':<32} {'status':<9} {'tokens'}")
+            click.echo(f"{'-'*32} {'-'*9} {'-'*6}")
+            for rel_path, status, tok in dir_rows:
+                tok_str = str(tok) if tok is not None else "-"
+                click.echo(f"{rel_path:<32} {status:<9} {tok_str}")
+
+    if output_format == "json":
+        _render_json()
+    else:
+        _render_text()
 
 
 @cli.command()

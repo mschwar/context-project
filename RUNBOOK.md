@@ -56,6 +56,14 @@ ctx verify /path/to/project
 ```
 Exit code 0 if all valid, exit code 1 if any invalid.
 
+### Show stats
+Show coverage summary across all directories.
+```bash
+ctx stats /path/to/project
+ctx stats /path/to/project --verbose       # per-directory breakdown
+ctx stats /path/to/project --format json   # machine-readable output
+```
+
 ### Serve manifests
 Serve manifests over HTTP.
 ```bash
