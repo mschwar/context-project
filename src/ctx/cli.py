@@ -493,7 +493,7 @@ def export(path: str, output: Optional[str], filter_mode: str, depth: Optional[i
                 rel_display = rel if rel != "." else ""
                 dir_label = (rel_display + "/") if rel_display else "./"
                 missing_dirs.append(dir_label)
-        content = "\n".join(f"# {d} [MISSING]" for d in missing_dirs)
+        content = "\n".join(f"# {missing_dir} [MISSING]" for missing_dir in missing_dirs)
         if output:
             Path(output).write_text(content, encoding="utf-8")
             click.echo(f"Exported {len(missing_dirs)} missing director{'y' if len(missing_dirs) == 1 else 'ies'} to {output}")
