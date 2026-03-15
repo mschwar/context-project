@@ -26,7 +26,7 @@ from ctx.config import (
 )
 from ctx.llm import TRANSIENT_ERROR_PREFIX
 from ctx.generator import GenerateStats, check_stale_dirs, generate_tree, get_status, update_tree
-from ctx.ignore import load_ignore_patterns
+from ctx.ignore import load_ignore_patterns, should_ignore
 from ctx.llm import create_client
 
 
@@ -478,15 +478,17 @@ def stats(path: str) -> None:
     """Show coverage summary across all directories.
 
     Reports:
-      dirs        — total directories found
+      dirs        — total directories found (respects .ctxignore)
       covered     — directories with a CONTEXT.md
       missing     — directories without a CONTEXT.md
       stale       — directories whose CONTEXT.md is older than a source file
       tokens      — sum of tokens_total from all manifest frontmatters
     """
+    import os
     import re as _re
 
     root = Path(path).resolve()
+    spec = load_ignore_patterns(root)
 
     dirs_total = 0
     dirs_covered = 0
@@ -496,16 +498,20 @@ def stats(path: str) -> None:
 
     _tokens_re = _re.compile(r"^tokens_total:\s*(\d+)", _re.MULTILINE)
 
-    for d in sorted(root.rglob("*")):
-        if not d.is_dir():
-            continue
+    for dirpath, dirnames, _ in os.walk(root):
+        d = Path(dirpath)
+        # Prune ignored subdirectories in-place to avoid descending into them
+        dirnames[:] = [
+            dn for dn in sorted(dirnames)
+            if not should_ignore(d / dn, spec, root)
+        ]
+
         dirs_total += 1
         manifest = d / "CONTEXT.md"
         if not manifest.exists():
             dirs_missing += 1
         else:
             dirs_covered += 1
-            # Extract tokens_total from YAML frontmatter
             try:
                 text = manifest.read_text(encoding="utf-8")
                 m = _tokens_re.search(text)
@@ -513,7 +519,6 @@ def stats(path: str) -> None:
                     tokens_total += int(m.group(1))
             except (OSError, UnicodeDecodeError):
                 pass
-            # Check staleness: is any source file in this dir newer than the manifest?
             try:
                 manifest_mtime = manifest.stat().st_mtime
                 is_stale_dir = any(
