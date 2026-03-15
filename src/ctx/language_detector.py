@@ -20,6 +20,8 @@ EXTENSION_MAP = {
     ".rb": "Ruby",
     ".php": "PHP",
     ".swift": "Swift",
+    ".ex": "Elixir",
+    ".exs": "Elixir",
 }
 
 # Mapping of project configuration files to languages

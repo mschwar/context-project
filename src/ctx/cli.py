@@ -351,12 +351,19 @@ def setup(path: str, check_only: bool) -> None:
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True), default=".", required=False)
 @click.option("--since", default=None, help="Git ref (branch, commit, tag) to diff against. Defaults to HEAD.")
-def diff(path: str, since: Optional[str]) -> None:
+@click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format.")
+def diff(path: str, since: Optional[str], output_format: str) -> None:
     """Show CONTEXT.md files that changed since the last generation run.
 
     Uses git when available; falls back to mtime comparison when outside a
     git repository.
+
+    Output labels:
+      [mod]   — manifest modified (git path)
+      [new]   — manifest untracked/new (git path)
+      [stale] — manifest older than source files (mtime fallback path)
     """
+    import json
     import subprocess
 
     target_path = Path(path)
@@ -381,8 +388,15 @@ def diff(path: str, since: Optional[str]) -> None:
         )
         new_files = [line.strip() for line in untracked.stdout.splitlines() if line.strip()]
         new_files_set = set(new_files)
+        modified_files = sorted(f for f in changed if f not in new_files_set)
+        new_files_sorted = sorted(new_files_set)
         all_changed = sorted(set(changed) | new_files_set)
         label = f"since {ref}"
+
+        if output_format == "json":
+            click.echo(json.dumps({"modified": modified_files, "new": new_files_sorted}))
+            return
+
         if not all_changed:
             click.echo(f"No CONTEXT.md files changed {label}.")
             return
@@ -398,6 +412,7 @@ def diff(path: str, since: Optional[str]) -> None:
             click.echo("Warning: git not available or command failed. Falling back to mtime comparison.", err=True)
 
     # --- mtime fallback (non-git repos) ---
+    # Note: mtime path cannot distinguish modified vs new; all detected files use [stale].
     click.echo("Warning: git not available. Falling back to mtime comparison.", err=True)
     stale: list[str] = []
     for manifest in sorted(target_path.rglob("CONTEXT.md")):
@@ -416,12 +431,108 @@ def diff(path: str, since: Optional[str]) -> None:
         except OSError:
             continue
 
+    if output_format == "json":
+        click.echo(json.dumps({"stale": stale}))
+        return
+
     if not stale:
         click.echo("No CONTEXT.md files appear stale (mtime check).")
         return
     click.echo(f"{len(stale)} CONTEXT.md file{'s' if len(stale) != 1 else ''} may be stale (mtime check):")
     for f in stale:
         click.echo(f"  [stale] {f}")
+
+
+@cli.command()
+@click.argument("path", default=".", type=click.Path(exists=True))
+@click.option("--output", "-o", default=None, help="Output file path (default: stdout).")
+def export(path: str, output: Optional[str]) -> None:
+    """Concatenate all CONTEXT.md files to stdout or a file.
+
+    Each manifest is prefixed with a header line:
+        # path/to/CONTEXT.md
+    """
+    root = Path(path).resolve()
+    files = sorted(root.rglob("CONTEXT.md"))
+
+    lines = []
+    for f in files:
+        try:
+            rel = f.relative_to(root).as_posix()
+        except ValueError:
+            rel = f.as_posix()
+        lines.append(f"# {rel}\n\n")
+        lines.append(f.read_text(encoding="utf-8"))
+        lines.append("\n\n")
+
+    content = "".join(lines)
+
+    if output:
+        Path(output).write_text(content, encoding="utf-8")
+        click.echo(f"Exported {len(files)} manifest{'s' if len(files) != 1 else ''} to {output}")
+    else:
+        click.echo(content, nl=False)
+
+
+@cli.command()
+@click.argument("path", default=".", type=click.Path(exists=True))
+def stats(path: str) -> None:
+    """Show coverage summary across all directories.
+
+    Reports:
+      dirs        — total directories found
+      covered     — directories with a CONTEXT.md
+      missing     — directories without a CONTEXT.md
+      stale       — directories whose CONTEXT.md is older than a source file
+      tokens      — sum of tokens_total from all manifest frontmatters
+    """
+    import re as _re
+
+    root = Path(path).resolve()
+
+    dirs_total = 0
+    dirs_covered = 0
+    dirs_missing = 0
+    dirs_stale = 0
+    tokens_total = 0
+
+    _tokens_re = _re.compile(r"^tokens_total:\s*(\d+)", _re.MULTILINE)
+
+    for d in sorted(root.rglob("*")):
+        if not d.is_dir():
+            continue
+        dirs_total += 1
+        manifest = d / "CONTEXT.md"
+        if not manifest.exists():
+            dirs_missing += 1
+        else:
+            dirs_covered += 1
+            # Extract tokens_total from YAML frontmatter
+            try:
+                text = manifest.read_text(encoding="utf-8")
+                m = _tokens_re.search(text)
+                if m:
+                    tokens_total += int(m.group(1))
+            except (OSError, UnicodeDecodeError):
+                pass
+            # Check staleness: is any source file in this dir newer than the manifest?
+            try:
+                manifest_mtime = manifest.stat().st_mtime
+                is_stale_dir = any(
+                    f.stat().st_mtime > manifest_mtime
+                    for f in d.iterdir()
+                    if f.is_file() and f.name != "CONTEXT.md"
+                )
+                if is_stale_dir:
+                    dirs_stale += 1
+            except OSError:
+                pass
+
+    click.echo(f"dirs:    {dirs_total}")
+    click.echo(f"covered: {dirs_covered}")
+    click.echo(f"missing: {dirs_missing}")
+    click.echo(f"stale:   {dirs_stale}")
+    click.echo(f"tokens:  {tokens_total}")
 
 
 @cli.command()
