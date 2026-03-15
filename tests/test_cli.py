@@ -345,3 +345,59 @@ def test_diff_reports_modified_files(tmp_path, monkeypatch) -> None:
     assert "2 CONTEXT.md files changed" in result.output
     assert "[mod]" in result.output
     assert "[new]" in result.output
+
+
+def test_diff_since_flag_passes_ref_to_git(tmp_path, monkeypatch) -> None:
+    """ctx diff --since <ref> should pass the ref to git diff."""
+    import subprocess
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    captured_cmds: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        captured_cmds.append(cmd)
+        class R:
+            stdout = ""
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", "--since", "main", str(root)])
+
+    assert result.exit_code == 0
+    assert any("main" in cmd for cmd in captured_cmds)
+    assert "No CONTEXT.md files changed since main" in result.output
+
+
+def test_diff_mtime_fallback(tmp_path, monkeypatch) -> None:
+    """ctx diff falls back to mtime comparison when git is unavailable."""
+    import subprocess
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    # Create a directory with a source file newer than its CONTEXT.md
+    project = tmp_path / "project"
+    project.mkdir()
+    manifest = project / "CONTEXT.md"
+    manifest.write_text("# old", encoding="utf-8")
+    src = project / "main.py"
+    src.write_text("x = 1", encoding="utf-8")
+
+    # Make src newer than manifest
+    import os, time
+    os.utime(str(manifest), (time.time() - 10, time.time() - 10))
+    os.utime(str(src), (time.time(), time.time()))
+
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError("git not found")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", str(project)])
+
+    assert result.exit_code == 0
+    assert "stale" in result.output
+    assert "[stale]" in result.output

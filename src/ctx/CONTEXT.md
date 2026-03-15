@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T23:44:41Z'
+generated: '2026-03-15T03:50:27Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:b5efea138408c5cd90e11413cd0d62b0da192f38d9a26cfb17f18bab8a9eb764
+content_hash: sha256:58c2d52b0ab368c92c8bb59a7be02448f17b8118bf918b10380a824e07c530c1
 files: 14
 dirs: 1
-tokens_total: 12746
+tokens_total: 12736
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
-Core module implementing a filesystem-native context layer for AI agents, providing CLI tools and LLM-powered directory summarization with manifest generation and serving.
+Core module implementing a filesystem-native context layer for AI agents, providing CLI tools and LLM-powered manifest generation for directory documentation.
 
 ## Files
 
@@ -18,7 +18,7 @@ Core module implementing a filesystem-native context layer for AI agents, provid
 - **__main__.py** — Entry point for running ctx as a Python module via `python -m ctx`.
 - **cli.py** — Click CLI entry point providing commands to generate, update, and manage CONTEXT.md manifests.
 - **config.py** — Loads and resolves configuration from environment variables, .ctxconfig files, and CLI flags with provider detection.
-- **generator.py** — Core generation engine that walks directory trees bottom-up, reads files, calls LLM for summaries, and writes manifests.
+- **generator.py** — Core generation engine that walks directory trees bottom-up to produce CONTEXT.md manifest files with LLM-generated summaries.
 - **git.py** — Utility for retrieving changed files from a git repository since last commit or staging.
 - **hasher.py** — Content hashing for staleness detection using SHA-256 with directory hash composition.
 - **ignore.py** — Ignore-pattern matching using .ctxignore files with gitignore-style glob patterns.
@@ -30,11 +30,9 @@ Core module implementing a filesystem-native context layer for AI agents, provid
 
 ## Subdirectories
 
-- **lang_parsers/** — Language-specific parsers that extract public APIs and structural elements from source code files.
+- **lang_parsers/** — Language-specific parsers that extract public APIs and definitions from source code files across multiple programming languages.
 
 ## Notes
 
-- The generator module orchestrates the full pipeline: configuration loading, directory traversal, LLM summarization, and manifest writing.
-- Ignore patterns and git integration enable selective processing of changed or non-excluded files.
-- Multiple LLM providers (Anthropic, OpenAI) are supported via pluggable client implementations.
-- The watcher and server modules enable real-time manifest updates and programmatic access via MCP.
+- The module follows a layered architecture: configuration and detection (config, language_detector, git) feed into core generation (generator, hasher, ignore), which uses LLM clients (llm) to produce manifests (manifest) exposed via CLI (cli) or server (server).
+- Watcher and incremental updates enable real-time manifest synchronization during development.

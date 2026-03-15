@@ -350,26 +350,28 @@ def setup(path: str, check_only: bool) -> None:
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True), default=".", required=False)
-def diff(path: str) -> None:
+@click.option("--since", default=None, help="Git ref (branch, commit, tag) to diff against. Defaults to HEAD.")
+def diff(path: str, since: Optional[str]) -> None:
     """Show CONTEXT.md files that changed since the last generation run.
 
-    Uses git to list CONTEXT.md files with uncommitted modifications,
-    giving a quick view of which parts of the manifest tree are freshly
-    regenerated or unexpectedly dirty.
+    Uses git when available; falls back to mtime comparison when outside a
+    git repository.
     """
     import subprocess
 
     target_path = Path(path)
+    ref = since or "HEAD"
+
+    # --- git path ---
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD", "--", "*/CONTEXT.md", "CONTEXT.md"],
+            ["git", "diff", "--name-only", ref, "--", "*/CONTEXT.md", "CONTEXT.md"],
             cwd=str(target_path),
             capture_output=True,
             text=True,
             check=True,
         )
         changed = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-        # Also include untracked CONTEXT.md files (new directories)
         untracked = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard", "--", "*/CONTEXT.md", "CONTEXT.md"],
             cwd=str(target_path),
@@ -378,19 +380,45 @@ def diff(path: str) -> None:
             check=True,
         )
         new_files = [line.strip() for line in untracked.stdout.splitlines() if line.strip()]
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        raise click.UsageError("ctx diff requires git to be available and the path to be inside a git repository.")
-
-    new_files_set = set(new_files)
-    all_changed = sorted(set(changed) | new_files_set)
-    if not all_changed:
-        click.echo("No CONTEXT.md files changed since last commit.")
+        new_files_set = set(new_files)
+        all_changed = sorted(set(changed) | new_files_set)
+        label = f"since {ref}"
+        if not all_changed:
+            click.echo(f"No CONTEXT.md files changed {label}.")
+            return
+        click.echo(f"{len(all_changed)} CONTEXT.md file{'s' if len(all_changed) != 1 else ''} changed {label}:")
+        for f in all_changed:
+            prefix = "new" if f in new_files_set else "mod"
+            click.echo(f"  [{prefix}] {f}")
         return
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        if since is not None:
+            raise click.UsageError("--since requires git to be available and the path to be inside a git repository.")
 
-    click.echo(f"{len(all_changed)} CONTEXT.md file{'s' if len(all_changed) != 1 else ''} changed:")
-    for f in all_changed:
-        prefix = "new" if f in new_files_set else "mod"
-        click.echo(f"  [{prefix}] {f}")
+    # --- mtime fallback (non-git repos) ---
+    stale: list[str] = []
+    for manifest in sorted(target_path.rglob("CONTEXT.md")):
+        try:
+            manifest_mtime = manifest.stat().st_mtime
+            if any(
+                f.stat().st_mtime > manifest_mtime
+                for f in manifest.parent.iterdir()
+                if f.is_file() and f.name != "CONTEXT.md"
+            ):
+                try:
+                    rel = manifest.relative_to(target_path).as_posix()
+                except ValueError:
+                    rel = manifest.as_posix()
+                stale.append(rel)
+        except OSError:
+            continue
+
+    if not stale:
+        click.echo("No CONTEXT.md files appear stale (mtime check).")
+        return
+    click.echo(f"{len(stale)} CONTEXT.md file{'s' if len(stale) != 1 else ''} may be stale (mtime check):")
+    for f in stale:
+        click.echo(f"  [stale] {f}")
 
 
 @cli.command()
