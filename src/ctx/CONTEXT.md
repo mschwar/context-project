@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-15T03:50:27Z'
+generated: '2026-03-15T04:04:27Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:58c2d52b0ab368c92c8bb59a7be02448f17b8118bf918b10380a824e07c530c1
+content_hash: sha256:c6b6b0ca602cf0b21a77a17dba09803aac57b83a23651a4e24c986cb4cb49023
 files: 14
 dirs: 1
 tokens_total: 12736
@@ -30,9 +30,10 @@ Core module implementing a filesystem-native context layer for AI agents, provid
 
 ## Subdirectories
 
-- **lang_parsers/** — Language-specific parsers that extract public APIs and definitions from source code files across multiple programming languages.
+- **lang_parsers/** — Language-specific parsers that extract public APIs and definitions from source files across multiple programming languages.
 
 ## Notes
 
-- The module follows a layered architecture: configuration and detection (config, language_detector, git) feed into core generation (generator, hasher, ignore), which uses LLM clients (llm) to produce manifests (manifest) exposed via CLI (cli) or server (server).
-- Watcher and incremental updates enable real-time manifest synchronization during development.
+- The module follows a layered architecture: configuration and CLI at the top, generation and manifest management in the middle, and language detection and LLM integration at the foundation.
+- Staleness detection via hashing and git integration enables incremental updates rather than full regeneration.
+- The watcher and server components support real-time and on-demand manifest retrieval for AI agent workflows.

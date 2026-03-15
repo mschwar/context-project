@@ -13,7 +13,7 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 - **Test Coverage**: 166 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
 
-> **Branch notice**: As of March 2026, Phases 1–12 are complete on `main`. Phase 13 is the active development phase. New work should branch from `main`.
+> **Branch notice**: As of March 2026, Phases 1–13 are complete on `main`. Phase 14 is the active development phase. New work should branch from `main`.
 
 > **Manifest refresh rule**: Any commit that adds or modifies source files must include a `ctx update .` pass to regenerate stale `CONTEXT.md` files before pushing. The `CTX Manifest Check` CI job enforces this and will fail otherwise.
 
@@ -223,12 +223,22 @@ Scope: close all suggestions from the Phase 11 reflection; expand language cover
 
 **Branch:** `feat/phase12-language-depth`
 
-### Phase 13 — Extended Language Support & CLI Polish
+### Phase 13 — Extended Language Support & CLI Polish ✓
 Scope: close all suggestions from the Phase 12 reflection.
-- PHP parser: `public function`, `class`, `interface`, `trait`, `enum`. Wired for `.php`.
-- Swift parser: `func`, `class`, `struct`, `protocol`, `enum`. Wired for `.swift`.
-- `ctx diff --since <ref>`: accept a git ref to scope the diff beyond `HEAD`.
-- Non-git fallback for `ctx diff`: mtime-based comparison when outside a git repo.
-- `ctx init` idempotency docs: README clarification + promote `--no-overwrite`.
+- PHP parser: `public function`, global functions, `class`, `interface`, `trait`, `enum`. 5 tests.
+- Swift parser: `public`/`open`/`internal` `func`, `class`, `struct`, `protocol`, `enum`. 5 tests.
+- `ctx diff --since <ref>`: custom git ref passed to `git diff`. 1 test.
+- Non-git fallback: mtime comparison + `[stale]` prefix + stderr warning. 1 test.
+- README: `ctx init` idempotency note, `--no-overwrite` and `ctx diff` in commands table.
 
 **Branch:** `feat/phase13-extended-language-support`
+
+### Phase 14 — CLI Completeness & Elixir
+Scope: close all suggestions from the Phase 13 reflection.
+- Unified `ctx diff` output format: consistent `[mod]`/`[new]`/`[stale]` across git and mtime paths.
+- `ctx diff --format json`: machine-readable JSON output for CI pipelines.
+- `ctx export` command: concatenate all `CONTEXT.md` files to stdout or file.
+- `ctx stats` command: coverage summary (dirs, covered, missing, stale, total tokens).
+- Elixir parser: `def`/`defp`, `defmodule`, `defstruct`. Wired for `.ex`/`.exs`.
+
+**Branch:** `feat/phase14-cli-completeness`
