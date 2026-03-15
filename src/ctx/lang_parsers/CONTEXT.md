@@ -1,20 +1,20 @@
 ---
-generated: '2026-03-15T04:13:26Z'
+generated: '2026-03-15T04:39:00Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:daef9bde4af1bde1585e9ed24f6ab8d641b44d4625f984742c84dbecdad16011
+content_hash: sha256:d19fb41304f33136a9352a92b332d5ddb714832fc91e348f38e0b460b1cff6a3
 files: 11
 dirs: 0
-tokens_total: 4999
+tokens_total: 5211
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx/lang_parsers
 
-Language-specific parsers that extract public APIs and structural definitions from source files across multiple programming languages.
+Language-specific parsers that extract public APIs and structural elements from source files across multiple programming languages.
 
 ## Files
 
 - **csharp_parser.py** — Extracts public types, methods, and properties from C# files using regex patterns.
-- **elixir_parser.py** — Parses Elixir source files to extract public functions, module definitions, and struct declarations.
+- **elixir_parser.py** — Parses Elixir source files to extract public functions, modules, structs, types, specs, and callbacks.
 - **go_parser.py** — Extracts exported functions, types, constants, and variables from Go files by capitalization.
 - **java_parser.py** — Extracts public types and methods from Java files using regex patterns and annotation stripping.
 - **js_ts_parser.py** — Extracts exported functions, classes, interfaces, and types from JavaScript/TypeScript files.
@@ -31,6 +31,6 @@ Language-specific parsers that extract public APIs and structural definitions fr
 
 ## Notes
 
-- Each parser is tailored to its language's syntax and visibility conventions (e.g., capitalization for Go, public keyword for Java/C#, module exports for JavaScript/TypeScript).
+- Each parser is tailored to its language's syntax and visibility conventions (e.g., capitalization in Go, public keyword in Java/C#, module exports in JavaScript/TypeScript).
 - Parsers use a mix of regex-based and AST-based approaches depending on language complexity.
-- These modules likely share a common interface for integration with the broader context-project framework.
+- These modules likely share a common interface for integration with the broader context-project system.

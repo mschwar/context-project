@@ -3,11 +3,11 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–14 complete.
+- **Status:** Stable. Phases 1–15 complete.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 237 tests passing across all modules.
+- **Test Coverage:** 249 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
-- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby + Elixir language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view (with `--format json`), `ctx export`, `ctx stats`.
+- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby + Elixir language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view (with `--format json`, `--quiet`, `--since`), `ctx export` (with `--filter`, `--depth`), `ctx stats` (with `--verbose`), `ctx clean`.
 
 ## Completed Milestones
 
@@ -171,15 +171,26 @@ Close all suggestions from the Phase 13 reflection. Deliver unified diff vocabul
 
 **Branch:** `feat/phase14-cli-completeness`
 
-## Phase 15 — CLI Power-User Features
+## Phase 15 — CLI Power-User Features ✓
 
 Close all suggestions from the Phase 14 reflection.
 
-- [ ] **15.1 `ctx stats --verbose`** — per-directory breakdown table (path, covered/missing/stale status, token count) in addition to aggregate totals.
-- [ ] **15.2 `ctx export --filter stale`** — `--filter` option accepting `stale`, `missing`, or `all` (default) to export only manifests that need attention.
-- [ ] **15.3 `ctx diff --quiet` exit-code mode** — suppress output and exit 1 if any changes are found; enables zero-config CI gating without JSON parsing.
-- [ ] **15.4 Elixir `@type`/`@spec`/`@callback` extraction** — extend the Elixir parser to capture module-level attributes for full library API surface coverage.
-- [ ] **15.5 `ctx clean` command** — remove all `CONTEXT.md` files under a directory tree; provides a quick "reset to zero" before regenerating.
-- [ ] **15.6 `ctx export --depth N`** — limit the rglob to N nesting levels; useful for exporting only top-level or mid-level manifests.
+- [x] **15.1 `ctx stats --verbose`** — per-directory breakdown table (path, covered/missing/stale status, token count) in addition to aggregate totals.
+- [x] **15.2 `ctx export --filter stale`** — `--filter` option accepting `stale`, `missing`, or `all` (default) to export only manifests that need attention.
+- [x] **15.3 `ctx diff --quiet` exit-code mode** — suppress output and exit 1 if any changes are found; enables zero-config CI gating without JSON parsing.
+- [x] **15.4 Elixir `@type`/`@spec`/`@callback` extraction** — extend the Elixir parser to capture module-level attributes for full library API surface coverage.
+- [x] **15.5 `ctx clean` command** — remove all `CONTEXT.md` files under a directory tree; provides a quick "reset to zero" before regenerating.
+- [x] **15.6 `ctx export --depth N`** — limit the rglob to N nesting levels; useful for exporting only top-level or mid-level manifests.
 
 **Branch:** `feat/phase15-cli-power-user`
+
+## Phase 16 — Observability & Consistency
+
+Close all suggestions from the Phase 15 reflection.
+
+- [ ] **16.1 `ctx stats --format json`** — add `--format json` flag (aggregate and `--verbose` modes) for machine-readable coverage reports; enables dashboards and CI scripts without parsing table text.
+- [ ] **16.2 `ctx clean --dry-run`** — preview which `CONTEXT.md` files would be deleted without removing them; mirrors the `ctx update --dry-run` pattern.
+- [ ] **16.3 `ctx export` respects `.ctxignore`** — thread the `pathspec`-based ignore logic through the `rglob` walk in `export.py` so directories excluded from `ctx update` are also excluded from `ctx export`.
+- [ ] **16.4 `ctx watch` stale count on update** — after each debounced `update_tree` call, print a one-line stats summary (stale/covered counts) so users get continuous coverage feedback without running a separate command.
+- [ ] **16.5 `ctx verify` command** — check each `CONTEXT.md` frontmatter for required fields (`generated`, `generator`, `model`, `content_hash`, `files`, `dirs`, `tokens_total`) and report manifests with missing or malformed fields.
+- [ ] **16.6 `ctx diff --stat`** — print a one-line summary count (`N modified, N new, N stale`) rather than the full file list; mirrors `git diff --stat` semantics.
