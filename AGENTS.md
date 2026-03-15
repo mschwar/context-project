@@ -13,7 +13,7 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 - **Test Coverage**: 166 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
 
-> **Branch notice**: As of March 2026, Phases 1–11 are complete on `main`. Phase 12 is the active development phase. New work should branch from `main`.
+> **Branch notice**: As of March 2026, Phases 1–12 are complete on `main`. Phase 13 is the active development phase. New work should branch from `main`.
 
 > **Manifest refresh rule**: Any commit that adds or modifies source files must include a `ctx update .` pass to regenerate stale `CONTEXT.md` files before pushing. The `CTX Manifest Check` CI job enforces this and will fail otherwise.
 
@@ -212,13 +212,23 @@ Scope: close all open suggestions accumulated across Phases 4–10 reflections.
 
 **Branch:** `feat/phase11-completeness`
 
-### Phase 12 — Language Depth & CLI Ergonomics
+### Phase 12 — Language Depth & CLI Ergonomics ✓
 Scope: close all suggestions from the Phase 11 reflection; expand language coverage and improve CLI discoverability.
-- Kotlin parser: `fun`, `data class`, `object`, `interface`, `enum class`. Wired in for `.kt` files.
-- Ruby parser: top-level `def`, `class`, `module`. Wired in for `.rb` files.
-- `ctx diff` command: show which `CONTEXT.md` files changed since the last generation run.
-- C# property parsing: separate `properties` key from `methods` in `parse_csharp_file()`.
-- Annotation-aware Java method matching: handle `@Annotation\npublic void foo()` patterns.
-- `ctx init --overwrite` flag: skip fresh manifests when `--overwrite=false` (matching `ctx update` behaviour).
+- Kotlin parser: `fun`, `data class`, `object`, `interface`, `enum class`. 6 tests.
+- Ruby parser: `def`/`self.method`, `class`, `module`. 6 tests.
+- `ctx diff` command: `[mod]`/`[new]` CONTEXT.md files via git. 2 tests.
+- C# property parsing: separate `properties` key from `methods`. 1 new test.
+- Annotation-aware Java method matching: strips `@Annotation` lines before regex. 1 new test.
+- `ctx init --overwrite/--no-overwrite`: `--no-overwrite` delegates to `update_tree`. 2 tests.
 
 **Branch:** `feat/phase12-language-depth`
+
+### Phase 13 — Extended Language Support & CLI Polish
+Scope: close all suggestions from the Phase 12 reflection.
+- PHP parser: `public function`, `class`, `interface`, `trait`, `enum`. Wired for `.php`.
+- Swift parser: `func`, `class`, `struct`, `protocol`, `enum`. Wired for `.swift`.
+- `ctx diff --since <ref>`: accept a git ref to scope the diff beyond `HEAD`.
+- Non-git fallback for `ctx diff`: mtime-based comparison when outside a git repo.
+- `ctx init` idempotency docs: README clarification + promote `--no-overwrite`.
+
+**Branch:** `feat/phase13-extended-language-support`

@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-14T23:44:55Z'
+generated: '2026-03-15T03:43:55Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:b728039fb5404bc2ee85f700fb218ea49d44da6542cffa0cb32869207c8696a5
+content_hash: sha256:e930ceae36179676ce4621937afd6bd99ca6eeb432066103196b4eb40a5a51fd
 files: 17
 dirs: 9
 tokens_total: 12086
@@ -29,7 +29,7 @@ CLI tool that generates CONTEXT.md manifests for project directories to help AI 
 - **package.json** — Project metadata and scripts for Node.js tooling including commitlint and Husky setup.
 - **pyproject.toml** — Python package configuration specifying dependencies, entry points, and metadata for the ctx-tool PyPI distribution.
 - **rules.md** — Engineering standards and agentic rules for code quality, path handling, and manifest protocol compliance.
-- **state.md** — Current development status tracking completed milestones, active phases, health metrics, and upcoming roadmap items for ctx project.
+- **state.md** — Development status tracker documenting completed milestones, current health, and active roadmap phases for the ctx project.
 
 ## Subdirectories
 
@@ -39,12 +39,12 @@ CLI tool that generates CONTEXT.md manifests for project directories to help AI 
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
 - **.pytest_cache/** — Pytest cache directory storing test execution metadata, results, and configuration to optimize test runs.
 - **.worktrees/** — Git worktrees configuration and management directory for the context-project.
-- **archive/** — Archive of design documents, analyses, and roadmaps for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
-- **src/** — Source code directory containing the main implementation of the context project.
+- **archive/** — Historical documentation and design analysis for the ctx tool, a filesystem-native manifest system enabling hierarchical directory navigation for AI agents.
+- **src/** — Source code for the context project, containing core modules and utilities for AI agent context management.
 - **tests/** — Test suite covering CLI commands, configuration, language parsers, Git integration, file hashing, manifest generation, LLM clients, and end-to-end workflows.
 
 ## Notes
 
-- This project implements an agentic SDLC workflow with mandatory phase closeout procedures and pre-commit validation.
-- Python and Node.js tooling are both configured; the primary distribution is via PyPI as ctx-tool.
-- Git hooks enforce conventional commits and manifest freshness checks before commits.
+- The project uses Python (pyproject.toml) and Node.js (package.json) tooling with pre-commit hooks and Husky for automation.
+- AGENTS.md, CONTRIBUTING.md, GATE_CLOSEOUT.md, and rules.md define the agentic SDLC workflow and governance model.
+- The =4.0 file appears to be a malformed or temporary artifact and may warrant investigation.

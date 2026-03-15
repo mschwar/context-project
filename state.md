@@ -3,11 +3,11 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–11 complete.
+- **Status:** Stable. Phases 1–12 complete.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 195 tests passing across all modules.
+- **Test Coverage:** 213 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
-- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection.
+- **Ecosystem:** MCP server, git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view.
 
 ## Completed Milestones
 
@@ -134,15 +134,27 @@ Close all outstanding suggestions accumulated across Phases 4–10 reflections.
 
 **Branch:** `feat/phase11-completeness`
 
-## Phase 12 — Language Depth & CLI Ergonomics
+## Phase 12 — Language Depth & CLI Ergonomics ✓
 
 Close all suggestions from the Phase 11 reflection. Expand language coverage and improve CLI discoverability.
 
-- [ ] **12.1 Kotlin parser** — `fun`, `data class`, `object`, `interface`, `enum class`. Wired in for `.kt` files.
-- [ ] **12.2 Ruby parser** — top-level `def`, `class`, `module`. Public by default; parse all top-level definitions. Wired in for `.rb` files.
-- [ ] **12.3 `ctx diff` command** — show which `CONTEXT.md` files changed since the last generation run (git diff on `CONTEXT.md` files). Low cost, high diagnostic value.
-- [ ] **12.4 C# property parsing** — add `properties` key to `parse_csharp_file()`, separate from `methods`. `public int Foo { get; set; }` currently may match method regex.
-- [ ] **12.5 Annotation-aware Java method matching** — handle `@Override\npublic void foo()` by stripping annotation lines before matching or relaxing line-anchor requirement.
-- [ ] **12.6 `ctx init --overwrite` flag** — skip existing fresh manifests when `--overwrite=false` (default), matching `ctx update` behaviour.
+- [x] **12.1 Kotlin parser** — `fun`, `data class`, `object`, `interface`, `enum class`; wired for `.kt`; 6 tests.
+- [x] **12.2 Ruby parser** — `def`/`self.method`, `class`, `module`; wired for `.rb`; 6 tests.
+- [x] **12.3 `ctx diff` command** — lists `[mod]`/`[new]` CONTEXT.md files via `git diff HEAD` + `git ls-files`; 2 tests.
+- [x] **12.4 C# property parsing** — `properties` key added, separate from `methods`; 1 new test.
+- [x] **12.5 Annotation-aware Java method matching** — strips `@Annotation` lines before method regex; 1 new test.
+- [x] **12.6 `ctx init --overwrite/--no-overwrite`** — default regenerates all; `--no-overwrite` delegates to `update_tree`; 2 tests.
 
 **Branch:** `feat/phase12-language-depth`
+
+## Phase 13 — Extended Language Support & CLI Polish
+
+Close all suggestions from the Phase 12 reflection.
+
+- [ ] **13.1 PHP parser** — `public function`, `class`, `interface`, `trait`, `enum`. Wired for `.php` files.
+- [ ] **13.2 Swift parser** — `func`, `class`, `struct`, `protocol`, `enum`. Wired for `.swift` files.
+- [ ] **13.3 `ctx diff --since <ref>`** — accept a git ref (branch, commit, tag) to show changes since a specific point, not just since `HEAD`.
+- [ ] **13.4 Non-git fallback for `ctx diff`** — when outside a git repo, compare `CONTEXT.md` mtimes against source file mtimes.
+- [ ] **13.5 `ctx init` idempotency docs** — clarify in README that `ctx init` regenerates unconditionally; promote `ctx init --no-overwrite` for incremental use.
+
+**Branch:** `feat/phase13-extended-language-support`
