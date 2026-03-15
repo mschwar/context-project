@@ -1,22 +1,22 @@
 ---
-generated: '2026-03-15T04:13:31Z'
+generated: '2026-03-15T04:39:05Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:6f7f8f93070b650aede9e5cbd0c4edfb80cf07af3bac410d036ccd604577b98b
+content_hash: sha256:e148050b5728a33083358b78d60b5d9fa79bd46c5b0a42e99e079e16f99ececb
 files: 14
 dirs: 1
-tokens_total: 12763
+tokens_total: 12764
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
-Core module implementing a filesystem-native context layer for AI agents, providing CLI tools and LLM-powered directory summarization with manifest generation and incremental updates.
+Core module providing filesystem-native context generation for AI agents through LLM-powered directory manifests and incremental updates.
 
 ## Files
 
 - **.ctxignore.default** — Default ignore patterns for ctx, excluding version control, dependencies, IDE files, and temporary artifacts.
 - **__init__.py** — Package initialization defining ctx as a filesystem-native context layer for AI agents.
 - **__main__.py** — Entry point for running ctx as a Python module via `python -m ctx`.
-- **cli.py** — Click CLI entry point providing commands to generate, update, and manage CONTEXT.md manifests.
+- **cli.py** — Click CLI entry point providing commands to generate, update, and manage CONTEXT.md filesystem manifests.
 - **config.py** — Loads and resolves configuration from environment variables, .ctxconfig files, and CLI flags with provider detection.
 - **generator.py** — Core generation engine that walks directory trees bottom-up, reads files, calls LLM for summaries, and writes manifests.
 - **git.py** — Utility for retrieving changed files from a git repository since last commit or staging.
@@ -30,10 +30,10 @@ Core module implementing a filesystem-native context layer for AI agents, provid
 
 ## Subdirectories
 
-- **lang_parsers/** — Language-specific parsers that extract public APIs and structural definitions from source files across multiple programming languages.
+- **lang_parsers/** — Language-specific parsers that extract public APIs and structural elements from source files across multiple programming languages.
 
 ## Notes
 
-- The module follows a layered architecture: configuration and CLI at the top, generation and manifest management in the middle, and language detection and LLM integration at the foundation.
-- Incremental updates are supported through git integration, content hashing, and file watching for efficient re-generation.
-- Multiple LLM providers are supported via a protocol-based abstraction in llm.py.
+- The module follows a layered architecture: configuration and detection (config, language_detector, ignore) feed into core generation (generator, llm, manifest), with utilities for git integration, hashing, and file watching supporting incremental workflows.
+- LLM implementations are pluggable via the protocol in llm.py, allowing multiple provider backends.
+- Manifests are stored as CONTEXT.md files with frontmatter metadata for tracking staleness and configuration.

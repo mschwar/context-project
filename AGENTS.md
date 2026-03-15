@@ -10,10 +10,10 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 - **LLM Clients**: Anthropic and OpenAI supported (including Ollama and LM Studio). **BitNet is deprecated** — `create_client("bitnet")` raises an informative error directing users to Ollama or LM Studio.
 - **Language Parsers**: Python (`ast`-based), JavaScript/TypeScript (regex), Rust (regex), Go (regex). Wired into `generator._prepare_file_entry`; metadata is passed to the LLM prompt for richer summaries.
 - **File Watcher**: `ctx watch` — OS-native file watcher via `watchdog`. CONTEXT.md writes excluded to prevent infinite loops. 0.5 s per-file debounce.
-- **Test Coverage**: 237 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, `java_parser`, `csharp_parser`, `kotlin_parser`, `ruby_parser`, `php_parser`, `swift_parser`, `elixir_parser`, integration).
+- **Test Coverage**: 249 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, `java_parser`, `csharp_parser`, `kotlin_parser`, `ruby_parser`, `php_parser`, `swift_parser`, `elixir_parser`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, and `CONTRIBUTING.md` define the system.
 
-> **Branch notice**: As of March 2026, Phases 1–14 are complete on `main`. Phase 15 is the active development phase. New work should branch from `main`.
+> **Branch notice**: As of March 2026, Phases 1–15 are complete on `main`. Phase 16 is the active development phase. New work should branch from `main`.
 
 > **Manifest refresh rule**: Any commit that adds or modifies source files must include a `ctx update .` pass to regenerate stale `CONTEXT.md` files before pushing. The `CTX Manifest Check` CI job enforces this and will fail otherwise.
 
@@ -243,7 +243,7 @@ Scope: unified diff vocabulary, JSON output, export, stats, and Elixir parser.
 
 **Branch:** `feat/phase14-cli-completeness`
 
-### Phase 15 — CLI Power-User Features
+### Phase 15 — CLI Power-User Features ✓
 Scope: close all suggestions from the Phase 14 reflection.
 - `ctx stats --verbose`: per-directory breakdown table in addition to aggregate totals.
 - `ctx export --filter stale`: export only manifests needing attention (`stale`, `missing`, or `all`).
@@ -253,3 +253,12 @@ Scope: close all suggestions from the Phase 14 reflection.
 - `ctx export --depth N`: limit rglob to N nesting levels.
 
 **Branch:** `feat/phase15-cli-power-user`
+
+### Phase 16 — Observability & Consistency
+Scope: close all suggestions from the Phase 15 reflection.
+- `ctx stats --format json`: machine-readable JSON output for aggregate and `--verbose` modes; enables dashboards and CI scripts.
+- `ctx clean --dry-run`: preview which `CONTEXT.md` files would be deleted without removing them; mirrors `ctx update --dry-run`.
+- `ctx export` respects `.ctxignore`: thread `pathspec`-based ignore logic through the `rglob` walk so excluded directories are consistently excluded from both `update` and `export`.
+- `ctx watch` stale count on update: after each debounced `update_tree` call, print a one-line stats summary so users get continuous coverage feedback.
+- `ctx verify` command: check each `CONTEXT.md` frontmatter for all required fields; report manifests with missing or malformed fields.
+- `ctx diff --stat`: print a one-line summary count (`N modified, N new, N stale`) rather than the full file list; mirrors `git diff --stat` semantics.
