@@ -751,9 +751,6 @@ def verify(path: str) -> None:
             malformed_manifests.append(rel)
             continue
 
-        if manifest is None:
-            continue
-
         missing_fields = []
         for field in required_fields:
             value = getattr(manifest.frontmatter, field, None)
