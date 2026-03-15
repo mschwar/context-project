@@ -37,6 +37,8 @@ from ctx.lang_parsers.java_parser import parse_java_file
 from ctx.lang_parsers.csharp_parser import parse_csharp_file
 from ctx.lang_parsers.kotlin_parser import parse_kotlin_file
 from ctx.lang_parsers.ruby_parser import parse_ruby_file
+from ctx.lang_parsers.php_parser import parse_php_file
+from ctx.lang_parsers.swift_parser import parse_swift_file
 
 
 # Cap on threads per depth level. LLM calls are I/O-bound so threads are effective,
@@ -203,6 +205,10 @@ def _prepare_file_entry(
         metadata = parse_kotlin_file(path)
     elif language == "Ruby":
         metadata = parse_ruby_file(path)
+    elif language == "PHP":
+        metadata = parse_php_file(path)
+    elif language == "Swift":
+        metadata = parse_swift_file(path)
 
     truncated = content[: config.max_file_tokens]
     entry = {

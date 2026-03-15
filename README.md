@@ -22,10 +22,12 @@ That's it. Every directory now has a `CONTEXT.md` that summarises its contents f
 | Command | Description |
 |---------|-------------|
 | `ctx setup` | Auto-detect provider and write `.ctxconfig` |
-| `ctx init .` | Generate manifests for all directories |
+| `ctx init .` | Generate manifests for **all** directories (unconditional) |
+| `ctx init . --no-overwrite` | Generate only missing/stale manifests (incremental) |
 | `ctx update .` | Regenerate only stale manifests |
 | `ctx smart-update .` | Regenerate only directories with git-changed files |
 | `ctx status .` | Show how many manifests are stale or missing |
+| `ctx diff .` | Show which CONTEXT.md files changed since last commit |
 | `ctx watch .` | Auto-regenerate on file save |
 | `ctx serve .` | Expose manifests via Model Context Protocol (MCP) |
 
