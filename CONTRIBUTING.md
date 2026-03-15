@@ -4,6 +4,14 @@ We embrace an **Agentic SDLC**. This means the codebase is designed to be co-aut
 
 ## The Agentic Workflow
 
+### 0. Phase 16 Gate Selection
+If you are working on Phase 16, start with [PHASE16_HANDOFF.md](./PHASE16_HANDOFF.md).
+
+- Pick exactly one gate.
+- Keep the gate's file list, tests, and acceptance criteria in your prompt.
+- For smaller models such as `kimi2.5` or `qwen`, do not combine gates.
+- If the work spills beyond the listed files, stop and update the plan before coding.
+
 ### 1. Context Maintenance
 Every PR that adds or modifies a directory MUST update the corresponding `CONTEXT.md` files.
 - Use `ctx update .` before committing your changes.
@@ -29,10 +37,11 @@ During code review, pay special attention to the `CONTEXT.md` changes. They are 
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/
+python -m pytest tests/
 ```
 
 ## Agentic Rules of Engagement
-- **Never bypass `ctx ignore`:** Respect the filtering logic to keep manifests clean.
+- **Never bypass `.ctxignore`:** Respect the filtering logic to keep manifests clean and consistent across CLI surfaces.
 - **Atomic Commits:** Prefer small, focused commits that update both code and its associated context.
 - **Deterministic Hashing:** If you modify `hasher.py`, ensure that hashes remain stable across platforms (Windows/Linux).
+- **One Gate Per PR:** For roadmap work, keep each branch scoped to one named gate unless `AGENTS.md` says otherwise.

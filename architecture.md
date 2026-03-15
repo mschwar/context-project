@@ -1,6 +1,8 @@
 # Architecture: `ctx`
 
-`ctx` is a filesystem-native context layer designed to help AI agents navigate large codebases. It provides a "coarse-to-fine" view of a project by generating and maintaining `CONTEXT.md` files in every directory.
+`ctx` is a filesystem-native context layer designed to help AI agents navigate large codebases. It provides a coarse-to-fine view of a project by generating and maintaining `CONTEXT.md` files in every directory.
+
+The manifests are the navigation primitive. The durable product value is the generator that keeps them fresh with one command and without external infrastructure.
 
 ## Core Design Principles
 
@@ -15,20 +17,25 @@ This recursive hashing ensures that any change in a leaf file propagates up the 
 
 ### 3. Decoupled LLM Strategy
 The `LLMClient` protocol abstracts the summarization logic. Supported providers include:
-- **Cloud:** Anthropic (Claude), OpenAI (GPT-4o-mini).
-- **Local:** Ollama, LM Studio (OpenAI-compatible), BitNet (subprocess-based inference).
+- **Cloud:** Anthropic (Claude), OpenAI.
+- **Local:** Ollama and LM Studio (via the OpenAI-compatible client).
+
+BitNet is deprecated in this repo. Attempting to use it raises an informative error directing users to Ollama or LM Studio.
 
 ## Component Breakdown
 
 | Component | Responsibility |
 |-----------|----------------|
-| `cli.py` | Entry point using `Click`. Handles `init`, `update`, and `status`. |
+| `cli.py` | Entry point using `Click`. Handles generation, inspection, export, cleanup, watch, setup, and serving commands. |
 | `generator.py` | The "Brain". Orchestrates tree walking, hashing, and LLM orchestration. |
 | `llm.py` | Provider implementations. Handles structured prompting and token tracking. |
 | `hasher.py` | Robust SHA-256 hashing logic with symlink loop detection. |
 | `manifest.py` | Parsing and serializing `CONTEXT.md` (YAML + Markdown). |
 | `config.py` | Hierarchical configuration resolution (Defaults -> `.ctxconfig` -> Env -> CLI). |
 | `ignore.py` | `.gitignore`-style filtering using the `pathspec` library. |
+| `git.py` | Git-aware changed-file detection for selective refresh. |
+| `watcher.py` | File watching and debounced incremental refresh. |
+| `server.py` | HTTP server for reading generated manifests remotely. |
 
 ## Data Flow
 

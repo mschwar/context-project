@@ -29,6 +29,11 @@ node_modules/
 *~
 .obsidian/
 
+# Workspace / agent noise
+.pytest_cache/
+.worktrees/
+.tmp/
+
 # Temporary files and directories
 tmp/
 tmp*/
