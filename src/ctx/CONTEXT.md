@@ -1,19 +1,19 @@
 ---
-generated: '2026-03-15T08:03:00Z'
+generated: '2026-03-15T05:51:15Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:34e09c5d50a5f2439a375186f7a92e706ede1e7e446fab2697ab1d13d69cddfd
+content_hash: sha256:3d9feb79799cb3e4d8f04bf8130b562a937af7bde62b4b2e9d01341994d1c76e
 files: 14
 dirs: 1
-tokens_total: 12764
+tokens_total: 12786
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
-Core module providing filesystem-native context generation for AI agents through LLM-powered directory manifests and incremental updates.
+Core implementation of ctx, a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agents using LLM-powered file summarization.
 
 ## Files
 
-- **.ctxignore.default** — Default ignore patterns for ctx, excluding version control, dependencies, editor state, workspace caches, temporary artifacts, and transient editor byproducts.
+- **.ctxignore.default** — Default ignore patterns for ctx tool, excluding version control, dependencies, IDE files, and sensitive data.
 - **__init__.py** — Package initialization defining ctx as a filesystem-native context layer for AI agents.
 - **__main__.py** — Entry point for running ctx as a Python module via `python -m ctx`.
 - **cli.py** — Click CLI entry point providing commands to generate, update, and manage CONTEXT.md filesystem manifests.
@@ -34,6 +34,7 @@ Core module providing filesystem-native context generation for AI agents through
 
 ## Notes
 
-- The module follows a layered architecture: configuration and detection (config, language_detector, ignore) feed into core generation (generator, llm, manifest), with utilities for git integration, hashing, and file watching supporting incremental workflows.
-- LLM implementations are pluggable via the protocol in llm.py, allowing multiple provider backends.
-- Manifests are stored as CONTEXT.md files with frontmatter metadata for tracking staleness and configuration.
+- The generator module orchestrates the full pipeline: configuration loading, file traversal, LLM summarization, and manifest writing.
+- LLM implementations are pluggable via the protocol in llm.py; config.py handles provider selection and credential resolution.
+- Ignore patterns follow gitignore conventions and are evaluated during directory traversal to exclude files from processing.
+- The watcher module enables continuous synchronization of manifests as the codebase evolves.

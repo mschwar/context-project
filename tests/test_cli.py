@@ -769,6 +769,43 @@ def test_clean_aborts_without_confirmation(tmp_path) -> None:
     assert (root / "CONTEXT.md").exists()
 
 
+def test_clean_dry_run_lists_files_without_deleting(tmp_path) -> None:
+    """ctx clean --dry-run should list files without deleting them."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "CONTEXT.md").write_text("root", encoding="utf-8")
+    sub = root / "sub"
+    sub.mkdir()
+    (sub / "CONTEXT.md").write_text("sub", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["clean", "--dry-run", str(root)])
+
+    assert result.exit_code == 0
+    assert "2 CONTEXT.md file(s) would be deleted:" in result.output
+    assert "CONTEXT.md" in result.output
+    assert "sub/CONTEXT.md" in result.output
+    # Files should still exist
+    assert (root / "CONTEXT.md").exists()
+    assert (sub / "CONTEXT.md").exists()
+
+
+def test_clean_dry_run_no_files_found(tmp_path) -> None:
+    """ctx clean --dry-run should report no files found when none exist."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+
+    result = runner.invoke(cli_module.cli, ["clean", "--dry-run", str(root)])
+
+    assert result.exit_code == 0
+    assert "No CONTEXT.md files found." in result.output
+
+
 # --- 15.6: ctx export --depth ---
 
 
