@@ -652,10 +652,7 @@ def clean(path: str, yes: bool, dry_run: bool) -> None:
     if dry_run:
         click.echo(f"{len(manifests)} CONTEXT.md file(s) would be deleted:")
         for m in manifests:
-            try:
-                rel = m.relative_to(root).as_posix()
-            except ValueError:
-                rel = m.as_posix()
+            rel = m.relative_to(root).as_posix()
             click.echo(f"  {rel}")
         return
 
