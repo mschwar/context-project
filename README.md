@@ -1,6 +1,10 @@
 # ctx
 
-Generates `CONTEXT.md` manifests for every directory in your project so AI agents can navigate large codebases without reading every file.
+[![PyPI](https://img.shields.io/pypi/v/ctx-tool)](https://pypi.org/project/ctx-tool/)
+[![Python Version](https://img.shields.io/pypi/pyversions/ctx-tool)](https://pypi.org/project/ctx-tool/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+Generates persistent `CONTEXT.md` manifests for every directory in your project so AI agents can navigate large codebases without reading every file.
 
 ## Quick Start
 
@@ -15,7 +19,7 @@ That's it. Every directory now has a `CONTEXT.md` that summarises its contents f
 
 ## What it does
 
-`ctx` walks your project tree bottom-up, sends each directory's file contents to an LLM, and writes a structured `CONTEXT.md` summary. Subsequent runs only regenerate manifests whose source files have changed. The result is a persistent, always-fresh context layer that agents and humans can read at any depth.
+`ctx` walks your project tree bottom-up, sends each directory's file contents to an LLM, and writes a structured `CONTEXT.md` summary. Subsequent runs only regenerate manifests whose source files have changed. The result is a persistent, hierarchical context layer that agents and humans can read at any depth without a separate database.
 
 ## Commands
 
@@ -28,8 +32,11 @@ That's it. Every directory now has a `CONTEXT.md` that summarises its contents f
 | `ctx smart-update .` | Regenerate only directories with git-changed files |
 | `ctx status .` | Show how many manifests are stale or missing |
 | `ctx diff .` | Show which CONTEXT.md files changed since last commit |
+| `ctx export .` | Concatenate manifests for downstream agent ingestion |
+| `ctx stats .` | Show coverage totals across the tree |
+| `ctx clean . --yes` | Remove all manifests under a tree |
 | `ctx watch .` | Auto-regenerate on file save |
-| `ctx serve .` | Expose manifests via Model Context Protocol (MCP) |
+| `ctx serve` | Serve manifests over HTTP |
 
 ## Configuration
 
@@ -72,4 +79,5 @@ Run `ctx init .` once before the hook will pass on a new repo.
 
 - [Architecture](./architecture.md) — bottom-up context strategy
 - [Contributing](./CONTRIBUTING.md) — agentic workflow
+- [Phase 16 Handoff](./PHASE16_HANDOFF.md) — current gate order and small-model guardrails
 - [State](./state.md) — current roadmap
