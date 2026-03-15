@@ -30,7 +30,8 @@ def parse_elixir_file(path: Path) -> Dict[str, List[str]]:
 
     modules = _DEFMODULE.findall(content)
     # If the file contains a defstruct, associate it with every module declared
-    # in that file (typically there is only one per file in idiomatic Elixir).
+    # in that file. This is a heuristic based on the common Elixir pattern of
+    # one module per file. It may be inaccurate for files with multiple modules.
     structs = list(modules) if _DEFSTRUCT.search(content) else []
 
     return {
