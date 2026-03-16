@@ -151,6 +151,7 @@ def test_cli_prints_retry_tip_when_transient_error_in_stats(tmp_path, monkeypatc
     )
 
     monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
+    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
     monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda p: object())
     monkeypatch.setattr(cli_module, "create_client", lambda c: object())
     monkeypatch.setattr(cli_module, "update_tree", lambda *a, **kw: fake_stats)

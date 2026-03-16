@@ -213,5 +213,21 @@ Carry-forward items from the Phase 16 reflection.
 
 Carry-forward items from the Phase 17 reflection.
 
-- [ ] **18.1 Pre-flight connectivity check** — run `probe_provider_connectivity` before starting the full refresh in `ctx update`/`ctx init` so the operator gets an early, actionable failure rather than per-directory errors after tokens are already spent.
-- [ ] **18.2 Proxy guidance in transient error tip** — when `_echo_generation_errors` prints the transient retry tip, also check and name active proxy env vars in-line so guidance appears without needing to run `ctx setup --check`.
+- [x] **18.1 Pre-flight connectivity check** — run `probe_provider_connectivity` before starting the full refresh in `ctx update`/`ctx init` so the operator gets an early, actionable failure rather than per-directory errors after tokens are already spent.
+- [x] **18.2 Proxy guidance in transient error tip** — when `_echo_generation_errors` prints the transient retry tip, also check and name active proxy env vars in-line so guidance appears without needing to run `ctx setup --check`.
+
+## Phase 19 — Real-World UX
+
+Theme: Quality-of-life improvements for live end-user testing on real repos.
+
+- [ ] **19.1 Cross-repo smoke test** — run `ctx setup && ctx init .` on a real non-ctx repo on this machine. Fix any failures, path issues, or ignore-pattern gaps that surface.
+- [ ] **19.2 Progress reporting** — show directory count, running token total, and elapsed time during generation.
+- [ ] **19.3 Run cost summary** — after `ctx init`/`ctx update`, print an estimated cost line based on tokens used and known provider pricing.
+
+## Phase 20 — Agent Integration & Daily Workflow
+
+Theme: Make ctx useful as part of a real AI-assisted development workflow.
+
+- [ ] **20.1 `ctx watch` session test** — run a timed `ctx watch` session during real edits. Validate stability, debounce, ignore patterns, and coverage feedback. Fix any issues.
+- [ ] **20.2 Agent handoff test** — test `ctx export --depth 1` and `ctx serve` as context sources for Claude Code. Validate that exported context helps an agent navigate the target repo.
+- [ ] **20.3 Summary quality audit** — read generated manifests on real repos. Flag anything vague, wrong, or unhelpful. Implement prompt tuning based on findings.

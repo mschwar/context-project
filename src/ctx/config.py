@@ -50,6 +50,11 @@ DEFAULT_BASE_URLS = {
 }
 LOCAL_PROVIDERS = frozenset({"ollama", "lmstudio", "bitnet"})
 
+# Probe endpoints for connectivity checks
+ANTHROPIC_PROBE_URL = "https://api.anthropic.com/v1/models"
+ANTHROPIC_API_VERSION = "2023-06-01"
+OPENAI_DEFAULT_PROBE_BASE_URL = "https://api.openai.com"
+
 # Human-readable detection source shown by `ctx setup`
 PROVIDER_DETECTED_VIA: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY env var",
