@@ -20,7 +20,9 @@ import click
 from ctx import __version__
 from ctx.config import (
     DEFAULT_BASE_URLS,
+    LOCAL_PROVIDERS,
     PROVIDER_DETECTED_VIA,
+    PROXY_ENV_VARS,
     MissingApiKeyError,
     detect_provider,
     load_config,
@@ -65,6 +67,16 @@ def _build_generation_runtime(
             "  Run `ctx setup` to auto-detect your environment and create a .ctxconfig file.\n"
             "  Or set ANTHROPIC_API_KEY / OPENAI_API_KEY in your environment."
         ) from None
+
+    # Pre-flight connectivity check for cloud providers
+    if config.provider not in LOCAL_PROVIDERS:
+        ok, conn_error = probe_provider_connectivity(
+            config.provider, config.api_key, config.base_url,
+        )
+        if not ok:
+            _echo_connectivity_failure(conn_error or "unknown error")
+            sys.exit(1)
+
     spec = load_ignore_patterns(target_path)
     client = create_client(config)
     progress_cb = _progress_callback()
@@ -76,6 +88,25 @@ def _progress_callback() -> Callable[[Path, int, int], None]:
         click.echo(f"  [{done}/{total}] Processing {current_dir.name or current_dir}")
 
     return callback
+
+
+def _active_proxy_vars() -> list[str]:
+    """Return names of proxy-related env vars that are currently set."""
+    return [v for v in PROXY_ENV_VARS if os.getenv(v)]
+
+
+def _echo_connectivity_failure(error: str) -> None:
+    """Print a connectivity failure message with optional proxy guidance."""
+    click.echo(f"Pre-flight check failed: {error}", err=True)
+    proxy_vars = _active_proxy_vars()
+    if proxy_vars:
+        click.echo(
+            f"Proxy env vars detected: {', '.join(proxy_vars)}. "
+            "A broken proxy may be blocking requests. "
+            "Try unsetting them: unset " + " ".join(proxy_vars),
+            err=True,
+        )
+    click.echo("Tip: run `ctx setup --check` for detailed provider diagnostics.", err=True)
 
 
 def _echo_generation_errors(stats: GenerateStats) -> None:
@@ -90,6 +121,14 @@ def _echo_generation_errors(stats: GenerateStats) -> None:
             "Tip: transient errors may resolve on retry. Run the command again.",
             err=True,
         )
+        proxy_vars = _active_proxy_vars()
+        if proxy_vars:
+            click.echo(
+                f"Proxy env vars detected: {', '.join(proxy_vars)}. "
+                "A broken proxy may be the cause. "
+                "Try unsetting them: unset " + " ".join(proxy_vars),
+                err=True,
+            )
 
 
 def _echo_stale_dirs(stale: list[Path], target_path: Path) -> None:
@@ -356,11 +395,7 @@ def setup(path: str, check_only: bool) -> None:
                 click.echo("Connectivity: OK")
             else:
                 click.echo(f"Connectivity: FAILED — {conn_error}", err=True)
-                proxy_vars = [
-                    v
-                    for v in PROXY_ENV_VARS
-                    if os.getenv(v)
-                ]
+                proxy_vars = _active_proxy_vars()
                 if proxy_vars:
                     click.echo(
                         f"Proxy env vars detected: {', '.join(proxy_vars)}. "

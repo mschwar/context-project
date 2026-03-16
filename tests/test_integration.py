@@ -70,6 +70,7 @@ def test_ctx_init_end_to_end_creates_manifests(monkeypatch, tmp_path) -> None:
     root = _copy_sample_project(tmp_path)
 
     monkeypatch.setattr(cli_module, "create_client", lambda config: _EndToEndFakeClient())
+    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
 
     result = runner.invoke(
         cli_module.cli,
