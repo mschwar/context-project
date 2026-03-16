@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-16T22:02:43Z'
+generated: '2026-03-16T23:05:13Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:439d91bc610332519f05da252269d454d3489a87304c58e9f892d611d9a2eec7
+content_hash: sha256:3187f880d3759293fcf7f4f0b8a2b30a45d41e48c8eda1546bf6e1eb073d0f4f
 files: 18
 dirs: 7
 tokens_total: 15253
@@ -44,7 +44,7 @@ A filesystem-native tool that generates and maintains persistent CONTEXT.md mani
 
 ## Notes
 
-- The project uses a hybrid Node.js and Python stack with commitlint and Husky for enforcing conventional commits and pre-commit validation.
-- Agentic workflow is central to the project design; AGENTS.md, CONTRIBUTING.md, and rules.md define the contract for AI-assisted development.
-- Phase-based delivery model with mandatory gate closeout procedures ensures quality and founder oversight at each milestone.
-- Bottom-up manifest generation with content hashing enables efficient incremental updates and caching of directory summaries.
+- The project uses a hybrid Node.js and Python stack (package.json and pyproject.toml), with Python as the primary implementation language.
+- Agentic workflow is central to the project design, with AGENTS.md defining the contract for AI agent contributions and GATE_CLOSEOUT.md enforcing phase-based delivery discipline.
+- Git hooks (Husky, pre-commit) enforce manifest freshness and conventional commit standards as part of the development workflow.
+- The archive/ directory preserves design history and rationale, supporting iterative refinement and agent onboarding.

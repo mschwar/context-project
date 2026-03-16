@@ -1,11 +1,11 @@
 ---
-generated: '2026-03-16T22:02:36Z'
+generated: '2026-03-16T23:05:07Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:bbbbaec2cf748f0b852d19c60ac116494d53aa192cecbfb9d8eddf9950684243
+content_hash: sha256:1cacb829126245385a674d70d8267c702567ef2f47ecbc05dc898c5890d781e1
 files: 30
 dirs: 1
-tokens_total: 27521
+tokens_total: 27574
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
@@ -42,7 +42,7 @@ Comprehensive test suite covering CLI commands, language parsers, configuration,
 - **test_setup.py** — Tests for setup command, provider detection, and config file generation with various LLM providers.
 - **test_swift_parser.py** — Tests Swift parser extraction of public functions, classes, structs, protocols, and enums from Swift files.
 - **test_trust.py** — Tests for token estimation accuracy, cache eviction policy, and transient error messaging with retry exhaustion handling.
-- **test_watcher.py** — Unit tests for file system watcher covering event filtering, debounce logic, and watch session integration.
+- **test_watcher.py** — Unit tests for file system watcher event filtering, debounce logic, and coverage summary reporting.
 
 ## Subdirectories
 
