@@ -293,3 +293,7 @@ Scope: harden the operator path around manifest refresh failures discovered duri
 - Add a closeout-grade request-readiness check and operator guidance so gate closeout can detect broken proxy state instead of trusting env-var presence alone.
 
 **Branch:** `feat/phase17-closeout-reliability`
+
+#### Gates
+- Gate 17.1 — `ctx init`/`ctx update` exit 1 on errors. ✓
+- Gate 17.2 — `ctx setup --check` probes real connectivity and surfaces proxy guidance. ✓

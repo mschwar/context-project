@@ -123,6 +123,47 @@ def detect_provider(
     return None
 
 
+def probe_provider_connectivity(
+    provider: str, api_key: str, base_url: str | None = None
+) -> tuple[bool, str | None]:
+    """Make a lightweight call to verify a cloud provider is reachable.
+
+    Returns (True, None) on success or (False, error_message) on failure.
+    Local providers (ollama, lmstudio, bitnet) always return success — they are
+    validated via port probe during detect_provider.
+    """
+    import urllib.error
+    import urllib.request
+
+    if provider in LOCAL_PROVIDERS:
+        return True, None
+
+    if provider == "anthropic":
+        url = ANTHROPIC_PROBE_URL
+        req = urllib.request.Request(url)
+        req.add_header("x-api-key", api_key)
+        req.add_header("anthropic-version", ANTHROPIC_API_VERSION)
+    elif provider == "openai":
+        url = (base_url or OPENAI_DEFAULT_PROBE_BASE_URL) + "/v1/models"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {api_key}")
+    else:
+        return True, None
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
+        return True, None
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return False, f"Authentication failed (HTTP {exc.code}) — check your API key"
+        return False, f"HTTP error {exc.code}: {exc.reason}"
+    except urllib.error.URLError as exc:
+        return False, f"Connection error: {exc.reason}"
+    except (TimeoutError, OSError) as exc:
+        return False, f"Connection error: {exc}"
+
+
 def write_default_config(path: Path, provider: str, model: str | None = None, base_url: str | None = None) -> None:
     """Write a minimal .ctxconfig into *path* directory."""
     lines = [f"provider: {provider}"]
