@@ -297,3 +297,11 @@ Scope: harden the operator path around manifest refresh failures discovered duri
 #### Gates
 - Gate 17.1 — `ctx init`/`ctx update` exit 1 on errors. ✓
 - Gate 17.2 — `ctx setup --check` probes real connectivity and surfaces proxy guidance. ✓
+- Gate 17Z — Manifest refresh, validation, and phase closeout. ✓ `ctx setup --check` confirmed `Connectivity: OK`; `ctx update .` refreshed 4 directories, exited 0; 18 fresh, 0 stale, 0 missing; 281 tests passing.
+
+### Phase 18 — Pre-flight Connectivity & Error Guidance
+Carry-forward items from the Phase 17 reflection.
+- Pre-flight connectivity check in `ctx update`/`ctx init` — run `probe_provider_connectivity` before starting the full refresh so the operator gets an early, actionable failure rather than per-directory errors after tokens are already spent.
+- Surface proxy env vars in the transient error tip — when `_echo_generation_errors` prints the transient retry tip, also check and name active proxy vars in-line so guidance appears without needing to run `ctx setup --check`.
+
+**Branch:** `feat/phase18-preflight-connectivity`

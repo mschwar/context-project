@@ -1,47 +1,47 @@
 ---
-generated: '2026-03-15T07:36:05Z'
+generated: '2026-03-16T15:26:17Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:21e9874d9873a4ae06e75bc804efc47dd5c8ca0a966ecf21022c00af2f213b27
+content_hash: sha256:4eb6c541c6aae6d403eb0d9e4a88ec88a0ed61bdfa436015a906176b6a16d83c
 files: 29
 dirs: 1
 tokens_total: 25029
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Test suite for the context project covering CLI commands, configuration, language parsers, manifest generation, and integrations.
+Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM clients, and core generation engine functionality.
 
 ## Files
 
 - **__init__.py** — Package initialization file for tests directory.
-- **conftest.py** — Pytest fixtures for isolated environment and temporary directory management.
-- **test_cli.py** — CLI command tests covering init, update, status, version, diff, export, stats, clean, and verify operations.
-- **test_config.py** — Configuration loading tests for file, environment, and CLI argument resolution.
-- **test_csharp_parser.py** — C# language parser tests extracting classes, interfaces, methods, and properties.
-- **test_elixir_parser.py** — Elixir language parser tests extracting modules, functions, structs, types, specs, and callbacks.
-- **test_generator.py** — Core generation engine tests for manifest creation, updates, status checking, and token budgeting.
-- **test_git.py** — Git integration tests for detecting changed files in staged and unstaged states.
-- **test_go_parser.py** — Go language parser tests extracting exported functions, types, constants, and variables.
-- **test_hasher.py** — File and directory hashing tests for content integrity and staleness detection.
-- **test_ignore.py** — Ignore pattern loading and matching tests for .ctxignore and .ctxignore.default files.
-- **test_integration.py** — End-to-end CLI integration test creating manifests on sample project fixture.
-- **test_java_parser.py** — Java language parser tests extracting classes, interfaces, methods, and nested types.
-- **test_js_ts_parser.py** — JavaScript/TypeScript parser tests extracting functions, classes, interfaces, types, and exports.
-- **test_kotlin_parser.py** — Kotlin language parser tests extracting functions, classes, interfaces, objects, and enums.
-- **test_language_detector.py** — Language detection tests identifying programming languages by file extension and project markers.
-- **test_llm.py** — LLM client tests for Anthropic, OpenAI, caching, retries, and prompt template handling.
-- **test_main.py** — Module invocation test verifying ctx runs correctly via python -m.
-- **test_manifest.py** — Manifest read/write tests for CONTEXT.md frontmatter and body preservation.
-- **test_php_parser.py** — PHP language parser tests extracting functions, classes, interfaces, traits, and enums.
-- **test_prompts.py** — Prompt template tests verifying structure, placeholders, and injection defense.
-- **test_python_parser.py** — Python language parser tests extracting classes and functions from source code.
-- **test_ruby_parser.py** — Ruby language parser tests extracting methods, classes, and modules.
-- **test_rust_parser.py** — Rust language parser tests extracting public functions, structs, enums, traits, and modules.
-- **test_server.py** — MCP server tests for context endpoint and CLI serve command integration.
-- **test_setup.py** — Setup command tests for provider detection, config writing, and API key validation.
-- **test_swift_parser.py** — Swift language parser tests extracting functions, classes, structs, protocols, and enums.
-- **test_trust.py** — Token estimation, cache eviction, and transient error messaging tests.
-- **test_watcher.py** — File system watcher tests for event filtering, debouncing, and coverage reporting.
+- **conftest.py** — Pytest fixtures providing isolated environment and workspace-local temporary directories for tests.
+- **test_cli.py** — Tests for CLI command wiring, dependency injection, and output formatting across init, update, status, version, and utility commands.
+- **test_config.py** — Tests for configuration loading from files, environment variables, and CLI arguments.
+- **test_csharp_parser.py** — Tests C# parser extraction of public classes, interfaces, enums, structs, records, methods, and properties.
+- **test_elixir_parser.py** — Tests for Elixir file parser extracting modules, functions, structs, type annotations, specs, and callbacks.
+- **test_generator.py** — Tests for core generation engine including tree creation, updates, and status checking.
+- **test_git.py** — Tests for Git integration to detect changed files in repositories.
+- **test_go_parser.py** — Tests for Go language parser extracting functions, types, constants, and variables.
+- **test_hasher.py** — Tests for file and directory content hashing with ignore pattern support.
+- **test_ignore.py** — Tests for ignore pattern loading, merging, and path matching against default and user-defined ignore files.
+- **test_integration.py** — End-to-end CLI tests on sample fixture project with fake LLM client.
+- **test_java_parser.py** — Tests Java parser extraction of public classes, interfaces, enums, records, and methods with modifiers.
+- **test_js_ts_parser.py** — Tests for JavaScript/TypeScript parser extracting exports and language constructs.
+- **test_kotlin_parser.py** — Tests Kotlin parser extraction of functions, classes, interfaces, objects, and enums from source files.
+- **test_language_detector.py** — Tests for language detection from file extensions and project markers.
+- **test_llm.py** — Tests for LLM client creation and file/directory summarization with retries.
+- **test_main.py** — Tests for module invocation via python -m ctx command.
+- **test_manifest.py** — Tests for CONTEXT.md manifest file reading, writing, and parsing.
+- **test_php_parser.py** — Tests PHP parser extraction of public functions, classes, interfaces, traits, and enums from PHP files.
+- **test_prompts.py** — Regression tests verifying prompt templates exist, contain required placeholders, and include injection-defence language.
+- **test_python_parser.py** — Tests for Python language parser extracting classes and functions.
+- **test_ruby_parser.py** — Tests Ruby parser extraction of methods, classes, and modules from source files.
+- **test_rust_parser.py** — Tests for Rust language parser extracting public items and modules.
+- **test_server.py** — Tests for MCP server functionality including serve command invocation and manifest context retrieval via HTTP endpoints.
+- **test_setup.py** — Tests for setup command, provider detection, and config file generation with various LLM providers.
+- **test_swift_parser.py** — Tests Swift parser extraction of public functions, classes, structs, protocols, and enums from Swift files.
+- **test_trust.py** — Tests for token estimation with tiktoken fallback, cache eviction with size limits, and transient error messaging.
+- **test_watcher.py** — Tests for file system event filtering and debounce logic in the watcher module, including CONTEXT.md exclusion and rapid event coalescing.
 
 ## Subdirectories
 
@@ -49,6 +49,6 @@ Test suite for the context project covering CLI commands, configuration, languag
 
 ## Notes
 
-- Tests are organized by functional area: parsers for each supported language, core features (CLI, config, generation), and integrations (Git, LLM, server).
-- Pytest fixtures in conftest.py provide isolated test environments and temporary directories.
-- Language parser tests follow a consistent pattern across multiple supported languages.
+- Tests are organized by module and feature area, with language-specific parser tests grouped together.
+- Integration tests use a fake LLM client to avoid external dependencies.
+- Fixtures directory provides sample projects for end-to-end testing scenarios.

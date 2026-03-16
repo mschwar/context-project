@@ -205,5 +205,13 @@ Execution order: one gate per branch/PR. See `PHASE16_HANDOFF.md` for file lists
 
 Carry-forward items from the Phase 16 reflection.
 
-- [ ] **17.1 Non-zero exit on refresh errors** — make `ctx update` / `ctx init` fail the process when any directory regeneration errors out, including transient retry exhaustion, so CI and gate closeout cannot misread a failed refresh as success.
-- [ ] **17.2 Refresh readiness and proxy guidance** — add a closeout-grade request-readiness check and operator guidance so `ctx setup --check` / closeout validation can distinguish "env var present" from "provider calls succeed", including broken proxy env cases.
+- [x] **17.1 Non-zero exit on refresh errors** — make `ctx update` / `ctx init` fail the process when any directory regeneration errors out, including transient retry exhaustion, so CI and gate closeout cannot misread a failed refresh as success.
+- [x] **17.2 Refresh readiness and proxy guidance** — add a closeout-grade request-readiness check and operator guidance so `ctx setup --check` / closeout validation can distinguish "env var present" from "provider calls succeed", including broken proxy env cases.
+- [x] **Gate 17Z — Manifest refresh and closeout** — `ctx setup --check` confirmed `Connectivity: OK`; `ctx update .` refreshed 4 directories, exited 0; 18 fresh, 0 stale, 0 missing; 281 tests passing.
+
+## Phase 18 — Pre-flight Connectivity & Error Guidance
+
+Carry-forward items from the Phase 17 reflection.
+
+- [ ] **18.1 Pre-flight connectivity check** — run `probe_provider_connectivity` before starting the full refresh in `ctx update`/`ctx init` so the operator gets an early, actionable failure rather than per-directory errors after tokens are already spent.
+- [ ] **18.2 Proxy guidance in transient error tip** — when `_echo_generation_errors` prints the transient retry tip, also check and name active proxy env vars in-line so guidance appears without needing to run `ctx setup --check`.

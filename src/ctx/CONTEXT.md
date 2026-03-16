@@ -1,32 +1,32 @@
 ---
-generated: '2026-03-15T07:36:04Z'
+generated: '2026-03-16T15:26:10Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:7c9da8e964dd55794fe3a0472639d55bb35a5d5c85944d47bdaea93d14afc20c
+content_hash: sha256:74f769a84d876bb0a8b4481ff7e433eba09c65deb1d14415252d9c3bddff0052
 files: 14
 dirs: 1
-tokens_total: 13227
+tokens_total: 13198
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
-Core module implementing a filesystem-native context layer for AI agents, providing CLI tools and LLM integration to generate and maintain CONTEXT.md manifests.
+Core implementation of ctx, a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agents.
 
 ## Files
 
-- **.ctxignore.default** — Default ignore patterns for ctx, excluding version control, dependencies, IDE files, and temporary artifacts.
-- **__init__.py** — Package initialization defining ctx version 0.8.0 as a filesystem-native context layer for AI agents.
+- **.ctxignore.default** — Default ignore patterns for ctx tool, excluding version control, dependencies, IDE files, and sensitive data.
+- **__init__.py** — Package initialization defining ctx as a filesystem-native context layer for AI agents.
 - **__main__.py** — Entry point for running ctx as a Python module via `python -m ctx`.
-- **cli.py** — Click CLI with commands for generating, updating, and managing CONTEXT.md manifests across directory trees.
-- **config.py** — Configuration loading from environment variables, .ctxconfig files, and CLI overrides with provider detection.
-- **generator.py** — Core generation engine orchestrating bottom-up directory walks, file reading, LLM calls, and manifest writing.
-- **git.py** — Utility for retrieving changed files from a git repository since last commit or staged changes.
-- **hasher.py** — Content hashing for staleness detection using SHA-256 with directory hash based on sorted child hashes.
-- **ignore.py** — Ignore-pattern matching using .ctxignore files in gitignore style via the pathspec library.
-- **language_detector.py** — Language detection for files and directories based on file extensions and project configuration files.
+- **cli.py** — Click CLI entry point providing commands to generate, update, and manage CONTEXT.md manifests.
+- **config.py** — Configuration loading and resolution from environment variables, .ctxconfig files, and CLI overrides.
+- **generator.py** — Core generation engine that walks directory trees bottom-up, reads files, calls LLM for summaries, and writes manifests.
+- **git.py** — Utility for retrieving changed files from a git repository since last commit or staging.
+- **hasher.py** — Content hashing for staleness detection using SHA-256 with directory hash composition.
+- **ignore.py** — Ignore-pattern matching using .ctxignore files with gitignore-style glob patterns.
+- **language_detector.py** — Detects programming language from file extensions and project configuration files.
 - **llm.py** — LLM client protocol with Anthropic and OpenAI implementations for file and directory summarization.
-- **manifest.py** — CONTEXT.md file format parsing and writing with YAML frontmatter and markdown body sections.
-- **server.py** — FastAPI server providing MCP endpoints for retrieving CONTEXT.md manifests from a project directory.
-- **watcher.py** — File watcher for ctx watch command that monitors directory trees and triggers incremental manifest regeneration.
+- **manifest.py** — CONTEXT.md file parsing, serialization, and frontmatter management.
+- **server.py** — FastAPI server providing HTTP endpoints to read and serve CONTEXT.md manifests with security checks for path traversal.
+- **watcher.py** — File system watcher that monitors directory changes and triggers incremental manifest regeneration.
 
 ## Subdirectories
 
@@ -34,6 +34,7 @@ Core module implementing a filesystem-native context layer for AI agents, provid
 
 ## Notes
 
-- The module follows a bottom-up generation pattern where file-level summaries are created first, then aggregated into directory manifests.
-- Configuration and LLM provider selection are centralized in config.py and llm.py, supporting multiple AI backends.
-- Staleness detection via hasher.py enables incremental updates without regenerating unchanged content.
+- The generator.py module orchestrates the manifest creation workflow by coordinating with config, ignore, hasher, language_detector, and llm modules.
+- LLM implementations in llm.py are pluggable; configuration determines which provider is used.
+- The manifest.py module handles both reading existing CONTEXT.md files and writing updated versions with preserved frontmatter.
+- Security is enforced in server.py to prevent path traversal attacks when serving manifests over HTTP.
