@@ -57,44 +57,54 @@ def _format_elapsed(seconds: float) -> str:
     return f"{minutes}m {secs}s"
 
 
+# Pricing per 1M tokens in USD.
+_PRICING_DATA: dict[str, dict] = {
+    "anthropic": {
+        "models": [
+            ("claude-3-opus", 15.0),
+            ("claude-3-sonnet", 3.0),
+            ("claude-3-haiku", 0.25),
+        ],
+        "default": 3.0,  # Sonnet pricing
+    },
+    "openai": {
+        "models": [
+            ("gpt-4o", 5.0),
+            ("gpt-4-o", 5.0),
+            ("gpt-4", 30.0),
+            ("gpt-3.5-turbo", 0.5),
+            ("gpt-3.5", 0.5),
+        ],
+        "default": 5.0,  # GPT-4o pricing
+    },
+    "ollama": {"default": 0.0},
+    "lmstudio": {"default": 0.0},
+}
+_DEFAULT_UNKNOWN_PROVIDER_PRICE = 3.0  # Default for unknown providers
+
+
 def _estimate_cost(tokens: int, provider: str, model: str) -> float:
     """Estimate cost in USD based on tokens used and provider pricing.
 
     Pricing is per 1M tokens (input + output averaged/estimated).
     These are approximate prices as of early 2025.
     """
-    # Normalize provider and model for lookup
     provider_lower = provider.lower()
     model_lower = model.lower()
 
-    # Anthropic pricing (approximate per 1M tokens)
-    if provider_lower == "anthropic":
-        if "claude-3-opus" in model_lower:
-            return tokens * 15.0 / 1_000_000  # $15/MTok
-        elif "claude-3-sonnet" in model_lower:
-            return tokens * 3.0 / 1_000_000  # $3/MTok
-        elif "claude-3-haiku" in model_lower:
-            return tokens * 0.25 / 1_000_000  # $0.25/MTok
-        else:
-            return tokens * 3.0 / 1_000_000  # Default to sonnet pricing
+    provider_pricing = _PRICING_DATA.get(provider_lower)
+    if not provider_pricing:
+        return tokens * _DEFAULT_UNKNOWN_PROVIDER_PRICE / 1_000_000
 
-    # OpenAI pricing (approximate per 1M tokens)
-    elif provider_lower == "openai":
-        if "gpt-4o" in model_lower or "gpt-4-o" in model_lower:
-            return tokens * 5.0 / 1_000_000  # $5/MTok
-        elif "gpt-4" in model_lower:
-            return tokens * 30.0 / 1_000_000  # $30/MTok
-        elif "gpt-3.5" in model_lower or "gpt-3.5-turbo" in model_lower:
-            return tokens * 0.5 / 1_000_000  # $0.50/MTok
-        else:
-            return tokens * 5.0 / 1_000_000  # Default to GPT-4o pricing
+    # Local providers have a default of 0.0 and no specific models
+    if "models" not in provider_pricing:
+        return tokens * provider_pricing["default"] / 1_000_000
 
-    # Local providers - no cost
-    elif provider_lower in ("ollama", "lmstudio"):
-        return 0.0
+    for model_key, price_per_million in provider_pricing["models"]:
+        if model_key in model_lower:
+            return tokens * price_per_million / 1_000_000
 
-    # Unknown provider - default estimate
-    return tokens * 3.0 / 1_000_000
+    return tokens * provider_pricing["default"] / 1_000_000
 
 
 def _echo_cost_summary(stats: GenerateStats, provider: str, model: str) -> None:
