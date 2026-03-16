@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-15T07:37:56Z'
+generated: '2026-03-16T15:27:42Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:2016ad06a116a5bee8ae84105f6272164439bc4f043ec001ea2f172b2df687b7
+content_hash: sha256:3000303cdb886ff822a12f548ffbc152d5d18abd4b9e3d51d9e84909c0fce89e
 files: 18
 dirs: 7
 tokens_total: 15253
 ---
 # C:/Users/Matty/Documents/context-project
 
-A filesystem-native tool that generates persistent CONTEXT.md manifests to help AI agents navigate large codebases through hierarchical directory summaries.
+A filesystem-native hierarchical manifest system that generates persistent CONTEXT.md files to help AI agents navigate large codebases.
 
 ## Files
 
@@ -38,13 +38,12 @@ A filesystem-native tool that generates persistent CONTEXT.md manifests to help 
 - **.githooks/** — Git hooks directory for automated pre-commit testing and validation.
 - **.github/** — GitHub configuration and automation for the context-project repository.
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
-- **archive/** — Archive of design documents, analyses, and roadmaps for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
-- **src/** — Source code for the context-project application, containing core modules and utilities.
-- **tests/** — Test suite for the context project covering CLI commands, configuration, language parsers, manifest generation, and integrations.
+- **archive/** — Archive of design documents, analyses, and roadmaps for the ctx project.
+- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer.
+- **tests/** — Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM clients, and core generation engine functionality.
 
 ## Notes
 
-- The project uses both Node.js (commitlint, Husky) and Python (pyproject.toml) tooling for development and distribution.
+- The project uses both Node.js (package.json, Husky) and Python (pyproject.toml) tooling.
 - Git hooks and pre-commit validation ensure manifest freshness and conventional commit compliance.
-- AGENTS.md, CONTRIBUTING.md, and rules.md define the agentic workflow and quality standards for contributors.
-- Phase-based execution contracts (GATE_CLOSEOUT.md, PHASE16_HANDOFF.md) structure ongoing development work.
+- Phase-based delivery structure with detailed closeout and handoff documentation for agent coordination.
