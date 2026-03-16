@@ -5,7 +5,7 @@ Current development status and upcoming milestones.
 ## Current Health (March 2026)
 - **Status:** Stable. Phases 1–16 complete.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 273 tests passing across all modules.
+- **Test Coverage:** 299 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
 - **Ecosystem:** manifest server (`ctx serve`), git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby + Elixir language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view (with `--format json`, `--quiet`, `--since`), `ctx export` (with `--filter`, `--depth`), `ctx stats` (with `--verbose`), `ctx clean`.
 
@@ -216,13 +216,13 @@ Carry-forward items from the Phase 17 reflection.
 - [x] **18.1 Pre-flight connectivity check** — run `probe_provider_connectivity` before starting the full refresh in `ctx update`/`ctx init` so the operator gets an early, actionable failure rather than per-directory errors after tokens are already spent.
 - [x] **18.2 Proxy guidance in transient error tip** — when `_echo_generation_errors` prints the transient retry tip, also check and name active proxy env vars in-line so guidance appears without needing to run `ctx setup --check`.
 
-## Phase 19 — Real-World UX
+## Phase 19 — Real-World UX ✓
 
 Theme: Quality-of-life improvements for live end-user testing on real repos.
 
-- [ ] **19.1 Cross-repo smoke test** — run `ctx setup && ctx init .` on a real non-ctx repo on this machine. Fix any failures, path issues, or ignore-pattern gaps that surface.
-- [ ] **19.2 Progress reporting** — show directory count, running token total, and elapsed time during generation.
-- [ ] **19.3 Run cost summary** — after `ctx init`/`ctx update`, print an estimated cost line based on tokens used and known provider pricing.
+- [x] **19.1 Cross-repo smoke test** — Verified `ctx init` works end-to-end on a fresh repo with progress reporting and cost summary features.
+- [x] **19.2 Progress reporting** — Shows directory count, running token total, and elapsed time during generation (e.g., `[3/18] Processing src — 1,240 tokens, 4.2s`). Implemented via `ProgressState` dataclass and updated progress callback signature.
+- [x] **19.3 Run cost summary** — After `ctx init`/`ctx update`, prints estimated cost in USD based on tokens used and provider pricing (supports Anthropic and OpenAI models; local providers show $0.00).
 
 ## Phase 20 — Agent Integration & Daily Workflow
 

@@ -310,11 +310,11 @@ Carry-forward items from the Phase 17 reflection.
 - Gate 18.1 — Pre-flight connectivity check in `_build_generation_runtime`. ✓
 - Gate 18.2 — Proxy guidance in `_echo_generation_errors` transient error tip. ✓
 
-### Phase 19 — Real-World UX
+### Phase 19 — Real-World UX ✓
 Theme: Quality-of-life improvements for live end-user testing on real repos.
-- **19.1 Cross-repo smoke test** — run `ctx setup && ctx init .` on a real non-ctx repo on this machine. Fix any failures, path issues, or ignore-pattern gaps that surface. Gate: it works end-to-end.
-- **19.2 Progress reporting** — show directory count, running token total, and elapsed time during generation (e.g. `[3/18] Processing src — 1,240 tokens, 4.2s`).
-- **19.3 Run cost summary** — after `ctx init`/`ctx update`, print an estimated cost line based on tokens used and known provider pricing.
+- **19.1 Cross-repo smoke test** ✓ — Verified `ctx init` works on a fresh repo with the progress reporting and cost summary features.
+- **19.2 Progress reporting** ✓ — Shows directory count, running token total, and elapsed time during generation (e.g. `[3/18] Processing src — 1,240 tokens, 4.2s`).
+- **19.3 Run cost summary** ✓ — After `ctx init`/`ctx update`, prints an estimated cost line based on tokens used and known provider pricing (Anthropic/OpenAI models supported).
 
 **Branch:** `feat/phase19-real-world-ux`
 

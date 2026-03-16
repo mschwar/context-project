@@ -1,24 +1,24 @@
 ---
-generated: '2026-03-16T15:26:10Z'
+generated: '2026-03-16T20:56:49Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:74f769a84d876bb0a8b4481ff7e433eba09c65deb1d14415252d9c3bddff0052
+content_hash: sha256:c0028139f73da55f40d13512fc0037d6f6a35a4f07c6b16a183b6cd472cf384b
 files: 14
 dirs: 1
-tokens_total: 13198
+tokens_total: 13343
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
-Core implementation of ctx, a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agents.
+Core implementation of ctx, a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agents using LLM-powered file summarization.
 
 ## Files
 
 - **.ctxignore.default** — Default ignore patterns for ctx tool, excluding version control, dependencies, IDE files, and sensitive data.
 - **__init__.py** — Package initialization defining ctx as a filesystem-native context layer for AI agents.
 - **__main__.py** — Entry point for running ctx as a Python module via `python -m ctx`.
-- **cli.py** — Click CLI entry point providing commands to generate, update, and manage CONTEXT.md manifests.
-- **config.py** — Configuration loading and resolution from environment variables, .ctxconfig files, and CLI overrides.
-- **generator.py** — Core generation engine that walks directory trees bottom-up, reads files, calls LLM for summaries, and writes manifests.
+- **cli.py** — Click CLI entry point providing commands to generate, update, and manage CONTEXT.md files across directory trees.
+- **config.py** — Configuration loading and resolution from environment variables, .ctxconfig files, and CLI flags with provider detection.
+- **generator.py** — Core generation engine that walks directory trees bottom-up, reads files, calls LLMs for summaries, and writes CONTEXT.md manifests.
 - **git.py** — Utility for retrieving changed files from a git repository since last commit or staging.
 - **hasher.py** — Content hashing for staleness detection using SHA-256 with directory hash composition.
 - **ignore.py** — Ignore-pattern matching using .ctxignore files with gitignore-style glob patterns.
@@ -34,7 +34,7 @@ Core implementation of ctx, a filesystem-native context layer that generates and
 
 ## Notes
 
-- The generator.py module orchestrates the manifest creation workflow by coordinating with config, ignore, hasher, language_detector, and llm modules.
-- LLM implementations in llm.py are pluggable; configuration determines which provider is used.
-- The manifest.py module handles both reading existing CONTEXT.md files and writing updated versions with preserved frontmatter.
-- Security is enforced in server.py to prevent path traversal attacks when serving manifests over HTTP.
+- The generator.py module is the orchestration hub, coordinating ignore patterns, hashing, LLM calls, and manifest writing.
+- Configuration flows through config.py and is consumed by cli.py and generator.py.
+- LLM implementations in llm.py support multiple providers; language detection informs which parser to use.
+- The server.py module exposes manifests via HTTP for integration with external tools.

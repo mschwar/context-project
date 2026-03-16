@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-16T15:27:37Z'
+generated: '2026-03-16T20:56:53Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:ced8be95fdb54b66a63fab8ba9174461d18dbb242fd873733b6066421e478e61
+content_hash: sha256:35c202e1cf2b01706eeee63bb8576e30fe71c16280f4f4828176e336c6ff023e
 files: 6
 dirs: 1
 tokens_total: 6967
 ---
 # C:/Users/Matty/Documents/context-project/archive
 
-Archive of design documents, analyses, and roadmaps for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
+Archive of design documents, analyses, and reflections for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
 
 ## Files
 
@@ -22,9 +22,9 @@ Archive of design documents, analyses, and roadmaps for the ctx project—a file
 
 ## Subdirectories
 
-- **reflections/** — Chronological collection of phase-by-phase reflections documenting the development progress, feature implementations, and technical decisions of the context-project.
+- **reflections/** — Chronological collection of phase-by-phase project reflections documenting development progress, achievements, friction points, and recommendations across the context-project lifecycle.
 
 ## Notes
 
-- This directory preserves early-stage design iterations and AI model feedback that shaped the final ctx architecture.
+- This directory preserves early-stage design iterations and LLM feedback that shaped the final ctx architecture.
 - Documents progress from initial concept through multiple refinement cycles with different AI models.

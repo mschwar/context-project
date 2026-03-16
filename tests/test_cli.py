@@ -36,8 +36,8 @@ def test_init_command_wires_dependencies_and_prints_summary(tmp_path, monkeypatc
 
     def fake_generate_tree(root: Path, config: Config, client: object, spec: object, *, progress):
         calls["generate_tree"] = (root, config, client, spec)
-        progress(root / "docs", 1, 2)
-        progress(root, 2, 2)
+        progress(root / "docs", 1, 2, 50)
+        progress(root, 2, 2, 99)
         return GenerateStats(
             dirs_processed=2,
             files_processed=4,
@@ -96,7 +96,7 @@ def test_update_command_wires_dependencies_and_prints_summary(tmp_path, monkeypa
 
     def fake_update_tree(root: Path, config: Config, client: object, spec: object, *, progress):
         calls["update_tree"] = (root, config, client, spec)
-        progress(root, 1, 1)
+        progress(root, 1, 1, 42)
         return GenerateStats(dirs_processed=1, dirs_skipped=2, tokens_used=42)
 
     monkeypatch.setattr(cli_module, "load_config", fake_load_config)
@@ -1756,3 +1756,196 @@ def test_transient_errors_no_proxy_guidance_when_no_proxy_set(tmp_path, monkeypa
 
     assert result.exit_code == 1
     assert "Proxy env vars" not in result.output
+
+
+# --- Phase 19: Real-World UX ---
+
+def test_progress_callback_shows_tokens_and_elapsed() -> None:
+    """Progress callback should display tokens and elapsed time."""
+    import time
+    cli_module = import_module("ctx.cli")
+    
+    # Use a time in the past to ensure elapsed > 0
+    state = cli_module.ProgressState(start_time=time.time() - 0.1)
+    callback = cli_module._progress_callback(state)
+    
+    # Simulate progress
+    callback(Path("/test/src"), 1, 5, 1200)
+    callback(Path("/test/docs"), 2, 5, 2500)
+    
+    # Elapsed should be increasing (at least 0.1s)
+    assert state.elapsed() >= 0.05  # Allow some tolerance
+    assert state.tokens_accumulated == 2500
+
+
+def test_estimate_cost_anthropic_models() -> None:
+    """Cost estimation for Anthropic models."""
+    cli_module = import_module("ctx.cli")
+    
+    # Claude 3 Opus pricing (~$15/MTok)
+    opus_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-3-opus-20240229")
+    assert 14.0 < opus_cost < 16.0
+    
+    # Claude 3 Sonnet pricing (~$3/MTok)
+    sonnet_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-3-sonnet-20240229")
+    assert 2.5 < sonnet_cost < 3.5
+    
+    # Claude 3 Haiku pricing (~$0.25/MTok)
+    haiku_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-3-haiku-20240307")
+    assert 0.2 < haiku_cost < 0.3
+    
+    # Default pricing for unknown anthropic model
+    default_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-unknown")
+    assert 2.5 < default_cost < 3.5
+
+
+def test_estimate_cost_openai_models() -> None:
+    """Cost estimation for OpenAI models."""
+    cli_module = import_module("ctx.cli")
+    
+    # GPT-4 pricing (~$30/MTok)
+    gpt4_cost = cli_module._estimate_cost(1_000_000, "openai", "gpt-4")
+    assert 25.0 < gpt4_cost < 35.0
+    
+    # GPT-4o pricing (~$5/MTok)
+    gpt4o_cost = cli_module._estimate_cost(1_000_000, "openai", "gpt-4o")
+    assert 4.0 < gpt4o_cost < 6.0
+    
+    # GPT-3.5 pricing (~$0.50/MTok)
+    gpt35_cost = cli_module._estimate_cost(1_000_000, "openai", "gpt-3.5-turbo")
+    assert 0.4 < gpt35_cost < 0.6
+
+
+def test_estimate_cost_local_providers() -> None:
+    """Cost estimation for local providers should be $0."""
+    cli_module = import_module("ctx.cli")
+    
+    ollama_cost = cli_module._estimate_cost(1_000_000, "ollama", "llama2")
+    assert ollama_cost == 0.0
+    
+    lmstudio_cost = cli_module._estimate_cost(1_000_000, "lmstudio", "local-model")
+    assert lmstudio_cost == 0.0
+
+
+def test_estimate_cost_small_token_counts() -> None:
+    """Cost estimation for small token counts."""
+    cli_module = import_module("ctx.cli")
+    
+    # Small token count should produce small cost
+    cost = cli_module._estimate_cost(1000, "anthropic", "claude-3-sonnet")
+    assert 0.002 < cost < 0.004  # ~$0.003
+
+
+def test_echo_cost_summary_format(tmp_path, monkeypatch, capsys) -> None:
+    """Cost summary should be formatted correctly."""
+    cli_module = import_module("ctx.cli")
+    from click.testing import CliRunner
+    
+    runner = CliRunner()
+    fake_config = Config(provider="anthropic", model="claude-3-sonnet", api_key="test-key")
+    
+    def fake_generate(root, config, client, spec, *, progress):
+        progress(root, 1, 1, 50000)
+        return GenerateStats(dirs_processed=1, tokens_used=50000)
+    
+    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
+    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(cli_module, "generate_tree", fake_generate)
+    
+    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
+    
+    assert result.exit_code == 0
+    assert "Estimated cost:" in result.output
+    # 50k tokens at $3/MTok = $0.15
+    assert "$0.15" in result.output or "$0.1500" in result.output or "50,000 tokens" in result.output
+
+
+def test_echo_cost_summary_local_provider(tmp_path, monkeypatch) -> None:
+    """Cost summary for local provider should indicate $0."""
+    cli_module = import_module("ctx.cli")
+    from click.testing import CliRunner
+    
+    runner = CliRunner()
+    fake_config = Config(provider="ollama", model="llama2", api_key="")
+    
+    def fake_generate(root, config, client, spec, *, progress):
+        progress(root, 1, 1, 10000)
+        return GenerateStats(dirs_processed=1, tokens_used=10000)
+    
+    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
+    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(cli_module, "generate_tree", fake_generate)
+    
+    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
+    
+    assert result.exit_code == 0
+    assert "Estimated cost: $0.00 (local provider)" in result.output
+
+
+def test_echo_cost_summary_zero_tokens(tmp_path, monkeypatch) -> None:
+    """Cost summary should be skipped when no tokens used."""
+    cli_module = import_module("ctx.cli")
+    from click.testing import CliRunner
+    
+    runner = CliRunner()
+    fake_config = Config(provider="anthropic", model="claude-test", api_key="test-key")
+    
+    def fake_generate(root, config, client, spec, *, progress):
+        return GenerateStats(dirs_processed=0, tokens_used=0)
+    
+    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
+    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(cli_module, "generate_tree", fake_generate)
+    
+    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
+    
+    assert result.exit_code == 0
+    assert "Estimated cost:" not in result.output
+
+
+def test_format_elapsed_seconds_only() -> None:
+    """Elapsed time under 60s should show as seconds."""
+    cli_module = import_module("ctx.cli")
+    
+    assert cli_module._format_elapsed(0.5) == "0.5s"
+    assert cli_module._format_elapsed(4.2) == "4.2s"
+    assert cli_module._format_elapsed(59.9) == "59.9s"
+
+
+def test_format_elapsed_minutes() -> None:
+    """Elapsed time over 60s should show as minutes and seconds."""
+    cli_module = import_module("ctx.cli")
+    
+    assert cli_module._format_elapsed(60.0) == "1m 0s"
+    assert cli_module._format_elapsed(125.5) == "2m 5s"
+    assert cli_module._format_elapsed(3600.0) == "60m 0s"
+
+
+def test_update_command_shows_cost_summary(tmp_path, monkeypatch) -> None:
+    """Update command should also show cost summary."""
+    cli_module = import_module("ctx.cli")
+    from click.testing import CliRunner
+    
+    runner = CliRunner()
+    fake_config = Config(provider="openai", model="gpt-4o", api_key="test-key")
+    
+    def fake_update(root, config, client, spec, *, progress):
+        progress(root, 1, 1, 25000)
+        return GenerateStats(dirs_processed=1, dirs_skipped=2, tokens_used=25000)
+    
+    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
+    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(cli_module, "update_tree", fake_update)
+    
+    result = runner.invoke(cli_module.cli, ["update", str(tmp_path)])
+    
+    assert result.exit_code == 0
+    assert "Estimated cost:" in result.output

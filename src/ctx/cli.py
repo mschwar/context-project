@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -35,6 +37,80 @@ from ctx.ignore import load_ignore_patterns, should_ignore
 from ctx.llm import create_client
 
 
+@dataclass
+class ProgressState:
+    """Mutable state for progress tracking across callbacks."""
+
+    start_time: float
+    tokens_accumulated: int = 0
+
+    def elapsed(self) -> float:
+        return time.time() - self.start_time
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Format elapsed time in seconds to a readable string."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    return f"{minutes}m {secs}s"
+
+
+def _estimate_cost(tokens: int, provider: str, model: str) -> float:
+    """Estimate cost in USD based on tokens used and provider pricing.
+
+    Pricing is per 1M tokens (input + output averaged/estimated).
+    These are approximate prices as of early 2025.
+    """
+    # Normalize provider and model for lookup
+    provider_lower = provider.lower()
+    model_lower = model.lower()
+
+    # Anthropic pricing (approximate per 1M tokens)
+    if provider_lower == "anthropic":
+        if "claude-3-opus" in model_lower:
+            return tokens * 15.0 / 1_000_000  # $15/MTok
+        elif "claude-3-sonnet" in model_lower:
+            return tokens * 3.0 / 1_000_000  # $3/MTok
+        elif "claude-3-haiku" in model_lower:
+            return tokens * 0.25 / 1_000_000  # $0.25/MTok
+        else:
+            return tokens * 3.0 / 1_000_000  # Default to sonnet pricing
+
+    # OpenAI pricing (approximate per 1M tokens)
+    elif provider_lower == "openai":
+        if "gpt-4o" in model_lower or "gpt-4-o" in model_lower:
+            return tokens * 5.0 / 1_000_000  # $5/MTok
+        elif "gpt-4" in model_lower:
+            return tokens * 30.0 / 1_000_000  # $30/MTok
+        elif "gpt-3.5" in model_lower or "gpt-3.5-turbo" in model_lower:
+            return tokens * 0.5 / 1_000_000  # $0.50/MTok
+        else:
+            return tokens * 5.0 / 1_000_000  # Default to GPT-4o pricing
+
+    # Local providers - no cost
+    elif provider_lower in ("ollama", "lmstudio"):
+        return 0.0
+
+    # Unknown provider - default estimate
+    return tokens * 3.0 / 1_000_000
+
+
+def _echo_cost_summary(stats: GenerateStats, provider: str, model: str) -> None:
+    """Print estimated cost summary after generation."""
+    if stats.tokens_used == 0:
+        return
+
+    cost = _estimate_cost(stats.tokens_used, provider, model)
+    if cost == 0.0:
+        click.echo("Estimated cost: $0.00 (local provider)")
+    elif cost < 0.01:
+        click.echo(f"Estimated cost: ${cost:.4f} ({stats.tokens_used:,} tokens)")
+    else:
+        click.echo(f"Estimated cost: ${cost:.2f} ({stats.tokens_used:,} tokens)")
+
+
 def _build_generation_runtime(
     path: str,
     *,
@@ -44,7 +120,8 @@ def _build_generation_runtime(
     token_budget: Optional[int] = None,
     base_url: Optional[str] = None,
     cache_path: Optional[str] = None,
-) -> tuple[Path, object, object, object, Callable[[Path, int, int], None]]:
+    progress_state: Optional[ProgressState] = None,
+) -> tuple[Path, object, object, object, Callable[[Path, int, int, int], None]]:
     target_path = Path(path)
     load_config_kwargs: dict[str, Optional[str] | int] = {
         "provider": provider,
@@ -79,13 +156,29 @@ def _build_generation_runtime(
 
     spec = load_ignore_patterns(target_path)
     client = create_client(config)
-    progress_cb = _progress_callback()
+    state = progress_state if progress_state is not None else ProgressState(start_time=time.time())
+    progress_cb = _progress_callback(state)
     return target_path, config, spec, client, progress_cb
 
 
-def _progress_callback() -> Callable[[Path, int, int], None]:
-    def callback(current_dir: Path, done: int, total: int) -> None:
-        click.echo(f"  [{done}/{total}] Processing {current_dir.name or current_dir}")
+def _progress_callback(state: ProgressState) -> Callable[[Path, int, int, int], None]:
+    """Create a progress callback that shows elapsed time and running token total.
+
+    Args:
+        state: Mutable progress state shared across callbacks.
+
+    Returns:
+        Callback function for progress reporting.
+    """
+
+    def callback(current_dir: Path, done: int, total: int, tokens_used: int) -> None:
+        state.tokens_accumulated = tokens_used
+        elapsed = state.elapsed()
+        elapsed_str = _format_elapsed(elapsed)
+        tokens_str = f"{tokens_used:,} tokens"
+        click.echo(
+            f"  [{done}/{total}] Processing {current_dir.name or current_dir} — {tokens_str}, {elapsed_str}"
+        )
 
     return callback
 
@@ -175,6 +268,7 @@ def cli() -> None:
 @click.option("--overwrite/--no-overwrite", default=True, help="Regenerate all manifests (default) or skip already-fresh ones.")
 def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Optional[int], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], overwrite: bool) -> None:
     """Generate CONTEXT.md files for a directory tree."""
+    progress_state = ProgressState(start_time=time.time())
     target_path, config, spec, client, progress_cb = _build_generation_runtime(
         path,
         provider=provider,
@@ -183,6 +277,7 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
         token_budget=token_budget,
         base_url=base_url,
         cache_path=cache_path,
+        progress_state=progress_state,
     )
 
     click.echo(f"ctx init: generating manifests for {target_path}")
@@ -197,6 +292,7 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
     click.echo(f"Directories processed: {stats.dirs_processed}")
     click.echo(f"Files processed: {stats.files_processed}")
     click.echo(f"Tokens used: {stats.tokens_used}")
+    _echo_cost_summary(stats, config.provider, config.resolved_model())
     click.echo(f"Errors: {len(stats.errors)}")
     _echo_generation_errors(stats)
     _echo_budget_warning(stats, config)
@@ -226,6 +322,7 @@ def update(path: str, provider: Optional[str], model: Optional[str], token_budge
         _echo_stale_dirs(stale, target_path)
         return
 
+    progress_state = ProgressState(start_time=time.time())
     target_path, config, spec, client, progress_cb = _build_generation_runtime(
         path,
         provider=provider,
@@ -233,6 +330,7 @@ def update(path: str, provider: Optional[str], model: Optional[str], token_budge
         token_budget=token_budget,
         base_url=base_url,
         cache_path=cache_path,
+        progress_state=progress_state,
     )
 
     click.echo(f"ctx update: refreshing manifests for {target_path}")
@@ -242,6 +340,7 @@ def update(path: str, provider: Optional[str], model: Optional[str], token_budge
     click.echo(f"Directories refreshed: {stats.dirs_processed}")
     click.echo(f"Directories skipped: {stats.dirs_skipped}")
     click.echo(f"Tokens used: {stats.tokens_used}")
+    _echo_cost_summary(stats, config.provider, config.resolved_model())
     click.echo(f"Errors: {len(stats.errors)}")
     _echo_generation_errors(stats)
     _echo_budget_warning(stats, config)
@@ -314,6 +413,7 @@ def smart_update(path: str, provider: Optional[str], model: Optional[str], token
         _echo_stale_dirs(stale, target_path)
         return
 
+    progress_state = ProgressState(start_time=time.time())
     target_path, config, spec, client, progress_cb = _build_generation_runtime(
         path,
         provider=provider,
@@ -321,6 +421,7 @@ def smart_update(path: str, provider: Optional[str], model: Optional[str], token
         token_budget=token_budget,
         base_url=base_url,
         cache_path=cache_path,
+        progress_state=progress_state,
     )
 
     click.echo(f"ctx smart-update: refreshing manifests for {target_path} based on git changes")
@@ -331,6 +432,7 @@ def smart_update(path: str, provider: Optional[str], model: Optional[str], token
     click.echo(f"Directories refreshed: {stats.dirs_processed}")
     click.echo(f"Directories skipped: {stats.dirs_skipped}")
     click.echo(f"Tokens used: {stats.tokens_used}")
+    _echo_cost_summary(stats, config.provider, config.resolved_model())
     click.echo(f"Errors: {len(stats.errors)}")
     _echo_generation_errors(stats)
     _echo_budget_warning(stats, config)
