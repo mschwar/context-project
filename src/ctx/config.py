@@ -139,12 +139,12 @@ def probe_provider_connectivity(
         return True, None
 
     if provider == "anthropic":
-        url = "https://api.anthropic.com/v1/models"
+        url = ANTHROPIC_PROBE_URL
         req = urllib.request.Request(url)
         req.add_header("x-api-key", api_key)
-        req.add_header("anthropic-version", "2023-06-01")
+        req.add_header("anthropic-version", ANTHROPIC_API_VERSION)
     elif provider == "openai":
-        url = (base_url or "https://api.openai.com") + "/v1/models"
+        url = (base_url or OPENAI_DEFAULT_PROBE_BASE_URL) + "/v1/models"
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {api_key}")
     else:
