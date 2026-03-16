@@ -22,6 +22,7 @@ from ctx.config import (
     DEFAULT_BASE_URLS,
     LOCAL_PROVIDERS,
     PROVIDER_DETECTED_VIA,
+    PROXY_ENV_VARS,
     MissingApiKeyError,
     detect_provider,
     load_config,
@@ -29,8 +30,6 @@ from ctx.config import (
     write_default_config,
 )
 from ctx.llm import TRANSIENT_ERROR_PREFIX
-
-PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 from ctx.generator import GenerateStats, check_stale_dirs, generate_tree, get_status, update_tree
 from ctx.ignore import load_ignore_patterns, should_ignore
 from ctx.llm import create_client

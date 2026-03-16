@@ -55,6 +55,9 @@ ANTHROPIC_PROBE_URL = "https://api.anthropic.com/v1/models"
 ANTHROPIC_API_VERSION = "2023-06-01"
 OPENAI_DEFAULT_PROBE_BASE_URL = "https://api.openai.com"
 
+# Proxy environment variables checked when connectivity fails
+PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+
 # Human-readable detection source shown by `ctx setup`
 PROVIDER_DETECTED_VIA: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY env var",
