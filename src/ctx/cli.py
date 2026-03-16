@@ -358,7 +358,7 @@ def setup(path: str, check_only: bool) -> None:
                 click.echo(f"Connectivity: FAILED — {conn_error}", err=True)
                 proxy_vars = [
                     v
-                    for v in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+                    for v in PROXY_ENV_VARS
                     if os.getenv(v)
                 ]
                 if proxy_vars:
