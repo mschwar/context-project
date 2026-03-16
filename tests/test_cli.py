@@ -55,7 +55,7 @@ def test_init_command_wires_dependencies_and_prints_summary(tmp_path, monkeypatc
         ["init", str(tmp_path), "--provider", "openai", "--model", "gpt-test", "--max-depth", "3"],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert calls["load_config"] == (
         tmp_path,
         {"provider": "openai", "model": "gpt-test", "max_depth": 3},
@@ -1374,3 +1374,172 @@ def test_verify_no_manifests(tmp_path) -> None:
 
     assert result.exit_code == 0
     assert "All manifests are valid." in result.output
+
+
+# --- Phase 17.1: non-zero exit on refresh errors ---
+
+
+def test_init_exits_nonzero_when_errors(tmp_path, monkeypatch) -> None:
+    """ctx init should exit 1 when any directory regeneration errors."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    fake_config = Config(provider="openai", model="gpt-test", api_key="test-key")
+    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
+    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        cli_module,
+        "generate_tree",
+        lambda *a, **kw: GenerateStats(dirs_processed=1, errors=["src: [transient, retries exhausted] Connection error"]),
+    )
+
+    result = runner.invoke(cli_module.cli, ["init", str(root)])
+
+    assert result.exit_code == 1
+    assert "Errors: 1" in result.output
+
+
+def test_init_exits_zero_when_no_errors(tmp_path, monkeypatch) -> None:
+    """ctx init should exit 0 when all directories complete without errors."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    fake_config = Config(provider="openai", model="gpt-test", api_key="test-key")
+    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
+    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        cli_module,
+        "generate_tree",
+        lambda *a, **kw: GenerateStats(dirs_processed=2, files_processed=4, tokens_used=50),
+    )
+
+    result = runner.invoke(cli_module.cli, ["init", str(root)])
+
+    assert result.exit_code == 0
+    assert "Errors: 0" in result.output
+
+
+def test_update_exits_nonzero_when_errors(tmp_path, monkeypatch) -> None:
+    """ctx update should exit 1 when any directory regeneration errors."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    fake_config = Config(provider="anthropic", model="claude-test", api_key="test-key")
+    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
+    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        cli_module,
+        "update_tree",
+        lambda *a, **kw: GenerateStats(dirs_processed=0, errors=["docs: [transient, retries exhausted] Connection error"]),
+    )
+
+    result = runner.invoke(cli_module.cli, ["update", str(root)])
+
+    assert result.exit_code == 1
+    assert "Errors: 1" in result.output
+
+
+def test_update_exits_zero_when_no_errors(tmp_path, monkeypatch) -> None:
+    """ctx update should exit 0 when all directories refresh without errors."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    fake_config = Config(provider="anthropic", model="claude-test", api_key="test-key")
+    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
+    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
+    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        cli_module,
+        "update_tree",
+        lambda *a, **kw: GenerateStats(dirs_processed=3, dirs_skipped=1, tokens_used=120),
+    )
+
+    result = runner.invoke(cli_module.cli, ["update", str(root)])
+
+    assert result.exit_code == 0
+    assert "Errors: 0" in result.output
+
+
+# --- Phase 17.2: setup --check connectivity probe ---
+
+
+def test_setup_check_reports_ok_when_connectivity_succeeds(tmp_path, monkeypatch) -> None:
+    """ctx setup --check should print 'Connectivity: OK' and exit 0 for cloud providers."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    monkeypatch.setattr(cli_module, "detect_provider", lambda **kw: ("anthropic", None))
+    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda provider, api_key, **kw: (True, None))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-abc")
+
+    result = runner.invoke(cli_module.cli, ["setup", "--check", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "Detected: anthropic" in result.output
+    assert "Connectivity: OK" in result.output
+
+
+def test_setup_check_exits_nonzero_on_connectivity_failure(tmp_path, monkeypatch) -> None:
+    """ctx setup --check should exit 1 when provider connectivity fails."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    monkeypatch.setattr(cli_module, "detect_provider", lambda **kw: ("anthropic", None))
+    monkeypatch.setattr(
+        cli_module,
+        "probe_provider_connectivity",
+        lambda provider, api_key, **kw: (False, "Connection error: [Errno 111] Connection refused"),
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-abc")
+
+    result = runner.invoke(cli_module.cli, ["setup", "--check", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "Connectivity: FAILED" in result.output
+
+
+def test_setup_check_shows_proxy_guidance_when_proxy_vars_set(tmp_path, monkeypatch) -> None:
+    """ctx setup --check should mention proxy env vars when connectivity fails and proxy vars are set."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    monkeypatch.setattr(cli_module, "detect_provider", lambda **kw: ("anthropic", None))
+    monkeypatch.setattr(
+        cli_module,
+        "probe_provider_connectivity",
+        lambda provider, api_key, **kw: (False, "Connection error: timed out"),
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-abc")
+    monkeypatch.setenv("HTTPS_PROXY", "http://broken-proxy:8080")
+
+    result = runner.invoke(cli_module.cli, ["setup", "--check", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "HTTPS_PROXY" in result.output
+
+
+def test_setup_check_skips_probe_for_local_providers(tmp_path, monkeypatch) -> None:
+    """ctx setup --check should exit 0 without connectivity probe for local providers."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    probe_calls: list[str] = []
+    monkeypatch.setattr(cli_module, "detect_provider", lambda **kw: ("ollama", "llama3.2"))
+    monkeypatch.setattr(
+        cli_module,
+        "probe_provider_connectivity",
+        lambda provider, api_key, **kw: probe_calls.append(provider) or (True, None),
+    )
+
+    result = runner.invoke(cli_module.cli, ["setup", "--check", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert not probe_calls  # probe should not be called for local providers
+    assert "Detected: ollama" in result.output

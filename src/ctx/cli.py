@@ -10,6 +10,7 @@ Commands:
 from __future__ import annotations
 
 import os
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Callable, Optional
@@ -23,6 +24,7 @@ from ctx.config import (
     MissingApiKeyError,
     detect_provider,
     load_config,
+    probe_provider_connectivity,
     write_default_config,
 )
 from ctx.llm import TRANSIENT_ERROR_PREFIX
@@ -159,6 +161,8 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
     click.echo(f"Errors: {len(stats.errors)}")
     _echo_generation_errors(stats)
     _echo_budget_warning(stats, config)
+    if stats.errors:
+        sys.exit(1)
 
 
 @cli.command()
@@ -202,6 +206,8 @@ def update(path: str, provider: Optional[str], model: Optional[str], token_budge
     click.echo(f"Errors: {len(stats.errors)}")
     _echo_generation_errors(stats)
     _echo_budget_warning(stats, config)
+    if stats.errors:
+        sys.exit(1)
 
 
 @cli.command()
@@ -236,7 +242,6 @@ def status(path: str, check_exit_code: bool) -> None:
     )
 
     if check_exit_code and (counts.get("stale", 0) > 0 or counts.get("missing", 0) > 0):
-        import sys
         sys.exit(1)
 
 
@@ -290,6 +295,8 @@ def smart_update(path: str, provider: Optional[str], model: Optional[str], token
     click.echo(f"Errors: {len(stats.errors)}")
     _echo_generation_errors(stats)
     _echo_budget_warning(stats, config)
+    if stats.errors:
+        sys.exit(1)
 
 
 @cli.command()
@@ -341,6 +348,27 @@ def setup(path: str, check_only: bool) -> None:
     click.echo(f"Detected: {provider} ({detected_via})")
 
     if check_only:
+        if provider in ("anthropic", "openai"):
+            api_key_env = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+            api_key = os.getenv(api_key_env, "")
+            ok, conn_error = probe_provider_connectivity(provider, api_key)
+            if ok:
+                click.echo("Connectivity: OK")
+            else:
+                click.echo(f"Connectivity: FAILED — {conn_error}", err=True)
+                proxy_vars = [
+                    v
+                    for v in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+                    if os.getenv(v)
+                ]
+                if proxy_vars:
+                    click.echo(
+                        f"Proxy env vars detected: {', '.join(proxy_vars)}. "
+                        "A broken proxy may be blocking requests. "
+                        "Try unsetting them: unset " + " ".join(proxy_vars),
+                        err=True,
+                    )
+                sys.exit(1)
         return
 
     base_url = DEFAULT_BASE_URLS.get(provider)
@@ -368,7 +396,6 @@ def diff(path: str, since: Optional[str], output_format: str, quiet: bool, stat:
     """
     import json
     import subprocess
-    import sys
 
     target_path = Path(path)
     ref = since or "HEAD"
@@ -750,8 +777,6 @@ def verify(path: str) -> None:
       - Malformed frontmatter reported separately from missing fields
       - Exit 0 if all valid, exit 1 if any invalid
     """
-    import sys
-
     from ctx.manifest import read_manifest
 
     root = Path(path).resolve()
