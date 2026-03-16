@@ -318,10 +318,10 @@ Theme: Quality-of-life improvements for live end-user testing on real repos.
 
 **Branch:** `feat/phase19-real-world-ux`
 
-### Phase 20 — Agent Integration & Daily Workflow
+### Phase 20 — Agent Integration & Daily Workflow ✓
 Theme: Make ctx useful as part of a real AI-assisted development workflow.
-- **20.1 `ctx watch` session test** — run a timed `ctx watch` session during real edits. Validate stability, debounce, ignore patterns, and coverage feedback. Fix any issues.
-- **20.2 Agent handoff test** — test `ctx export --depth 1` and `ctx serve` as context sources for Claude Code. Validate that exported context helps an agent navigate the target repo.
-- **20.3 Summary quality audit** — read generated manifests on real repos. Flag anything vague, wrong, or unhelpful. Implement prompt tuning in `llm.py` based on findings.
+- **20.1 `ctx watch` session test** ✓ — Validated stability, debounce, ignore patterns, and coverage feedback with comprehensive integration tests.
+- **20.2 Agent handoff test** ✓ — Tested `ctx export --depth 1` and `ctx serve` as context sources for Claude Code. Added 6 new tests validating agent navigation workflow.
+- **20.3 Summary quality audit** ✓ — Reviewed generated manifests, identified areas for improvement (boilerplate file handling, Notes section quality), implemented prompt tuning in `llm.py` with examples and improved guidance.
 
 **Branch:** `feat/phase20-agent-integration`

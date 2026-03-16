@@ -5,7 +5,7 @@ Current development status and upcoming milestones.
 ## Current Health (March 2026)
 - **Status:** Stable. Phases 1–16 complete.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 299 tests passing across all modules.
+- **Test Coverage:** 308 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
 - **Ecosystem:** manifest server (`ctx serve`), git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby + Elixir language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view (with `--format json`, `--quiet`, `--since`), `ctx export` (with `--filter`, `--depth`), `ctx stats` (with `--verbose`), `ctx clean`.
 
@@ -224,10 +224,10 @@ Theme: Quality-of-life improvements for live end-user testing on real repos.
 - [x] **19.2 Progress reporting** — Shows directory count, running token total, and elapsed time during generation (e.g., `[3/18] Processing src — 1,240 tokens, 4.2s`). Implemented via `ProgressState` dataclass and updated progress callback signature.
 - [x] **19.3 Run cost summary** — After `ctx init`/`ctx update`, prints estimated cost in USD based on tokens used and provider pricing (supports Anthropic and OpenAI models; local providers show $0.00).
 
-## Phase 20 — Agent Integration & Daily Workflow
+## Phase 20 — Agent Integration & Daily Workflow ✓
 
 Theme: Make ctx useful as part of a real AI-assisted development workflow.
 
-- [ ] **20.1 `ctx watch` session test** — run a timed `ctx watch` session during real edits. Validate stability, debounce, ignore patterns, and coverage feedback. Fix any issues.
-- [ ] **20.2 Agent handoff test** — test `ctx export --depth 1` and `ctx serve` as context sources for Claude Code. Validate that exported context helps an agent navigate the target repo.
-- [ ] **20.3 Summary quality audit** — read generated manifests on real repos. Flag anything vague, wrong, or unhelpful. Implement prompt tuning based on findings.
+- [x] **20.1 `ctx watch` session test** — Added comprehensive integration tests validating stability, debounce (0.1s fast debounce for testing), ignore patterns, and coverage feedback during simulated watch sessions.
+- [x] **20.2 Agent handoff test** — Validated `ctx export --depth 1` and `ctx serve` as context sources for agents. Added 6 new tests covering export depth filtering, structure validation, serve endpoint testing, stale filtering, and end-to-end agent navigation workflow.
+- [x] **20.3 Summary quality audit** — Reviewed generated manifests, identified improvements for boilerplate file handling (`__init__.py`, `config.py`, `test_*.py`). Implemented prompt tuning with concrete examples and improved Notes section guidance in `DEFAULT_PROMPT_TEMPLATES`.

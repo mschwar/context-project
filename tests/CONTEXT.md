@@ -1,20 +1,21 @@
 ---
-generated: '2026-03-16T20:56:57Z'
+generated: '2026-03-16T22:02:36Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:a141d6f1aec616cb504b47b23149177f6aa46c8a9a0442672993c515aaec22a3
-files: 29
+content_hash: sha256:bbbbaec2cf748f0b852d19c60ac116494d53aa192cecbfb9d8eddf9950684243
+files: 30
 dirs: 1
-tokens_total: 25093
+tokens_total: 27521
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Comprehensive test suite covering CLI, configuration, language parsers, generation engine, Git integration, and manifest functionality.
+Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM clients, and end-to-end manifest generation workflows.
 
 ## Files
 
 - **__init__.py** — Package initialization file for tests directory.
 - **conftest.py** — Pytest fixtures providing isolated environment and workspace-local temporary directories for tests.
+- **test_agent_handoff.py** — Unit tests for agent handoff workflow validating ctx export and ctx serve as context sources for agent navigation.
 - **test_cli.py** — Tests for CLI command wiring, dependency injection, and output formatting across init, update, status, and utility commands.
 - **test_config.py** — Tests for configuration loading from files, environment variables, and CLI arguments.
 - **test_csharp_parser.py** — Tests C# parser extraction of public classes, interfaces, enums, structs, records, methods, and properties.
@@ -41,7 +42,7 @@ Comprehensive test suite covering CLI, configuration, language parsers, generati
 - **test_setup.py** — Tests for setup command, provider detection, and config file generation with various LLM providers.
 - **test_swift_parser.py** — Tests Swift parser extraction of public functions, classes, structs, protocols, and enums from Swift files.
 - **test_trust.py** — Tests for token estimation accuracy, cache eviction policy, and transient error messaging with retry exhaustion handling.
-- **test_watcher.py** — Tests for file system event filtering and debounce logic in the watcher module, including CONTEXT.md exclusion and rapid event coalescing.
+- **test_watcher.py** — Unit tests for file system watcher covering event filtering, debounce logic, and watch session integration.
 
 ## Subdirectories
 
@@ -49,6 +50,7 @@ Comprehensive test suite covering CLI, configuration, language parsers, generati
 
 ## Notes
 
-- Tests are organized by module and feature area, with language-specific parser tests grouped together.
-- Integration tests rely on fixtures in the `fixtures/` subdirectory for realistic project scenarios.
-- Pytest configuration and shared fixtures are defined in `conftest.py`.
+- Test organization mirrors core module structure with dedicated test files for each language parser, CLI command, and major subsystem.
+- Pytest fixtures in conftest.py provide isolated temporary workspaces to prevent test interference.
+- Integration tests validate end-to-end workflows using fake LLM clients and sample project fixtures.
+- Parser tests follow consistent patterns across multiple languages (Python, Go, Rust, Java, C#, Kotlin, PHP, Ruby, Swift, Elixir, JavaScript/TypeScript).
