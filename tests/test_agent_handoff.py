@@ -5,11 +5,7 @@ Validates that exported context helps an agent navigate the target repo.
 
 from __future__ import annotations
 
-import json
-import subprocess
-import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -147,7 +143,6 @@ def test_serve_provides_manifest_access(tmp_path) -> None:
     )
     
     # Test server endpoint
-    from ctx.server import get_mcp_context
     from fastapi.testclient import TestClient
     from ctx.server import app
     
