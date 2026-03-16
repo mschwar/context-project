@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-16T20:57:04Z'
+generated: '2026-03-16T22:02:43Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:c8cba382c7a16d02795df9f118dfb6843c13387c1fd4b3b3c73e7ea67905f1c1
+content_hash: sha256:439d91bc610332519f05da252269d454d3489a87304c58e9f892d611d9a2eec7
 files: 18
 dirs: 7
 tokens_total: 15253
 ---
 # C:/Users/Matty/Documents/context-project
 
-A filesystem-native context layer tool that generates persistent CONTEXT.md manifests to help AI agents navigate large codebases.
+A filesystem-native tool that generates and maintains persistent CONTEXT.md manifests to help AI agents navigate and understand large codebases through hierarchical directory summaries.
 
 ## Files
 
@@ -30,7 +30,7 @@ A filesystem-native context layer tool that generates persistent CONTEXT.md mani
 - **package.json** — Node.js package metadata and development dependencies for the ctx project.
 - **pyproject.toml** — Python project configuration specifying dependencies, entry points, and build system.
 - **rules.md** — Engineering standards and agentic rules for code quality, testing, and manifest protocol compliance.
-- **state.md** — Documents current development status, completed milestones, and phases 1-9 of the ctx project through March 2026.
+- **state.md** — Development status document tracking completed phases 1–9, current health metrics, and ecosystem features for the ctx tool.
 
 ## Subdirectories
 
@@ -39,12 +39,12 @@ A filesystem-native context layer tool that generates persistent CONTEXT.md mani
 - **.github/** — GitHub configuration and automation for the context-project repository.
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
 - **archive/** — Archive of design documents, analyses, and reflections for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
-- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer for AI agents.
-- **tests/** — Comprehensive test suite covering CLI, configuration, language parsers, generation engine, Git integration, and manifest functionality.
+- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agents.
+- **tests/** — Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM clients, and end-to-end manifest generation workflows.
 
 ## Notes
 
-- The project uses both Node.js (package.json, Husky) and Python (pyproject.toml) tooling.
-- Git hooks and pre-commit validation ensure manifest freshness and conventional commit compliance.
-- AGENTS.md and CONTRIBUTING.md define the agentic workflow and contribution standards.
-- GATE_CLOSEOUT.md and PHASE16_HANDOFF.md document structured phase execution and handoff protocols.
+- The project uses a hybrid Node.js and Python stack with commitlint and Husky for enforcing conventional commits and pre-commit validation.
+- Agentic workflow is central to the project design; AGENTS.md, CONTRIBUTING.md, and rules.md define the contract for AI-assisted development.
+- Phase-based delivery model with mandatory gate closeout procedures ensures quality and founder oversight at each milestone.
+- Bottom-up manifest generation with content hashing enables efficient incremental updates and caching of directory summaries.
