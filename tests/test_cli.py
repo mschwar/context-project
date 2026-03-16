@@ -1749,7 +1749,7 @@ def test_transient_errors_no_proxy_guidance_when_no_proxy_set(tmp_path, monkeypa
         ),
     )
     # Ensure no proxy vars are set
-    for v in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+    for v in cli_module.PROXY_ENV_VARS:
         monkeypatch.delenv(v, raising=False)
 
     result = runner.invoke(cli_module.cli, ["init", str(root)])
