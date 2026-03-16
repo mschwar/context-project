@@ -60,8 +60,8 @@ class GenerateStats:
     errors: list[str] = field(default_factory=list)
 
 
-# Type alias for progress callback: (current_dir, dirs_done, dirs_total)
-ProgressCallback = Callable[[Path, int, int], None]
+# Type alias for progress callback: (current_dir, dirs_done, dirs_total, tokens_used)
+ProgressCallback = Callable[[Path, int, int, int], None]
 
 
 def _relative_path_str(path: Path, root: Path) -> str:
@@ -425,7 +425,7 @@ def _run_generation(
                         stats.files_binary += binary_count
                         stats.tokens_used += tokens_used
                     if progress is not None:
-                        progress(directory, local_done, total_dirs)
+                        progress(directory, local_done, total_dirs, stats.tokens_used)
 
     return stats
 

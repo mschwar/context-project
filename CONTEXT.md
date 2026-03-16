@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-16T15:27:42Z'
+generated: '2026-03-16T20:57:04Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:3000303cdb886ff822a12f548ffbc152d5d18abd4b9e3d51d9e84909c0fce89e
+content_hash: sha256:c8cba382c7a16d02795df9f118dfb6843c13387c1fd4b3b3c73e7ea67905f1c1
 files: 18
 dirs: 7
 tokens_total: 15253
 ---
 # C:/Users/Matty/Documents/context-project
 
-A filesystem-native hierarchical manifest system that generates persistent CONTEXT.md files to help AI agents navigate large codebases.
+A filesystem-native context layer tool that generates persistent CONTEXT.md manifests to help AI agents navigate large codebases.
 
 ## Files
 
@@ -30,20 +30,21 @@ A filesystem-native hierarchical manifest system that generates persistent CONTE
 - **package.json** — Node.js package metadata and development dependencies for the ctx project.
 - **pyproject.toml** — Python project configuration specifying dependencies, entry points, and build system.
 - **rules.md** — Engineering standards and agentic rules for code quality, testing, and manifest protocol compliance.
-- **state.md** — Current development status documenting completed milestones through Phase 9 with health metrics, ecosystem features, and implementation details.
+- **state.md** — Documents current development status, completed milestones, and phases 1-9 of the ctx project through March 2026.
 
 ## Subdirectories
 
-- **.claude/** — Configuration directory for the context project containing local settings and permitted operations.
+- **.claude/** — Configuration directory storing local settings and permissions for the context project environment.
 - **.githooks/** — Git hooks directory for automated pre-commit testing and validation.
 - **.github/** — GitHub configuration and automation for the context-project repository.
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
-- **archive/** — Archive of design documents, analyses, and roadmaps for the ctx project.
-- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer.
-- **tests/** — Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM clients, and core generation engine functionality.
+- **archive/** — Archive of design documents, analyses, and reflections for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
+- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer for AI agents.
+- **tests/** — Comprehensive test suite covering CLI, configuration, language parsers, generation engine, Git integration, and manifest functionality.
 
 ## Notes
 
 - The project uses both Node.js (package.json, Husky) and Python (pyproject.toml) tooling.
 - Git hooks and pre-commit validation ensure manifest freshness and conventional commit compliance.
-- Phase-based delivery structure with detailed closeout and handoff documentation for agent coordination.
+- AGENTS.md and CONTRIBUTING.md define the agentic workflow and contribution standards.
+- GATE_CLOSEOUT.md and PHASE16_HANDOFF.md document structured phase execution and handoff protocols.
