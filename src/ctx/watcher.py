@@ -159,14 +159,24 @@ def run_watch(
         echo = click.echo
 
     def on_change(changed_path: Path) -> None:
-        echo(f"  change detected: {changed_path.relative_to(root)}")
-        stats = update_tree(root, config, client, spec, changed_files=[changed_path])
-        if stats.dirs_processed:
-            echo(f"  refreshed {stats.dirs_processed} director{'y' if stats.dirs_processed == 1 else 'ies'}")
-        if stats.errors:
-            for err in stats.errors:
-                echo(f"  error: {err}")
-        _print_coverage_summary(root, spec)
+        try:
+            rel_changed_path = changed_path.relative_to(root)
+        except ValueError:
+            rel_changed_path = changed_path
+        echo(f"  change detected: {rel_changed_path}")
+
+        # Top-level boundary for the watchdog callback: never let exceptions
+        # escape the background thread and silently kill future watch updates.
+        try:
+            stats = update_tree(root, config, client, spec, changed_files=[changed_path])
+            if stats.dirs_processed:
+                echo(f"  refreshed {stats.dirs_processed} director{'y' if stats.dirs_processed == 1 else 'ies'}")
+            if stats.errors:
+                for err in stats.errors:
+                    echo(f"  error: {err}")
+            _print_coverage_summary(root, spec)
+        except Exception as exc:
+            echo(f"  error: {exc}")
 
     handler = _DebounceHandler(root, spec, on_change, debounce_seconds=config.watch_debounce_seconds)
     observer = Observer()

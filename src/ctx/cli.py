@@ -31,9 +31,11 @@ from ctx.config import (
     probe_provider_connectivity,
     write_default_config,
 )
+from ctx.hasher import hash_directory, is_stale
 from ctx.llm import TRANSIENT_ERROR_PREFIX
 from ctx.generator import GenerateStats, check_stale_dirs, generate_tree, get_status, update_tree
 from ctx.ignore import load_ignore_patterns, should_ignore
+from ctx.manifest import read_manifest
 from ctx.llm import create_client
 
 
@@ -198,17 +200,35 @@ def _active_proxy_vars() -> list[str]:
     return [v for v in PROXY_ENV_VARS if os.getenv(v)]
 
 
+def _proxy_unset_hint(proxy_vars: list[str], *, platform_name: Optional[str] = None) -> str:
+    """Return a shell-appropriate hint for unsetting proxy environment variables."""
+    platform = platform_name or os.name
+    if platform == "nt":
+        commands = "; ".join(
+            f"Remove-Item Env:{proxy_var} -ErrorAction SilentlyContinue"
+            for proxy_var in proxy_vars
+        )
+        return f"PowerShell: {commands}"
+    return "unset " + " ".join(proxy_vars)
+
+
+def _echo_proxy_guidance(proxy_vars: list[str]) -> None:
+    """Print shell-aware proxy guidance when active proxy variables are detected."""
+    if not proxy_vars:
+        return
+    click.echo(
+        f"Proxy env vars detected: {', '.join(proxy_vars)}. "
+        "A broken proxy may be blocking requests. "
+        f"Try unsetting them in your shell: {_proxy_unset_hint(proxy_vars)}",
+        err=True,
+    )
+
+
 def _echo_connectivity_failure(error: str) -> None:
     """Print a connectivity failure message with optional proxy guidance."""
     click.echo(f"Pre-flight check failed: {error}", err=True)
     proxy_vars = _active_proxy_vars()
-    if proxy_vars:
-        click.echo(
-            f"Proxy env vars detected: {', '.join(proxy_vars)}. "
-            "A broken proxy may be blocking requests. "
-            "Try unsetting them: unset " + " ".join(proxy_vars),
-            err=True,
-        )
+    _echo_proxy_guidance(proxy_vars)
     click.echo("Tip: run `ctx setup --check` for detailed provider diagnostics.", err=True)
 
 
@@ -224,14 +244,7 @@ def _echo_generation_errors(stats: GenerateStats) -> None:
             "Tip: transient errors may resolve on retry. Run the command again.",
             err=True,
         )
-        proxy_vars = _active_proxy_vars()
-        if proxy_vars:
-            click.echo(
-                f"Proxy env vars detected: {', '.join(proxy_vars)}. "
-                "A broken proxy may be the cause. "
-                "Try unsetting them: unset " + " ".join(proxy_vars),
-                err=True,
-            )
+        _echo_proxy_guidance(_active_proxy_vars())
 
 
 def _echo_stale_dirs(stale: list[Path], target_path: Path) -> None:
@@ -507,14 +520,7 @@ def setup(path: str, check_only: bool) -> None:
                 click.echo("Connectivity: OK")
             else:
                 click.echo(f"Connectivity: FAILED — {conn_error}", err=True)
-                proxy_vars = _active_proxy_vars()
-                if proxy_vars:
-                    click.echo(
-                        f"Proxy env vars detected: {', '.join(proxy_vars)}. "
-                        "A broken proxy may be blocking requests. "
-                        "Try unsetting them: unset " + " ".join(proxy_vars),
-                        err=True,
-                    )
+                _echo_proxy_guidance(_active_proxy_vars())
                 sys.exit(1)
         return
 
@@ -763,12 +769,11 @@ def stats(path: str, verbose: bool, output_format: str) -> None:
       dirs        — total directories found (respects .ctxignore)
       covered     — directories with a CONTEXT.md
       missing     — directories without a CONTEXT.md
-      stale       — directories whose CONTEXT.md is older than a source file
+      stale       — directories whose manifest hash no longer matches current contents
       tokens      — sum of tokens_total from all manifest frontmatters
     """
     import json
     import os
-    import re as _re
 
     root = Path(path).resolve()
     spec = load_ignore_patterns(root)
@@ -778,8 +783,6 @@ def stats(path: str, verbose: bool, output_format: str) -> None:
     dirs_missing = 0
     dirs_stale = 0
     tokens_total = 0
-
-    _tokens_re = _re.compile(r"^tokens_total:\s*(\d+)", _re.MULTILINE)
 
     # Per-directory rows for --verbose
     dir_rows: list[tuple[str, str, Optional[int]]] = []  # (rel_path, status, tokens)
@@ -808,25 +811,21 @@ def stats(path: str, verbose: bool, output_format: str) -> None:
             dirs_covered += 1
             dir_tokens: Optional[int] = None
             try:
-                text = manifest.read_text(encoding="utf-8")
-                m = _tokens_re.search(text)
-                if m:
-                    dir_tokens = int(m.group(1))
-                    tokens_total += dir_tokens
-            except (OSError, UnicodeDecodeError):
-                pass
-            is_stale_dir = False
-            try:
-                manifest_mtime = manifest.stat().st_mtime
-                is_stale_dir = any(
-                    f.stat().st_mtime > manifest_mtime
-                    for f in d.iterdir()
-                    if f.is_file() and f.name != "CONTEXT.md"
+                manifest_obj = read_manifest(d)
+                if manifest_obj is None:
+                    raise FileNotFoundError(manifest)
+                dir_tokens = manifest_obj.frontmatter.tokens_total
+                tokens_total += dir_tokens
+                is_stale_dir = is_stale(
+                    manifest_obj.frontmatter.content_hash,
+                    hash_directory(d, spec, root),
                 )
-                if is_stale_dir:
-                    dirs_stale += 1
-            except OSError:
-                pass
+            except (ValueError, OSError):
+                is_stale_dir = True
+
+            if is_stale_dir:
+                dirs_stale += 1
+
             if verbose:
                 status = "stale" if is_stale_dir else "covered"
                 dir_rows.append((rel, status, dir_tokens))
