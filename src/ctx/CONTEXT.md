@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-17T04:37:57Z'
+generated: '2026-03-17T07:15:13Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:743b75392d19b3027efc3cdc996ee221ecf0163b087c03c98558bb52bcacc111
+content_hash: sha256:67695b2df412b6fe5db1b9bcde906a78293f9063bac14f7290a59ca0e2c94536
 files: 14
 dirs: 1
 tokens_total: 13370
@@ -34,9 +34,8 @@ Core implementation of ctx, a filesystem-native context layer that generates and
 
 ## Notes
 
-- The generator module orchestrates the core workflow: directory traversal, file reading, LLM summarization, and manifest writing.
-- Configuration is resolved hierarchically from environment variables, .ctxconfig files, and CLI flags, with automatic LLM provider detection.
-- Ignore patterns follow gitignore conventions and are applied during directory traversal to exclude irrelevant files.
-- Content hashing enables incremental updates by detecting staleness at both file and directory levels.
-- The server module provides HTTP access to manifests with path traversal protection, enabling integration with external tools.
-- Language detection and lang_parsers work together to extract language-specific structural information for richer summaries.
+- The generator engine orchestrates the full pipeline: configuration loading, file traversal with ignore patterns, LLM-based summarization, and manifest writing.
+- Multiple LLM providers (Anthropic, OpenAI) are abstracted through a common protocol in llm.py, with provider selection via config.py.
+- Staleness detection via hasher.py enables incremental updates; git.py supports change-based regeneration workflows.
+- The server.py module exposes manifests over HTTP, complementing the CLI-driven generation model for integration with external tools.
+- Language detection and lang_parsers work together to provide context-aware summarization tailored to project structure.

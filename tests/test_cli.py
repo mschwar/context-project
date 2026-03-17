@@ -901,6 +901,42 @@ def test_stats_counts_stale_parents_via_hashes(tmp_path) -> None:
     assert output["aggregate"]["stale"] == 2
 
 
+def test_stats_treats_unreadable_manifest_state_as_stale(tmp_path, monkeypatch) -> None:
+    """ctx stats should mark a covered directory stale if manifest loading races or fails."""
+    import json
+    from ctx.hasher import hash_directory
+    from ctx.ignore import load_ignore_patterns
+    from ctx.manifest import write_manifest
+
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "main.py").write_text("print('ok')", encoding="utf-8")
+
+    spec = load_ignore_patterns(root)
+    write_manifest(
+        root,
+        model="test",
+        content_hash=hash_directory(root, spec, root),
+        files=1,
+        dirs=0,
+        tokens_total=10,
+        body="# root\n",
+    )
+
+    monkeypatch.setattr(cli_module, "read_manifest", lambda path: None)
+
+    result = runner.invoke(cli_module.cli, ["stats", "--format", "json", str(root)])
+
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    assert output["aggregate"]["covered"] == 1
+    assert output["aggregate"]["stale"] == 1
+    assert output["aggregate"]["tokens"] == 0
+
+
 # --- 15.2: ctx export --filter ---
 
 

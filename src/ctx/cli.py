@@ -810,21 +810,17 @@ def stats(path: str, verbose: bool, output_format: str) -> None:
         else:
             dirs_covered += 1
             dir_tokens: Optional[int] = None
-            is_stale_dir = False
             try:
                 manifest_obj = read_manifest(d)
-                if manifest_obj is not None:
-                    dir_tokens = manifest_obj.frontmatter.tokens_total
-                    tokens_total += dir_tokens
-                    is_stale_dir = is_stale(
-                        manifest_obj.frontmatter.content_hash,
-                        hash_directory(d, spec, root),
-                    )
-                else:
-                    is_stale_dir = True
-            except ValueError:
-                is_stale_dir = True
-            except OSError:
+                if manifest_obj is None:
+                    raise FileNotFoundError(manifest)
+                dir_tokens = manifest_obj.frontmatter.tokens_total
+                tokens_total += dir_tokens
+                is_stale_dir = is_stale(
+                    manifest_obj.frontmatter.content_hash,
+                    hash_directory(d, spec, root),
+                )
+            except (ValueError, OSError):
                 is_stale_dir = True
 
             if is_stale_dir:

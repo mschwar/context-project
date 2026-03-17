@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-17T04:38:15Z'
+generated: '2026-03-17T07:15:28Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:384321f0684bb96a5087085c01a3ee1ce19edb54608ecccd10c9bc9eecd89e55
+content_hash: sha256:7f9f6784eb1bc2c7e3be9bd49eb720a9225bfc5e757dda93501e30c191651480
 files: 18
 dirs: 7
 tokens_total: 15258
@@ -44,8 +44,8 @@ A filesystem-native manifest generation tool (ctx) that creates persistent CONTE
 
 ## Notes
 
-- The project uses a hybrid tech stack (Python core with Node.js tooling) for development and distribution.
-- Agentic SDLC principles are central to the project's workflow; see AGENTS.md and CONTRIBUTING.md for governance and contribution contracts.
-- Pre-commit hooks and commitlint enforce manifest freshness and conventional commit standards.
-- Phase-based delivery model with mandatory gate closeout procedures documented in GATE_CLOSEOUT.md and phase-specific handoff contracts.
-- Archive directory preserves design rationale and architectural evolution for future reference.
+- The project uses a hybrid tech stack with Python (core implementation) and Node.js (development tooling), coordinated through package.json and pyproject.toml.
+- Agentic SDLC principles are central to the project; AGENTS.md, CONTRIBUTING.md, and rules.md define the contract for AI-assisted development.
+- Pre-commit hooks (Husky, .pre-commit-hooks.yaml) enforce manifest freshness and conventional commits, ensuring consistency across phases.
+- Phase-based delivery model documented in GATE_CLOSEOUT.md and PHASE16_HANDOFF.md; state.md tracks progress through Phase 20.
+- Archive directory preserves design rationale and architectural evolution, supporting long-term maintainability and agent onboarding.
