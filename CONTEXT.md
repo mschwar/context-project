@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-16T22:02:43Z'
+generated: '2026-03-17T02:12:33Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:439d91bc610332519f05da252269d454d3489a87304c58e9f892d611d9a2eec7
+content_hash: sha256:635ddfbd853090f201e37fbf9594f3e2e45746c8876340cd5e310368e8aab551
 files: 18
 dirs: 7
 tokens_total: 15253
@@ -34,17 +34,16 @@ A filesystem-native tool that generates and maintains persistent CONTEXT.md mani
 
 ## Subdirectories
 
-- **.claude/** — Configuration directory storing local settings and permissions for the context project environment.
+- **.claude/** — Configuration directory storing local settings and permissions for the context project's Claude integration.
 - **.githooks/** — Git hooks directory for automated pre-commit testing and validation.
 - **.github/** — GitHub configuration and automation for the context-project repository.
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
-- **archive/** — Archive of design documents, analyses, and reflections for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
+- **archive/** — Design documents, AI analysis, and project reflections documenting the evolution and architectural decisions for the ctx tool.
 - **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agents.
 - **tests/** — Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM clients, and end-to-end manifest generation workflows.
 
 ## Notes
 
-- The project uses a hybrid Node.js and Python stack with commitlint and Husky for enforcing conventional commits and pre-commit validation.
+- The project uses a hybrid tech stack (Python for core logic, Node.js for tooling) with conventional commits and pre-commit hooks enforcing quality standards.
 - Agentic workflow is central to the project design; AGENTS.md, CONTRIBUTING.md, and rules.md define the contract for AI-assisted development.
-- Phase-based delivery model with mandatory gate closeout procedures ensures quality and founder oversight at each milestone.
-- Bottom-up manifest generation with content hashing enables efficient incremental updates and caching of directory summaries.
+- Phase-based delivery model with mandatory gate closeouts ensures structured progress tracking and founder validation at each milestone.
