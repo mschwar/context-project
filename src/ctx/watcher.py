@@ -36,40 +36,13 @@ def _should_process_event(event: FileSystemEvent, root: Path, spec: object) -> b
 
 def _print_coverage_summary(root: Path, spec: object) -> None:
     """Print a one-line coverage summary after a watch refresh."""
-    import os
+    from ctx.generator import inspect_directory_health
 
-    from ctx.hasher import hash_directory, is_stale
-    from ctx.manifest import read_manifest
-
-    dirs_total = 0
-    dirs_covered = 0
-    dirs_stale = 0
-    tokens_total = 0
-
-    for dirpath, dirnames, _ in os.walk(root):
-        d = Path(dirpath)
-        # Prune ignored subdirectories in-place
-        dirnames[:] = [
-            dn for dn in sorted(dirnames)
-            if not should_ignore(d / dn, spec, root)
-        ]
-
-        dirs_total += 1
-        manifest = d / "CONTEXT.md"
-
-        if not manifest.exists():
-            continue
-
-        dirs_covered += 1
-        try:
-            m_obj = read_manifest(d)
-            tokens_total += m_obj.frontmatter.tokens_total
-            current_hash = hash_directory(d, spec, root)
-            if is_stale(m_obj.frontmatter.content_hash, current_hash):
-                dirs_stale += 1
-        except (OSError, ValueError):
-            # Error reading or parsing, count as stale
-            dirs_stale += 1
+    health_entries = inspect_directory_health(root, spec, root)
+    dirs_total = len(health_entries)
+    dirs_covered = sum(1 for entry in health_entries if entry.status != "missing")
+    dirs_stale = sum(1 for entry in health_entries if entry.status == "stale")
+    tokens_total = sum(entry.tokens_total or 0 for entry in health_entries)
 
     print(f"  coverage: {dirs_covered}/{dirs_total} dirs covered, {dirs_stale} stale, {tokens_total:,} tokens")
 

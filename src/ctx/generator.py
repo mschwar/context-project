@@ -19,7 +19,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional
 
 import pathspec
 
@@ -27,7 +27,7 @@ from ctx.config import Config
 from ctx.hasher import hash_directory, is_stale
 from ctx.ignore import should_ignore
 from ctx.llm import CachingLLMClient, LLMClient, FileSummary, SubdirSummary
-from ctx.manifest import Manifest, read_manifest, write_manifest
+from ctx.manifest import Manifest, ManifestFrontmatter, read_manifest, write_manifest
 from ctx.language_detector import detect_language
 from ctx.lang_parsers.python_parser import parse_python_file
 from ctx.lang_parsers.js_ts_parser import parse_js_ts_file
@@ -58,6 +58,18 @@ class GenerateStats:
     tokens_used: int = 0
     budget_exhausted: bool = False
     errors: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DirectoryHealth:
+    """Health state for a single directory in a context tree."""
+
+    path: Path
+    relative_path: str
+    status: Literal["fresh", "stale", "missing"]
+    tokens_total: Optional[int] = None
+    frontmatter: Optional[ManifestFrontmatter] = None
+    error: Optional[str] = None
 
 
 # Type alias for progress callback: (current_dir, dirs_done, dirs_total, tokens_used)
@@ -537,48 +549,76 @@ def update_tree(
     )
 
 
-def get_status(
+def inspect_directory_health(
     root: Path,
     spec: pathspec.PathSpec,
     target_root: Path,
-) -> list[dict]:
-    """Check manifest status for all directories in a tree.
+    *,
+    max_depth: Optional[int] = None,
+) -> list[DirectoryHealth]:
+    """Inspect manifest health for all directories in a tree.
 
     Args:
         root: Directory to check.
         spec: Ignore spec.
         target_root: Root for relative path computation.
+        max_depth: Optional maximum depth relative to *root*.
 
     Returns:
-        List of dicts: {"path": relative_str, "status": "fresh"|"stale"|"missing"}
-
-    Implementation:
-        1. Walk all directories under root (respecting spec).
-        2. For each directory:
-           a. If no CONTEXT.md exists: status = "missing".
-           b. Else: read manifest, compute current hash, compare.
-              If hashes match: "fresh". Else: "stale".
-        3. Return sorted by path.
+        List of DirectoryHealth rows sorted by relative path.
     """
-    directories = _collect_directories(root, spec, target_root)
-    results: list[dict] = []
+    directories = _collect_directories(root, spec, target_root, max_depth=max_depth)
+    results: list[DirectoryHealth] = []
 
     for directory in directories:
         relative_path = _relative_path_str(directory, target_root)
         try:
             manifest = read_manifest(directory)
-        except ValueError:
-            results.append({"path": relative_path, "status": "stale"})
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            results.append(
+                DirectoryHealth(
+                    path=directory,
+                    relative_path=relative_path,
+                    status="stale",
+                    error=str(exc),
+                )
+            )
             continue
         if manifest is None:
-            results.append({"path": relative_path, "status": "missing"})
+            results.append(
+                DirectoryHealth(
+                    path=directory,
+                    relative_path=relative_path,
+                    status="missing",
+                )
+            )
             continue
 
         current_hash = hash_directory(directory, spec, target_root)
         status = "stale" if is_stale(manifest.frontmatter.content_hash, current_hash) else "fresh"
-        results.append({"path": relative_path, "status": status})
+        results.append(
+            DirectoryHealth(
+                path=directory,
+                relative_path=relative_path,
+                status=status,
+                tokens_total=manifest.frontmatter.tokens_total,
+                frontmatter=manifest.frontmatter,
+            )
+        )
 
-    return sorted(results, key=lambda item: item["path"])
+    return sorted(results, key=lambda item: item.relative_path)
+
+
+def get_status(
+    root: Path,
+    spec: pathspec.PathSpec,
+    target_root: Path,
+) -> list[dict]:
+    """Check manifest status for all directories in a tree."""
+    return [
+        {"path": health.relative_path, "status": health.status}
+        for health in inspect_directory_health(root, spec, target_root)
+    ]
 
 
 def check_stale_dirs(

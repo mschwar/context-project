@@ -1,12 +1,16 @@
 import pytest
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 import subprocess
 
-from ctx.git import get_changed_files
-
-UNSTAGED_CMD = ["git", "diff", "--name-only", "HEAD"]
-STAGED_CMD = ["git", "diff", "--name-only", "--cached"]
+from ctx.git import (
+    STAGED_CMD,
+    UNBORN_UNSTAGED_CMD,
+    UNSTAGED_CMD,
+    UNTRACKED_CMD,
+    get_changed_files,
+    is_unborn_head_error,
+)
 COMMON_KWARGS = dict(capture_output=True, text=True, check=True)
 
 
@@ -73,3 +77,35 @@ def test_get_changed_files_git_not_found(tmp_path):
         with pytest.raises(RuntimeError) as excinfo:
             get_changed_files(tmp_path)
         assert "Git executable not found" in str(excinfo.value)
+
+
+def test_get_changed_files_handles_unborn_head(tmp_path):
+    def side_effect(cmd, **kwargs):
+        if cmd == UNSTAGED_CMD:
+            raise subprocess.CalledProcessError(128, cmd, stderr="fatal: bad revision 'HEAD'")
+        mock = MagicMock()
+        outputs = {
+            tuple(UNBORN_UNSTAGED_CMD): "tracked.py\n",
+            tuple(STAGED_CMD): "tracked.py\nstaged.py\n",
+            tuple(UNTRACKED_CMD): "untracked.py\n",
+        }
+        mock.stdout = outputs[tuple(cmd)]
+        mock.stderr = ""
+        mock.returncode = 0
+        return mock
+
+    with patch("subprocess.run", side_effect=side_effect):
+        changes = get_changed_files(tmp_path)
+
+    assert changes == [
+        tmp_path / "staged.py",
+        tmp_path / "tracked.py",
+        tmp_path / "untracked.py",
+    ]
+
+
+def test_is_unborn_head_error_matches_known_messages() -> None:
+    assert is_unborn_head_error("fatal: bad revision 'HEAD'")
+    assert is_unborn_head_error("fatal: ambiguous argument 'HEAD': unknown revision or path not in the working tree.")
+    assert is_unborn_head_error("## No commits yet on main") is False
+    assert not is_unborn_head_error("fatal: not a git repository")

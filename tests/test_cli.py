@@ -136,22 +136,27 @@ def test_status_command_prints_table_and_summary(tmp_path, monkeypatch) -> None:
         calls["load_ignore_patterns"] = target_path
         return fake_spec
 
-    def fake_get_status(root: Path, spec: object, target_root: Path):
-        calls["get_status"] = (root, spec, target_root)
+    class _Health:
+        def __init__(self, relative_path: str, status: str) -> None:
+            self.relative_path = relative_path
+            self.status = status
+
+    def fake_inspect_directory_health(root: Path, spec: object, target_root: Path):
+        calls["inspect_directory_health"] = (root, spec, target_root)
         return [
-            {"path": ".", "status": "fresh"},
-            {"path": "src", "status": "stale"},
-            {"path": "docs", "status": "missing"},
+            _Health(".", "fresh"),
+            _Health("src", "stale"),
+            _Health("docs", "missing"),
         ]
 
     monkeypatch.setattr(cli_module, "load_ignore_patterns", fake_load_ignore_patterns)
-    monkeypatch.setattr(cli_module, "get_status", fake_get_status)
+    monkeypatch.setattr(cli_module, "inspect_directory_health", fake_inspect_directory_health)
 
     result = runner.invoke(cli_module.cli, ["status", str(tmp_path)])
 
     assert result.exit_code == 0
     assert calls["load_ignore_patterns"] == tmp_path
-    assert calls["get_status"] == (tmp_path, fake_spec, tmp_path)
+    assert calls["inspect_directory_health"] == (tmp_path, fake_spec, tmp_path)
     assert "STATUS   PATH" in result.output
     assert "fresh    ." in result.output
     assert "stale    ./src" in result.output
@@ -375,6 +380,72 @@ def test_diff_since_flag_passes_ref_to_git(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert any("main" in cmd for cmd in captured_cmds)
     assert "No CONTEXT.md files changed since main" in result.output
+
+
+def test_diff_handles_unborn_head_without_fallback_warning(tmp_path, monkeypatch) -> None:
+    """ctx diff should treat an empty repo as a first-class git state, not a git failure."""
+    import subprocess
+
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    def fake_run(cmd, **kwargs):
+        if cmd == ["git", "diff", "--name-only", "HEAD", "--", "*/CONTEXT.md", "CONTEXT.md"]:
+            raise subprocess.CalledProcessError(128, cmd, stderr="fatal: bad revision 'HEAD'")
+
+        class R:
+            returncode = 0
+
+        r = R()
+        if cmd == ["git", "diff", "--cached", "--name-only", "--", "*/CONTEXT.md", "CONTEXT.md"]:
+            r.stdout = "src/CONTEXT.md\n"
+        elif cmd == ["git", "ls-files", "--others", "--exclude-standard", "--", "*/CONTEXT.md", "CONTEXT.md"]:
+            r.stdout = "tests/CONTEXT.md\n"
+        else:
+            r.stdout = ""
+        return r
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", str(root)])
+
+    assert result.exit_code == 0
+    assert "[new] src/CONTEXT.md" in result.output
+    assert "[new] tests/CONTEXT.md" in result.output
+    assert "git not available" not in result.output
+
+
+def test_diff_stat_handles_unborn_head(tmp_path, monkeypatch) -> None:
+    """ctx diff --stat should count new manifests in repos without commits yet."""
+    import subprocess
+
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    root = _copy_sample_project(tmp_path)
+
+    def fake_run(cmd, **kwargs):
+        if cmd == ["git", "diff", "--name-only", "HEAD", "--", "*/CONTEXT.md", "CONTEXT.md"]:
+            raise subprocess.CalledProcessError(128, cmd, stderr="fatal: bad revision 'HEAD'")
+
+        class R:
+            returncode = 0
+
+        r = R()
+        if cmd == ["git", "diff", "--cached", "--name-only", "--", "*/CONTEXT.md", "CONTEXT.md"]:
+            r.stdout = "src/CONTEXT.md\n"
+        elif cmd == ["git", "ls-files", "--others", "--exclude-standard", "--", "*/CONTEXT.md", "CONTEXT.md"]:
+            r.stdout = "tests/CONTEXT.md\n"
+        else:
+            r.stdout = ""
+        return r
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.cli, ["diff", "--stat", str(root)])
+
+    assert result.exit_code == 0
+    assert "2 new" in result.output
 
 
 # --- 16H: ctx diff --stat ---
@@ -926,7 +997,13 @@ def test_stats_treats_unreadable_manifest_state_as_stale(tmp_path, monkeypatch) 
         body="# root\n",
     )
 
-    monkeypatch.setattr(cli_module, "read_manifest", lambda path: None)
+    class _Health:
+        relative_path = "."
+        status = "stale"
+        tokens_total = None
+        path = root
+
+    monkeypatch.setattr(cli_module, "inspect_directory_health", lambda *args: [_Health()])
 
     result = runner.invoke(cli_module.cli, ["stats", "--format", "json", str(root)])
 
@@ -960,9 +1037,7 @@ def test_export_filter_all_default(tmp_path) -> None:
 
 
 def test_export_filter_stale(tmp_path) -> None:
-    """ctx export --filter stale should only export manifests older than a source file."""
-    import os
-    import time
+    """ctx export --filter stale should only export manifests with stale hashes."""
 
     cli_module = import_module("ctx.cli")
     runner = CliRunner()
@@ -970,31 +1045,45 @@ def test_export_filter_stale(tmp_path) -> None:
     root = tmp_path / "project"
     root.mkdir()
 
-    # fresh dir — manifest is newer than source file
     fresh_dir = root / "fresh"
     fresh_dir.mkdir()
     (fresh_dir / "main.py").write_text("x = 1", encoding="utf-8")
-    fresh_manifest = fresh_dir / "CONTEXT.md"
-    fresh_manifest.write_text("fresh content", encoding="utf-8")
-    # Make source file older than manifest
-    os.utime(str(fresh_dir / "main.py"), (time.time() - 20, time.time() - 20))
-    os.utime(str(fresh_manifest), (time.time(), time.time()))
+    _write_stats_manifest(fresh_dir, root, tokens_total=10, body="fresh content")
 
-    # stale dir — manifest is older than source file
     stale_dir = root / "stale"
     stale_dir.mkdir()
     (stale_dir / "main.py").write_text("y = 2", encoding="utf-8")
-    stale_manifest = stale_dir / "CONTEXT.md"
-    stale_manifest.write_text("stale content", encoding="utf-8")
-    # Make manifest older than source file
-    os.utime(str(stale_manifest), (time.time() - 20, time.time() - 20))
-    os.utime(str(stale_dir / "main.py"), (time.time(), time.time()))
+    _write_stats_manifest(stale_dir, root, tokens_total=10, body="stale content")
+    (stale_dir / "main.py").write_text("y = 3", encoding="utf-8")
 
     result = runner.invoke(cli_module.cli, ["export", "--filter", "stale", str(root)])
 
     assert result.exit_code == 0
     assert "stale content" in result.output
     assert "fresh content" not in result.output
+
+
+def test_export_filter_stale_includes_parent_dirs_with_hash_drift(tmp_path) -> None:
+    """ctx export --filter stale should include stale parents, not just changed leaf dirs."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    child = root / "src"
+    root.mkdir()
+    child.mkdir()
+    (child / "main.py").write_text("print('v1')", encoding="utf-8")
+
+    _write_stats_manifest(child, root, tokens_total=10, body="child manifest")
+    _write_stats_manifest(root, root, tokens_total=20, body="root manifest")
+
+    (child / "main.py").write_text("print('v2')", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["export", "--filter", "stale", str(root)])
+
+    assert result.exit_code == 0
+    assert "# CONTEXT.md" in result.output
+    assert "# src/CONTEXT.md" in result.output
 
 
 # --- 15.3: ctx diff --quiet ---
@@ -1248,49 +1337,41 @@ def test_export_respects_custom_ctxignore(tmp_path) -> None:
 # --- 16E: ctx verify ---
 
 
+def _write_verify_manifest(directory: Path, root: Path, *, body: str = "# Manifest\n", tokens_total: int = 100) -> None:
+    """Write a valid manifest fixture for verify tests."""
+    from ctx.hasher import hash_directory
+    from ctx.ignore import load_ignore_patterns
+    from ctx.manifest import write_manifest
+
+    spec = load_ignore_patterns(root)
+    write_manifest(
+        directory,
+        model="test",
+        content_hash=hash_directory(directory, spec, root),
+        files=0,
+        dirs=0,
+        tokens_total=tokens_total,
+        body=body,
+    )
+
+
 def test_verify_all_valid_manifests(tmp_path) -> None:
-    """ctx verify should exit 0 when all manifests are valid."""
+    """ctx verify should exit 0 when all manifests are valid, fresh, and present."""
     cli_module = import_module("ctx.cli")
     runner = CliRunner()
 
     root = tmp_path / "project"
     root.mkdir()
-    (root / "CONTEXT.md").write_text(
-        """---
-generated: 2026-03-15T00:00:00Z
-generator: ctx/0.8.0
-model: claude-haiku-4-5-20251001
-content_hash: sha256:abc123
-files: 1
-dirs: 0
-tokens_total: 100
----
-# Root manifest
-""",
-        encoding="utf-8",
-    )
 
     sub = root / "sub"
     sub.mkdir()
-    (sub / "CONTEXT.md").write_text(
-        """---
-generated: 2026-03-15T00:00:00Z
-generator: ctx/0.8.0
-model: claude-haiku-4-5-20251001
-content_hash: sha256:def456
-files: 2
-dirs: 0
-tokens_total: 200
----
-# Sub manifest
-""",
-        encoding="utf-8",
-    )
+    _write_verify_manifest(sub, root, body="# Sub manifest\n", tokens_total=200)
+    _write_verify_manifest(root, root, body="# Root manifest\n", tokens_total=100)
 
     result = runner.invoke(cli_module.cli, ["verify", str(root)])
 
     assert result.exit_code == 0
-    assert "All manifests are valid." in result.output
+    assert "All manifests are valid, present, and fresh." in result.output
 
 
 def test_verify_missing_fields(tmp_path) -> None:
@@ -1357,22 +1438,6 @@ def test_verify_mixed_valid_and_invalid(tmp_path) -> None:
     root = tmp_path / "project"
     root.mkdir()
 
-    # Valid manifest
-    (root / "CONTEXT.md").write_text(
-        """---
-generated: 2026-03-15T00:00:00Z
-generator: ctx/0.8.0
-model: claude-haiku-4-5-20251001
-content_hash: sha256:abc123
-files: 1
-dirs: 0
-tokens_total: 100
----
-# Root manifest
-""",
-        encoding="utf-8",
-    )
-
     # Malformed (no closing ---)
     malformed = root / "malformed"
     malformed.mkdir()
@@ -1404,12 +1469,15 @@ files: 1
         encoding="utf-8",
     )
 
+    # Valid manifest written after child directories exist so the root hash is fresh.
+    _write_verify_manifest(root, root, body="# Root manifest\n")
+
     result = runner.invoke(cli_module.cli, ["verify", str(root)])
 
     assert result.exit_code == 1
     assert "Malformed frontmatter:" in result.output
     assert "Missing required fields:" in result.output
-    assert "Found 2 invalid manifest(s)." in result.output
+    assert "Found 2 directory issue(s)." in result.output
 
 
 def test_verify_respects_ctxignore(tmp_path) -> None:
@@ -1421,20 +1489,7 @@ def test_verify_respects_ctxignore(tmp_path) -> None:
     root.mkdir()
 
     # Valid manifest at root
-    (root / "CONTEXT.md").write_text(
-        """---
-generated: 2026-03-15T00:00:00Z
-generator: ctx/0.8.0
-model: claude-haiku-4-5-20251001
-content_hash: sha256:abc123
-files: 1
-dirs: 0
-tokens_total: 100
----
-# Root manifest
-""",
-        encoding="utf-8",
-    )
+    _write_verify_manifest(root, root, body="# Root manifest\n")
 
     # Invalid manifest in ignored directory
     ignored = root / ".pytest_cache"
@@ -1449,11 +1504,11 @@ tokens_total: 100
     result = runner.invoke(cli_module.cli, ["verify", str(root)])
 
     assert result.exit_code == 0
-    assert "All manifests are valid." in result.output
+    assert "All manifests are valid, present, and fresh." in result.output
 
 
 def test_verify_no_manifests(tmp_path) -> None:
-    """ctx verify should report all valid when no manifests exist."""
+    """ctx verify should fail when directories are missing manifests."""
     cli_module = import_module("ctx.cli")
     runner = CliRunner()
 
@@ -1463,8 +1518,74 @@ def test_verify_no_manifests(tmp_path) -> None:
 
     result = runner.invoke(cli_module.cli, ["verify", str(root)])
 
-    assert result.exit_code == 0
-    assert "All manifests are valid." in result.output
+    assert result.exit_code == 1
+    assert "Missing manifests:" in result.output
+    assert "." in result.output
+
+
+def test_verify_reports_stale_manifests(tmp_path) -> None:
+    """ctx verify should fail when a manifest hash no longer matches current contents."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "main.py").write_text("print('v1')", encoding="utf-8")
+    _write_verify_manifest(root, root, body="# Root manifest\n")
+    (root / "main.py").write_text("print('v2')", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["verify", str(root)])
+
+    assert result.exit_code == 1
+    assert "Stale manifests:" in result.output
+    assert "." in result.output
+
+
+def test_verify_reports_missing_subdirectory_manifest(tmp_path) -> None:
+    """ctx verify should fail when a child directory is missing its manifest."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    sub = root / "src"
+    root.mkdir()
+    sub.mkdir()
+    _write_verify_manifest(root, root, body="# Root manifest\n")
+
+    result = runner.invoke(cli_module.cli, ["verify", str(root)])
+
+    assert result.exit_code == 1
+    assert "Missing manifests:" in result.output
+    assert "src" in result.output
+
+
+def test_verify_format_json_reports_health_categories(tmp_path) -> None:
+    """ctx verify --format json should emit machine-readable health output."""
+    import json
+
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    stale = root / "stale"
+    missing = root / "missing"
+    root.mkdir()
+    stale.mkdir()
+    missing.mkdir()
+    (stale / "main.py").write_text("print('v1')", encoding="utf-8")
+    _write_verify_manifest(stale, root, body="# Stale manifest\n")
+    _write_verify_manifest(root, root, body="# Root manifest\n")
+    (stale / "main.py").write_text("print('v2')", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["verify", "--format", "json", str(root)])
+
+    assert result.exit_code == 1
+    output = json.loads(result.output)
+    assert output["aggregate"]["dirs"] == 3
+    assert output["aggregate"]["invalid"] == 3
+    assert "." in output["stale"]
+    assert "stale" in output["stale"]
+    assert "missing" in output["missing"]
 
 
 # --- Phase 17.1: non-zero exit on refresh errors ---
