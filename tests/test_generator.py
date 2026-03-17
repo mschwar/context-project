@@ -11,6 +11,7 @@ from ctx.generator import (
     format_binary_info,
     generate_tree,
     get_status,
+    inspect_directory_health,
     is_binary_file,
     update_tree,
 )
@@ -205,6 +206,24 @@ def test_get_status_marks_invalid_manifest_stale(tmp_path) -> None:
         {"path": "docs", "status": "stale"},
         {"path": "src", "status": "fresh"},
     ]
+
+
+def test_inspect_directory_health_reports_tokens_and_errors(tmp_path) -> None:
+    root = _copy_sample_project(tmp_path)
+    spec = load_ignore_patterns(root)
+    generate_tree(root, Config(api_key="test-key"), FakeLLMClient(), spec)
+
+    (root / "docs" / "CONTEXT.md").write_text("not valid frontmatter", encoding="utf-8")
+
+    health_entries = inspect_directory_health(root, spec, root)
+    docs_entry = next(entry for entry in health_entries if entry.relative_path == "docs")
+    root_entry = next(entry for entry in health_entries if entry.relative_path == ".")
+
+    assert docs_entry.status == "stale"
+    assert docs_entry.error is not None
+    assert root_entry.status == "fresh"
+    assert root_entry.tokens_total is not None
+    assert root_entry.tokens_total > 0
 
 
 def test_generate_tree_stops_at_token_budget(tmp_path) -> None:

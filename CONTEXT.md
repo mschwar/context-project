@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-17T07:15:28Z'
+generated: '2026-03-17T07:34:25Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:7f9f6784eb1bc2c7e3be9bd49eb720a9225bfc5e757dda93501e30c191651480
+content_hash: sha256:e27dd3a4bfc005dd1d2bbfac0862f4365f3a40ab916d89fc491e1b6e22b5e01e
 files: 18
 dirs: 7
 tokens_total: 15258
 ---
 # C:/Users/Matty/Documents/context-project
 
-A filesystem-native manifest generation tool (ctx) that creates persistent CONTEXT.md files to help AI agents navigate and understand large codebases through hierarchical directory summaries.
+A filesystem-native tool that generates and maintains persistent CONTEXT.md manifests to help AI agents navigate and understand large codebases through hierarchical directory documentation.
 
 ## Files
 
@@ -39,13 +39,13 @@ A filesystem-native manifest generation tool (ctx) that creates persistent CONTE
 - **.github/** — GitHub configuration and automation for the context-project repository.
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
 - **archive/** — Design documents, AI analysis, and project reflections documenting the evolution and architectural decisions for the ctx tool.
-- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer for AI agents.
-- **tests/** — Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM client functionality, and end-to-end workflows for the context manifest generation system.
+- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer that generates and maintains CONTEXT.md documentation.
+- **tests/** — Comprehensive test suite covering CLI commands, language parsers, core generation logic, Git integration, and end-to-end workflows.
 
 ## Notes
 
 - The project uses a hybrid tech stack with Python (core implementation) and Node.js (development tooling), coordinated through package.json and pyproject.toml.
 - Agentic SDLC principles are central to the project; AGENTS.md, CONTRIBUTING.md, and rules.md define the contract for AI-assisted development.
-- Pre-commit hooks (Husky, .pre-commit-hooks.yaml) enforce manifest freshness and conventional commits, ensuring consistency across phases.
-- Phase-based delivery model documented in GATE_CLOSEOUT.md and PHASE16_HANDOFF.md; state.md tracks progress through Phase 20.
-- Archive directory preserves design rationale and architectural evolution, supporting long-term maintainability and agent onboarding.
+- Pre-commit hooks and Husky enforce manifest freshness and conventional commits, ensuring quality gates before code integration.
+- Phase-based delivery model documented in GATE_CLOSEOUT.md and PHASE16_HANDOFF.md structures work into discrete, validatable increments.
+- The archive/ directory preserves design rationale and evolution history, supporting long-term maintainability and onboarding.

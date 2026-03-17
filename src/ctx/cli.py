@@ -31,11 +31,15 @@ from ctx.config import (
     probe_provider_connectivity,
     write_default_config,
 )
-from ctx.hasher import hash_directory, is_stale
 from ctx.llm import TRANSIENT_ERROR_PREFIX
-from ctx.generator import GenerateStats, check_stale_dirs, generate_tree, get_status, update_tree
-from ctx.ignore import load_ignore_patterns, should_ignore
-from ctx.manifest import read_manifest
+from ctx.generator import (
+    GenerateStats,
+    check_stale_dirs,
+    generate_tree,
+    inspect_directory_health,
+    update_tree,
+)
+from ctx.ignore import load_ignore_patterns
 from ctx.llm import create_client
 
 
@@ -379,7 +383,7 @@ def status(path: str, check_exit_code: bool) -> None:
 
     Implementation:
         1. load_ignore_patterns(Path(path)).
-        2. results = get_status(Path(path), spec, Path(path)).
+        2. results = inspect_directory_health(Path(path), spec, Path(path)).
         3. Print a table:
            STATUS   PATH
            fresh    ./src
@@ -390,13 +394,13 @@ def status(path: str, check_exit_code: bool) -> None:
     """
     target_path = Path(path)
     spec = load_ignore_patterns(target_path)
-    results = get_status(target_path, spec, target_path)
+    results = inspect_directory_health(target_path, spec, target_path)
 
     click.echo("STATUS   PATH")
     for result in results:
-        click.echo(f"{result['status']:<8} {_display_status_path(result['path'])}")
+        click.echo(f"{result.status:<8} {_display_status_path(result.relative_path)}")
 
-    counts = Counter(result["status"] for result in results)
+    counts = Counter(result.status for result in results)
     click.echo(
         f"{counts.get('fresh', 0)} fresh, {counts.get('stale', 0)} stale, "
         f"{counts.get('missing', 0)} missing"
@@ -550,32 +554,16 @@ def diff(path: str, since: Optional[str], output_format: str, quiet: bool, stat:
     import json
     import subprocess
 
+    from ctx.git import is_unborn_head_error
+
     target_path = Path(path)
     ref = since or "HEAD"
 
-    # --- git path ---
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", ref, "--", "*/CONTEXT.md", "CONTEXT.md"],
-            cwd=str(target_path),
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        changed = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-        untracked = subprocess.run(
-            ["git", "ls-files", "--others", "--exclude-standard", "--", "*/CONTEXT.md", "CONTEXT.md"],
-            cwd=str(target_path),
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        new_files = [line.strip() for line in untracked.stdout.splitlines() if line.strip()]
-        new_files_set = set(new_files)
-        modified_files = sorted(f for f in changed if f not in new_files_set)
-        new_files_sorted = sorted(new_files_set)
-        all_changed = sorted(set(changed) | new_files_set)
-        label = f"since {ref}"
+    def _split_lines(stdout: str) -> list[str]:
+        return [line.strip() for line in stdout.splitlines() if line.strip()]
+
+    def _emit_git_results(modified_files: list[str], new_files_sorted: list[str], label: str) -> None:
+        all_changed = sorted(set(modified_files) | set(new_files_sorted))
 
         if quiet:
             if all_changed:
@@ -601,15 +589,59 @@ def diff(path: str, since: Optional[str], output_format: str, quiet: bool, stat:
             click.echo(f"No CONTEXT.md files changed {label}.")
             return
         click.echo(f"{len(all_changed)} CONTEXT.md file{'s' if len(all_changed) != 1 else ''} changed {label}:")
-        for f in all_changed:
-            prefix = "new" if f in new_files_set else "mod"
-            click.echo(f"  [{prefix}] {f}")
+        for manifest_path in all_changed:
+            prefix = "new" if manifest_path in set(new_files_sorted) else "mod"
+            click.echo(f"  [{prefix}] {manifest_path}")
+
+    # --- git path ---
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", ref, "--", "*/CONTEXT.md", "CONTEXT.md"],
+            cwd=str(target_path),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        changed = _split_lines(result.stdout)
+        untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard", "--", "*/CONTEXT.md", "CONTEXT.md"],
+            cwd=str(target_path),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        new_files = _split_lines(untracked.stdout)
+        new_files_set = set(new_files)
+        modified_files = sorted(f for f in changed if f not in new_files_set)
+        new_files_sorted = sorted(new_files_set)
+        _emit_git_results(modified_files, new_files_sorted, f"since {ref}")
         return
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except subprocess.CalledProcessError as exc:
+        if since is None and ref == "HEAD" and is_unborn_head_error(exc.stderr):
+            staged = subprocess.run(
+                ["git", "diff", "--cached", "--name-only", "--", "*/CONTEXT.md", "CONTEXT.md"],
+                cwd=str(target_path),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            untracked = subprocess.run(
+                ["git", "ls-files", "--others", "--exclude-standard", "--", "*/CONTEXT.md", "CONTEXT.md"],
+                cwd=str(target_path),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            new_files_sorted = sorted(set(_split_lines(staged.stdout)) | set(_split_lines(untracked.stdout)))
+            _emit_git_results([], new_files_sorted, "in repo without commits yet")
+            return
         if since is not None:
             raise click.UsageError("--since requires git to be available and the path to be inside a git repository.")
-        else:
-            click.echo("Warning: git not available or command failed. Falling back to mtime comparison.", err=True)
+        click.echo("Warning: git not available or command failed. Falling back to mtime comparison.", err=True)
+    except FileNotFoundError:
+        if since is not None:
+            raise click.UsageError("--since requires git to be available and the path to be inside a git repository.")
+        click.echo("Warning: git not available or command failed. Falling back to mtime comparison.", err=True)
 
     # --- mtime fallback (non-git repos) ---
     # Note: mtime path cannot distinguish modified vs new; all detected files use [stale].
@@ -652,38 +684,11 @@ def diff(path: str, since: Optional[str], output_format: str, quiet: bool, stat:
         click.echo(f"  [stale] {f}")
 
 
-def _missing_dir_labels(root: Path) -> list[str]:
-    """Return relative labels for directories under *root* that have no CONTEXT.md."""
-    spec = load_ignore_patterns(root)
-    labels: list[str] = []
-    for dirpath, dirnames, _ in os.walk(root):
-        d = Path(dirpath)
-        dirnames[:] = [dn for dn in sorted(dirnames) if not should_ignore(d / dn, spec, root)]
-        if not (d / "CONTEXT.md").exists():
-            try:
-                rel = d.relative_to(root).as_posix()
-            except ValueError:
-                rel = d.as_posix()
-            rel_display = rel if rel != "." else ""
-            labels.append((rel_display + "/") if rel_display else "./")
-    return labels
-
-
-def _filter_stale_manifests(files: list[Path]) -> list[Path]:
-    """Return only those manifest paths whose parent dir has a newer source file."""
-    stale: list[Path] = []
-    for f in files:
-        try:
-            manifest_mtime = f.stat().st_mtime
-            if any(
-                src.stat().st_mtime > manifest_mtime
-                for src in f.parent.iterdir()
-                if src.is_file() and src.name != "CONTEXT.md"
-            ):
-                stale.append(f)
-        except OSError:
-            pass
-    return stale
+def _directory_within_depth(path: Path, root: Path, depth: Optional[int]) -> bool:
+    """Return True when a directory is within the requested export depth."""
+    if depth is None:
+        return True
+    return len(path.relative_to(root).parts) <= depth
 
 
 @cli.command()
@@ -706,9 +711,18 @@ def export(path: str, output: Optional[str], filter_mode: str, depth: Optional[i
     """
     root = Path(path).resolve()
     spec = load_ignore_patterns(root)
+    health_entries = [
+        entry for entry in inspect_directory_health(root, spec, root)
+        if _directory_within_depth(entry.path, root, depth)
+    ]
 
     if filter_mode == "missing":
-        missing_dirs = _missing_dir_labels(root)
+        missing_dirs = []
+        for entry in health_entries:
+            if entry.status != "missing":
+                continue
+            rel_display = entry.relative_path if entry.relative_path != "." else ""
+            missing_dirs.append((rel_display + "/") if rel_display else "./")
         content = "\n".join(f"# {d} [MISSING]" for d in missing_dirs)
         if output:
             Path(output).write_text(content, encoding="utf-8")
@@ -718,28 +732,11 @@ def export(path: str, output: Optional[str], filter_mode: str, depth: Optional[i
             click.echo(content, nl=False)
         return
 
-    # Use os.walk with pruning to avoid traversing ignored directories.
-    files = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        d = Path(dirpath)
-
-        # Prune traversal into ignored directories.
-        if should_ignore(d, spec, root):
-            dirnames.clear()  # Don't visit any subdirectories of an ignored directory.
-            continue
-
-        # Filter subdirectories to visit.
-        dirnames[:] = [dn for dn in sorted(dirnames) if not should_ignore(d / dn, spec, root)]
-
-        if "CONTEXT.md" in filenames:
-            files.append(d / "CONTEXT.md")
-    files.sort()
-
-    if depth is not None:
-        files = [f for f in files if len(f.relative_to(root).parts) - 1 <= depth]
-
-    if filter_mode == "stale":
-        files = _filter_stale_manifests(files)
+    files = [
+        entry.path / "CONTEXT.md"
+        for entry in health_entries
+        if entry.status != "missing" and (filter_mode != "stale" or entry.status == "stale")
+    ]
 
     parts = []
     for f in files:
@@ -773,62 +770,26 @@ def stats(path: str, verbose: bool, output_format: str) -> None:
       tokens      — sum of tokens_total from all manifest frontmatters
     """
     import json
-    import os
-
     root = Path(path).resolve()
     spec = load_ignore_patterns(root)
+    health_entries = inspect_directory_health(root, spec, root)
 
-    dirs_total = 0
-    dirs_covered = 0
-    dirs_missing = 0
-    dirs_stale = 0
-    tokens_total = 0
+    dirs_total = len(health_entries)
+    dirs_covered = sum(1 for entry in health_entries if entry.status != "missing")
+    dirs_missing = sum(1 for entry in health_entries if entry.status == "missing")
+    dirs_stale = sum(1 for entry in health_entries if entry.status == "stale")
+    tokens_total = sum(entry.tokens_total or 0 for entry in health_entries)
 
-    # Per-directory rows for --verbose
-    dir_rows: list[tuple[str, str, Optional[int]]] = []  # (rel_path, status, tokens)
-
-    for dirpath, dirnames, _ in os.walk(root):
-        d = Path(dirpath)
-        # Prune ignored subdirectories in-place to avoid descending into them
-        dirnames[:] = [
-            dn for dn in sorted(dirnames)
-            if not should_ignore(d / dn, spec, root)
+    dir_rows: list[tuple[str, str, Optional[int]]] = []
+    if verbose:
+        dir_rows = [
+            (
+                entry.relative_path,
+                "covered" if entry.status == "fresh" else entry.status,
+                entry.tokens_total,
+            )
+            for entry in health_entries
         ]
-
-        dirs_total += 1
-        manifest = d / "CONTEXT.md"
-
-        try:
-            rel = d.relative_to(root).as_posix()
-        except ValueError:
-            rel = d.as_posix()
-
-        if not manifest.exists():
-            dirs_missing += 1
-            if verbose:
-                dir_rows.append((rel, "missing", None))
-        else:
-            dirs_covered += 1
-            dir_tokens: Optional[int] = None
-            try:
-                manifest_obj = read_manifest(d)
-                if manifest_obj is None:
-                    raise FileNotFoundError(manifest)
-                dir_tokens = manifest_obj.frontmatter.tokens_total
-                tokens_total += dir_tokens
-                is_stale_dir = is_stale(
-                    manifest_obj.frontmatter.content_hash,
-                    hash_directory(d, spec, root),
-                )
-            except (ValueError, OSError):
-                is_stale_dir = True
-
-            if is_stale_dir:
-                dirs_stale += 1
-
-            if verbose:
-                status = "stale" if is_stale_dir else "covered"
-                dir_rows.append((rel, status, dir_tokens))
 
     def _render_json() -> None:
         """Render stats in JSON format."""
@@ -906,8 +867,9 @@ def clean(path: str, yes: bool, dry_run: bool) -> None:
 
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
-def verify(path: str) -> None:
-    """Check CONTEXT.md frontmatter for required fields.
+@click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format.")
+def verify(path: str, output_format: str) -> None:
+    """Check CONTEXT.md validity, freshness, and coverage.
 
     Required fields:
       - generated
@@ -919,14 +881,15 @@ def verify(path: str) -> None:
       - tokens_total
 
     Output:
-      - One line per invalid manifest
       - Malformed frontmatter reported separately from missing fields
-      - Exit 0 if all valid, exit 1 if any invalid
+      - Stale and missing directories are reported as verification failures
+      - Exit 0 if all manifests are valid, fresh, and present; exit 1 otherwise
     """
-    from ctx.manifest import read_manifest
+    import json
 
     root = Path(path).resolve()
     spec = load_ignore_patterns(root)
+    health_entries = inspect_directory_health(root, spec, root)
 
     required_fields = [
         "generated",
@@ -938,62 +901,90 @@ def verify(path: str) -> None:
         "tokens_total",
     ]
 
+    malformed_manifests = sorted(
+        entry.relative_path for entry in health_entries
+        if entry.error is not None
+    )
+    missing_manifests = sorted(
+        entry.relative_path for entry in health_entries
+        if entry.status == "missing"
+    )
     invalid_manifests: list[tuple[str, list[str]]] = []
-    malformed_manifests: list[str] = []
 
-    for dirpath, dirnames, _ in os.walk(root):
-        d = Path(dirpath)
-
-        # Prune ignored subdirectories in-place
-        dirnames[:] = [
-            dn for dn in sorted(dirnames)
-            if not should_ignore(d / dn, spec, root)
-        ]
-
-        manifest_path = d / "CONTEXT.md"
-        if not manifest_path.exists():
-            continue
-
-        try:
-            rel = d.relative_to(root).as_posix()
-        except ValueError:
-            rel = d.as_posix()
-
-        try:
-            manifest = read_manifest(d)
-        except (ValueError, OSError, UnicodeDecodeError):
-            malformed_manifests.append(rel)
+    for entry in health_entries:
+        if entry.status == "missing" or entry.error is not None or entry.frontmatter is None:
             continue
 
         missing_fields = []
         for field in required_fields:
-            value = getattr(manifest.frontmatter, field, None)
+            value = getattr(entry.frontmatter, field, None)
             if value is None or value == "":
                 missing_fields.append(field)
 
         if missing_fields:
-            invalid_manifests.append((rel, missing_fields))
+            invalid_manifests.append((entry.relative_path, missing_fields))
 
-    # Report malformed first
+    invalid_field_paths = {rel for rel, _fields in invalid_manifests}
+    stale_manifests = sorted(
+        entry.relative_path for entry in health_entries
+        if entry.status == "stale"
+        and entry.error is None
+        and entry.relative_path not in invalid_field_paths
+    )
+
+    invalid_paths = set(malformed_manifests) | invalid_field_paths | set(stale_manifests) | set(missing_manifests)
+    aggregate = {
+        "dirs": len(health_entries),
+        "fresh": sum(1 for entry in health_entries if entry.status == "fresh"),
+        "stale": sum(1 for entry in health_entries if entry.status == "stale"),
+        "missing": len(missing_manifests),
+        "invalid": len(invalid_paths),
+    }
+
+    if output_format == "json":
+        click.echo(json.dumps({
+            "aggregate": aggregate,
+            "malformed": malformed_manifests,
+            "missing_fields": [
+                {"path": rel, "fields": fields}
+                for rel, fields in sorted(invalid_manifests)
+            ],
+            "stale": stale_manifests,
+            "missing": missing_manifests,
+        }, indent=2))
+        sys.exit(1 if invalid_paths else 0)
+
     if malformed_manifests:
         click.echo("Malformed frontmatter:")
-        for rel in sorted(malformed_manifests):
+        for rel in malformed_manifests:
             click.echo(f"  {rel}")
 
-    # Report missing fields
     if invalid_manifests:
         click.echo("Missing required fields:")
         for rel, fields in sorted(invalid_manifests):
             field_list = ", ".join(fields)
             click.echo(f"  {rel}: {field_list}")
 
-    total_issues = len(malformed_manifests) + len(invalid_manifests)
-    if total_issues == 0:
-        click.echo("All manifests are valid.")
-        sys.exit(0)
-    else:
-        click.echo(f"\nFound {total_issues} invalid manifest(s).")
+    if stale_manifests:
+        click.echo("Stale manifests:")
+        for rel in stale_manifests:
+            click.echo(f"  {rel}")
+
+    if missing_manifests:
+        click.echo("Missing manifests:")
+        for rel in missing_manifests:
+            click.echo(f"  {rel}")
+
+    if invalid_paths:
+        click.echo(
+            f"\nHealth summary: {aggregate['fresh']} fresh, {aggregate['stale']} stale, "
+            f"{aggregate['missing']} missing."
+        )
+        click.echo(f"Found {len(invalid_paths)} directory issue(s).")
         sys.exit(1)
+
+    click.echo("All manifests are valid, present, and fresh.")
+    sys.exit(0)
 
 
 @cli.command()

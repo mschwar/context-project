@@ -1,27 +1,27 @@
 ---
-generated: '2026-03-17T07:15:22Z'
+generated: '2026-03-17T07:34:19Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:3bee27a089bb992311161be587ce04470f12d240e97a5e1b86f44a5c7a3dee4f
+content_hash: sha256:a19877e9d0e3879a8de9f89831deb63b1bb1b2205e78d6ad2c4b7c3f61c8d3ac
 files: 30
 dirs: 1
-tokens_total: 27574
+tokens_total: 27817
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM client functionality, and end-to-end workflows for the context manifest generation system.
+Comprehensive test suite covering CLI commands, language parsers, core generation logic, Git integration, and end-to-end workflows for the context project.
 
 ## Files
 
 - **__init__.py** — Package initialization file for tests directory.
 - **conftest.py** — Pytest fixtures providing isolated environment and workspace-local temporary directories for tests.
 - **test_agent_handoff.py** — Unit tests for agent handoff workflow validating ctx export and ctx serve as context sources for agent navigation.
-- **test_cli.py** — Unit tests for CLI commands covering init, update, status, diff, export, stats, clean, verify, setup, and cost estimation functionality.
+- **test_cli.py** — Unit tests for CLI commands covering dependency wiring, output formatting, and integration with core generation and status functions.
 - **test_config.py** — Tests for configuration loading from files, environment variables, and CLI arguments.
 - **test_csharp_parser.py** — Tests C# parser extraction of public classes, interfaces, enums, structs, records, methods, and properties.
 - **test_elixir_parser.py** — Tests for Elixir file parser extracting modules, functions, structs, type annotations, specs, and callbacks.
-- **test_generator.py** — Tests for core generation engine including tree creation, updates, and status checking.
-- **test_git.py** — Tests for Git integration to detect changed files in repositories.
+- **test_generator.py** — Unit tests for the generation engine covering manifest creation, tree traversal, staleness detection, and token budget enforcement.
+- **test_git.py** — Unit tests for Git integration covering changed file detection, staged/unstaged deduplication, and unborn HEAD handling.
 - **test_go_parser.py** — Tests for Go language parser extracting functions, types, constants, and variables.
 - **test_hasher.py** — Tests for file and directory content hashing with ignore pattern support.
 - **test_ignore.py** — Tests for ignore pattern loading, merging, and path matching against default and user-defined ignore files.
@@ -50,7 +50,7 @@ Comprehensive test suite covering CLI commands, language parsers, configuration,
 
 ## Notes
 
-- Test organization mirrors core module structure with dedicated test files for each language parser, CLI command, and major subsystem.
-- Pytest fixtures in conftest.py provide isolated temporary directories and environment setup for all tests.
-- Integration tests validate end-to-end workflows using fake LLM clients and sample project fixtures.
-- Language parser tests follow consistent patterns across multiple supported languages (Python, JavaScript/TypeScript, Go, Rust, Java, C#, Kotlin, PHP, Ruby, Swift, Elixir).
+- Language parser tests are organized by language (Python, Go, Rust, Java, C#, etc.) and validate extraction of public symbols and structural elements.
+- Core functionality tests (generator, git, hasher, ignore, manifest) validate the manifest generation pipeline and file system operations.
+- Integration tests use a fake LLM client and sample project fixtures to verify end-to-end workflows.
+- conftest.py provides shared pytest fixtures for isolated test environments and temporary workspace directories.
