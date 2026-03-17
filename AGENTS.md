@@ -309,6 +309,7 @@ Carry-forward items from the Phase 17 reflection.
 #### Gates
 - Gate 18.1 — Pre-flight connectivity check in `_build_generation_runtime`. ✓
 - Gate 18.2 — Proxy guidance in `_echo_generation_errors` transient error tip. ✓
+- Gate 18Z — Manifest refresh, reflection, and phase closeout. ✓ 308 tests passing; reflection artifact at `archive/reflections/2026-03-16-phase18-reflection.md`.
 
 ### Phase 19 — Real-World UX ✓
 Theme: Quality-of-life improvements for live end-user testing on real repos.

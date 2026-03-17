@@ -215,6 +215,7 @@ Carry-forward items from the Phase 17 reflection.
 
 - [x] **18.1 Pre-flight connectivity check** — run `probe_provider_connectivity` before starting the full refresh in `ctx update`/`ctx init` so the operator gets an early, actionable failure rather than per-directory errors after tokens are already spent.
 - [x] **18.2 Proxy guidance in transient error tip** — when `_echo_generation_errors` prints the transient retry tip, also check and name active proxy env vars in-line so guidance appears without needing to run `ctx setup --check`.
+- [x] **Gate 18Z — Manifest refresh and closeout** — 308 tests passing; reflection artifact created; carry-forward suggestions (probe timeout, session caching) added to backlog.
 
 ## Phase 19 — Real-World UX ✓
 
