@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-17T07:46:13Z'
+generated: '2026-03-17T07:55:58Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:3b6e8532046b78f104fe3ee29026bede6f3d9b4fe49c81fa095f79837dc28aab
+content_hash: sha256:d48fa30d89aaacee40441e37c12dbdf99f8c334c177a99b87123b109d3a1805f
 files: 18
 dirs: 7
 tokens_total: 15258
 ---
 # C:/Users/Matty/Documents/context-project
 
-A filesystem-native tool that generates and maintains persistent CONTEXT.md manifests to help AI agents navigate and understand large codebases through hierarchical directory documentation.
+A filesystem-native context layer tool (ctx) that generates and maintains persistent CONTEXT.md manifests to help AI agents navigate and understand large codebases.
 
 ## Files
 
@@ -18,7 +18,7 @@ A filesystem-native tool that generates and maintains persistent CONTEXT.md mani
 - **.gitignore** — Specifies files and directories to exclude from version control and context generation.
 - **.pre-commit-hooks.yaml** — Pre-commit hook configuration that checks if ctx manifests are fresh before commits.
 - **=4.0** — Empty or malformed file with no discernible purpose.
-- **AGENTS.md** — Canonical onboarding and workflow contract for agents contributing to ctx, defining mission, rules, required behaviors, and SDLC guardrails.
+- **AGENTS.md** — Canonical onboarding and workflow contract for agents contributing to ctx, defining mission, rules, required behavior, and SDLC guardrails.
 - **CONTRIBUTING.md** — Guidelines for contributing to ctx with agentic SDLC principles and test-driven development.
 - **GATE_CLOSEOUT.md** — Defines the mandatory closeout sequence for each project phase, including validation, reflection, suggestion disposition, and founder sign-off.
 - **PHASE16_HANDOFF.md** — Execution contract for Phase 16 work split into small gates for narrower models with recommended order and detailed task specifications.
@@ -30,7 +30,7 @@ A filesystem-native tool that generates and maintains persistent CONTEXT.md mani
 - **package.json** — Node.js package metadata and development dependencies for the ctx project.
 - **pyproject.toml** — Python project configuration specifying dependencies, entry points, and build system.
 - **rules.md** — Engineering standards and agentic rules for code quality, testing, and manifest protocol compliance.
-- **state.md** — Development status document tracking completed milestones, current health, and phase progress for the ctx project through Phase 20.
+- **state.md** — Current development status and completed milestones for ctx, tracking health, phases 1-9, and ecosystem features as of March 2026.
 
 ## Subdirectories
 
@@ -38,14 +38,13 @@ A filesystem-native tool that generates and maintains persistent CONTEXT.md mani
 - **.githooks/** — Git hooks directory for automated pre-commit testing and validation.
 - **.github/** — GitHub configuration and automation for the context-project repository.
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
-- **archive/** — Design documents, AI analysis, and project reflections documenting the evolution and architectural decisions for the ctx tool.
-- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer that generates and maintains CONTEXT.md documentation.
-- **tests/** — Comprehensive test suite covering CLI commands, language parsers, core generation logic, Git integration, and end-to-end workflows.
+- **archive/** — Design documents, AI analysis, and planning materials for the ctx project.
+- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer that generates and maintains CONTEXT.md documentation for AI agents.
+- **tests/** — Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, manifest generation, and LLM functionality for the context project.
 
 ## Notes
 
-- The project uses a hybrid tech stack with Python (core implementation) and Node.js (development tooling), coordinated through package.json and pyproject.toml.
-- Agentic SDLC principles are central to the project; AGENTS.md, CONTRIBUTING.md, and rules.md define the contract for AI-assisted development.
-- Pre-commit hooks and Husky enforce manifest freshness and conventional commits, ensuring quality gates before code integration.
-- Phase-based delivery model documented in GATE_CLOSEOUT.md and PHASE16_HANDOFF.md structures work into discrete, validatable increments.
-- The archive/ directory preserves design rationale and evolution history, supporting long-term maintainability and onboarding.
+- The project uses a hybrid Node.js and Python stack (package.json and pyproject.toml), with Python as the primary implementation language.
+- Agentic SDLC principles are central to the project's philosophy, documented in AGENTS.md, CONTRIBUTING.md, and rules.md; agents are expected to follow strict workflows and gate closeout procedures.
+- Git hooks (Husky, pre-commit) enforce manifest freshness and conventional commits, ensuring quality gates before code integration.
+- The archive directory preserves design history and planning artifacts, supporting iterative development and decision traceability.
