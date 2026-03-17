@@ -263,19 +263,61 @@ def test_watch_coverage_summary_accuracy(tmp_path, capsys):
     assert "coverage: 4/4 dirs covered, 0 stale, 400 tokens" in captured.out
 
 
-def test_watch_session_error_handling(tmp_path) -> None:
-    """Watch session should handle errors gracefully and continue.
-    
-    Note: The full watch loop with error handling is integration-tested
-    manually. This test validates that the error handling infrastructure
-    exists in the on_change callback (errors are caught and echoed rather
-    than propagating up to crash the watcher thread).
-    """
-    # Error handling is implemented in run_watch's on_change callback:
-    # - Errors from update_tree are caught
-    # - Error messages are echoed to the user
-    # - The watcher continues running
-    # This is verified by manual testing and the error handling logic
-    # present in ctx/watcher.py run_watch function.
-    pass
+def test_watch_session_error_handling(tmp_path, monkeypatch) -> None:
+    """run_watch should catch callback errors and stop cleanly on Ctrl+C."""
+    import ctx.generator as generator_module
+    import ctx.watcher as watcher_module
+    from ctx.config import Config
+
+    spec = _load_spec(tmp_path)
+    (tmp_path / "src").mkdir()
+    changed_file = tmp_path / "src" / "main.py"
+    changed_file.write_text("print('hello')", encoding="utf-8")
+
+    outputs: list[str] = []
+    coverage_calls: list[str] = []
+
+    class _FakeObserver:
+        def __init__(self) -> None:
+            self.handler = None
+            self.join_calls = 0
+            self.stopped = False
+
+        def schedule(self, handler, root_path: str, recursive: bool) -> None:
+            self.handler = handler
+
+        def start(self) -> None:
+            pass
+
+        def join(self) -> None:
+            self.join_calls += 1
+            if self.join_calls == 1:
+                assert self.handler is not None
+                self.handler._on_change(changed_file)
+                raise KeyboardInterrupt
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    fake_observer = _FakeObserver()
+
+    def _raise_update_error(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(watcher_module, "Observer", lambda: fake_observer)
+    monkeypatch.setattr(generator_module, "update_tree", _raise_update_error)
+    monkeypatch.setattr(
+        watcher_module,
+        "_print_coverage_summary",
+        lambda root, spec: coverage_calls.append("called"),
+    )
+
+    watcher_module.run_watch(tmp_path, Config(), object(), spec, echo=outputs.append)
+
+    joined_output = "\n".join(outputs).replace("\\", "/")
+    assert "change detected: src/main.py" in joined_output
+    assert "error: boom" in joined_output
+    assert "ctx watch: stopped" in joined_output
+    assert fake_observer.stopped is True
+    assert coverage_calls == []
 

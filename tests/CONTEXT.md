@@ -1,22 +1,22 @@
 ---
-generated: '2026-03-17T02:12:19Z'
+generated: '2026-03-17T04:38:05Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:1cacb829126245385a674d70d8267c702567ef2f47ecbc05dc898c5890d781e1
+content_hash: sha256:83075df18103a0be0cfeb82f0e291834b58d614a809b317fdf5ecefd950e7cf0
 files: 30
 dirs: 1
 tokens_total: 27574
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM clients, and end-to-end manifest generation workflows.
+Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, LLM client functionality, and end-to-end workflows for the context manifest generation system.
 
 ## Files
 
 - **__init__.py** — Package initialization file for tests directory.
 - **conftest.py** — Pytest fixtures providing isolated environment and workspace-local temporary directories for tests.
 - **test_agent_handoff.py** — Unit tests for agent handoff workflow validating ctx export and ctx serve as context sources for agent navigation.
-- **test_cli.py** — Tests for CLI command wiring, dependency injection, and output formatting across init, update, status, and utility commands.
+- **test_cli.py** — Unit tests for CLI commands covering init, update, status, diff, export, stats, clean, verify, setup, and cost estimation functionality.
 - **test_config.py** — Tests for configuration loading from files, environment variables, and CLI arguments.
 - **test_csharp_parser.py** — Tests C# parser extraction of public classes, interfaces, enums, structs, records, methods, and properties.
 - **test_elixir_parser.py** — Tests for Elixir file parser extracting modules, functions, structs, type annotations, specs, and callbacks.
@@ -51,6 +51,6 @@ Comprehensive test suite covering CLI commands, language parsers, configuration,
 ## Notes
 
 - Test organization mirrors core module structure with dedicated test files for each language parser, CLI command, and major subsystem.
-- Pytest fixtures in conftest.py provide isolated temporary workspaces to prevent test interference.
+- Pytest fixtures in conftest.py provide isolated temporary directories and environment setup for all tests.
 - Integration tests validate end-to-end workflows using fake LLM clients and sample project fixtures.
-- Parser tests follow consistent patterns across multiple languages (Python, Go, Rust, Java, C#, Kotlin, PHP, Ruby, Swift, Elixir, JavaScript/TypeScript).
+- Language parser tests follow consistent patterns across multiple supported languages (Python, JavaScript/TypeScript, Go, Rust, Java, C#, Kotlin, PHP, Ruby, Swift, Elixir).

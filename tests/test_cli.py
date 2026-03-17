@@ -643,6 +643,24 @@ def test_export_file(tmp_path) -> None:
 # --- ctx stats ---
 
 
+def _write_stats_manifest(directory: Path, root: Path, *, tokens_total: int, body: str) -> None:
+    """Write a valid manifest fixture for stats tests."""
+    from ctx.hasher import hash_directory
+    from ctx.ignore import load_ignore_patterns
+    from ctx.manifest import write_manifest
+
+    spec = load_ignore_patterns(root)
+    write_manifest(
+        directory,
+        model="test",
+        content_hash=hash_directory(directory, spec, root),
+        files=0,
+        dirs=0,
+        tokens_total=tokens_total,
+        body=body,
+    )
+
+
 def test_stats_basic(tmp_path) -> None:
     """ctx stats should report covered/missing/stale counts."""
     cli_module = import_module("ctx.cli")
@@ -654,9 +672,7 @@ def test_stats_basic(tmp_path) -> None:
     # covered dir with manifest
     covered = root / "covered"
     covered.mkdir()
-    (covered / "CONTEXT.md").write_text(
-        "---\ntokens_total: 42\n---\n# Covered\n", encoding="utf-8"
-    )
+    _write_stats_manifest(covered, root, tokens_total=42, body="# Covered\n")
 
     # missing dir (no manifest)
     missing = root / "missing"
@@ -706,16 +722,12 @@ def test_stats_verbose_shows_per_dir_table(tmp_path) -> None:
     # dir1 with a manifest
     dir1 = root / "alpha"
     dir1.mkdir()
-    (dir1 / "CONTEXT.md").write_text(
-        "---\ntokens_total: 100\n---\n# Alpha\n", encoding="utf-8"
-    )
+    _write_stats_manifest(dir1, root, tokens_total=100, body="# Alpha\n")
 
     # dir2 with a manifest
     dir2 = root / "beta"
     dir2.mkdir()
-    (dir2 / "CONTEXT.md").write_text(
-        "---\ntokens_total: 200\n---\n# Beta\n", encoding="utf-8"
-    )
+    _write_stats_manifest(dir2, root, tokens_total=200, body="# Beta\n")
 
     result = runner.invoke(cli_module.cli, ["stats", "--verbose", str(root)])
 
@@ -743,9 +755,7 @@ def test_stats_format_json(tmp_path) -> None:
     # covered dir with manifest
     covered = root / "covered"
     covered.mkdir()
-    (covered / "CONTEXT.md").write_text(
-        "---\ntokens_total: 42\n---\n# Covered\n", encoding="utf-8"
-    )
+    _write_stats_manifest(covered, root, tokens_total=42, body="# Covered\n")
 
     # missing dir (no manifest)
     missing = root / "missing"
@@ -778,16 +788,12 @@ def test_stats_format_json_verbose(tmp_path) -> None:
     # dir1 with a manifest
     dir1 = root / "alpha"
     dir1.mkdir()
-    (dir1 / "CONTEXT.md").write_text(
-        "---\ntokens_total: 100\n---\n# Alpha\n", encoding="utf-8"
-    )
+    _write_stats_manifest(dir1, root, tokens_total=100, body="# Alpha\n")
 
     # dir2 with a manifest
     dir2 = root / "beta"
     dir2.mkdir()
-    (dir2 / "CONTEXT.md").write_text(
-        "---\ntokens_total: 200\n---\n# Beta\n", encoding="utf-8"
-    )
+    _write_stats_manifest(dir2, root, tokens_total=200, body="# Beta\n")
 
     result = runner.invoke(cli_module.cli, ["stats", "--format", "json", "--verbose", str(root)])
 
@@ -826,9 +832,7 @@ def test_stats_format_json_values_match_text(tmp_path) -> None:
 
     covered = root / "covered"
     covered.mkdir()
-    (covered / "CONTEXT.md").write_text(
-        "---\ntokens_total: 500\n---\n# Covered\n", encoding="utf-8"
-    )
+    _write_stats_manifest(covered, root, tokens_total=500, body="# Covered\n")
 
     # Text output
     text_result = runner.invoke(cli_module.cli, ["stats", str(root)])
@@ -849,6 +853,52 @@ def test_stats_format_json_values_match_text(tmp_path) -> None:
     assert agg["dirs"] == text_dirs
     assert agg["covered"] == text_covered
     assert agg["tokens"] == text_tokens
+
+
+def test_stats_counts_stale_parents_via_hashes(tmp_path) -> None:
+    """ctx stats should count parent directories stale when a child directory changes."""
+    import json
+    from ctx.hasher import hash_directory
+    from ctx.ignore import load_ignore_patterns
+    from ctx.manifest import write_manifest
+
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    child = root / "src"
+    root.mkdir()
+    child.mkdir()
+    (child / "main.py").write_text("print('v1')", encoding="utf-8")
+
+    spec = load_ignore_patterns(root)
+    write_manifest(
+        child,
+        model="test",
+        content_hash=hash_directory(child, spec, root),
+        files=1,
+        dirs=0,
+        tokens_total=10,
+        body="# src\n",
+    )
+    write_manifest(
+        root,
+        model="test",
+        content_hash=hash_directory(root, spec, root),
+        files=0,
+        dirs=1,
+        tokens_total=20,
+        body="# root\n",
+    )
+
+    (child / "main.py").write_text("print('v2')", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["stats", "--format", "json", str(root)])
+
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    assert output["aggregate"]["covered"] == 2
+    assert output["aggregate"]["stale"] == 2
 
 
 # --- 15.2: ctx export --filter ---
@@ -1532,6 +1582,26 @@ def test_setup_check_shows_proxy_guidance_when_proxy_vars_set(tmp_path, monkeypa
 
     assert result.exit_code == 1
     assert "HTTPS_PROXY" in result.output
+
+
+def test_proxy_unset_hint_uses_powershell_commands_on_windows() -> None:
+    """Windows proxy guidance should use PowerShell-friendly commands."""
+    cli_module = import_module("ctx.cli")
+
+    hint = cli_module._proxy_unset_hint(["HTTPS_PROXY", "ALL_PROXY"], platform_name="nt")
+
+    assert "Remove-Item Env:HTTPS_PROXY" in hint
+    assert "Remove-Item Env:ALL_PROXY" in hint
+    assert "unset " not in hint
+
+
+def test_proxy_unset_hint_uses_unset_on_posix() -> None:
+    """POSIX proxy guidance should use unset syntax."""
+    cli_module = import_module("ctx.cli")
+
+    hint = cli_module._proxy_unset_hint(["HTTPS_PROXY", "ALL_PROXY"], platform_name="posix")
+
+    assert hint == "unset HTTPS_PROXY ALL_PROXY"
 
 
 def test_setup_check_skips_probe_for_local_providers(tmp_path, monkeypatch) -> None:

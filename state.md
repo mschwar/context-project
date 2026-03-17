@@ -3,9 +3,9 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–16 complete.
+- **Status:** Stable. Phases 1–20 complete.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 308 tests passing across all modules.
+- **Test Coverage:** 311 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
 - **Ecosystem:** manifest server (`ctx serve`), git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby + Elixir language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view (with `--format json`, `--quiet`, `--since`), `ctx export` (with `--filter`, `--depth`), `ctx stats` (with `--verbose`), `ctx clean`.
 
@@ -232,3 +232,33 @@ Theme: Make ctx useful as part of a real AI-assisted development workflow.
 - [x] **20.1 `ctx watch` session test** — Added comprehensive integration tests validating stability, debounce (0.1s fast debounce for testing), ignore patterns, and coverage feedback during simulated watch sessions.
 - [x] **20.2 Agent handoff test** — Validated `ctx export --depth 1` and `ctx serve` as context sources for agents. Added 6 new tests covering export depth filtering, structure validation, serve endpoint testing, stale filtering, and end-to-end agent navigation workflow.
 - [x] **20.3 Summary quality audit** — Reviewed generated manifests, identified improvements for boilerplate file handling (`__init__.py`, `config.py`, `test_*.py`). Implemented prompt tuning with concrete examples and improved Notes section guidance in `DEFAULT_PROMPT_TEMPLATES`.
+
+## Phase 21 — Health Truth & Diagnostics
+
+Theme: make health-reporting and troubleshooting surfaces agree after real-world smoke testing.
+
+- [ ] **21.1 Shared stale-truth engine** — unify hash-based freshness detection across `ctx stats`, `ctx export --filter stale`, watch coverage summaries, and any future health/coverage surfaces so parent-directory staleness is reported consistently.
+- [ ] **21.2 Stronger `ctx verify`** — extend `ctx verify` with stale/missing coverage checks and machine-readable output so CI and gate closeout can validate both manifest shape and manifest freshness.
+- [ ] **21.3 Unborn-HEAD git UX** — treat empty repos / unborn `HEAD` as a first-class git state in `ctx diff` and related git-aware flows instead of falling back with misleading "git unavailable" warnings.
+
+**Branch:** `feat/phase21-health-truth`
+
+## Phase 22 — First-Run Operator UX
+
+Theme: make the first live run self-diagnosing and immediately fixable.
+
+- [ ] **22.1 `ctx doctor` command** — report provider detection, connectivity, active proxy vars, git state, manifest coverage, and the recommended next command in one place.
+- [ ] **22.2 Zero-manifest guidance** — improve `ctx verify`, `ctx diff`, and related read-only commands so fresh repos steer users toward `ctx init` rather than ambiguous "everything is valid" style output.
+- [ ] **22.3 Shell-aware remediation depth** — expand connectivity/configuration tips so PowerShell, CMD, and POSIX users all get actionable proxy/config fix commands.
+
+**Branch:** `feat/phase22-first-run-ops`
+
+## Phase 23 — External Repo Validation & Prompt Calibration
+
+Theme: prove ctx on real repositories outside its own codebase and feed the results back into summary quality.
+
+- [ ] **23.1 External smoke matrix** — build a repeatable validation matrix against at least three external repo archetypes (Python package, mixed-language application, docs/tooling-heavy repo).
+- [ ] **23.2 Snapshot-based quality checks** — capture manifest/export snapshots and a lightweight rubric so regressions in structure, stale counts, and Notes usefulness are measurable.
+- [ ] **23.3 Prompt and ignore tuning from field results** — use external-repo findings to refine prompt templates, default ignores, and boilerplate-file handling for real-world repositories.
+
+**Branch:** `feat/phase23-external-validation`
