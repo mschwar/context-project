@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-17T07:46:05Z'
+generated: '2026-03-17T07:49:48Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:fe9d2815b9ae269f6e29ed4e8d4a71fb1f76eb58f673cdabd9e56ab4f9d03948
+content_hash: sha256:d961aaed1aead4b858a3ab031664e9065905b9da0a533ed1a4432e913a70c904
 files: 14
 dirs: 1
 tokens_total: 13443
@@ -34,7 +34,8 @@ Core implementation of ctx, a filesystem-native context layer that generates and
 
 ## Notes
 
-- The generator orchestrates a pipeline combining git state detection, ignore-pattern filtering, language detection, LLM summarization, and manifest serialization.
-- Configuration is resolved hierarchically: environment variables override .ctxconfig files, which override defaults; provider detection enables automatic LLM selection.
-- Staleness detection via content hashing enables incremental updates; the watcher supports continuous monitoring for development workflows.
-- The server module provides HTTP access to manifests with path traversal protection, enabling integration with external tools and agents.
+- The generator orchestrates a bottom-up walk that depends on hasher for staleness detection, ignore for filtering, language_detector for classification, and llm for content generation.
+- Configuration flows from config.py through cli.py to generator.py, with provider selection (Anthropic/OpenAI) determined at startup.
+- Git integration via git.py enables incremental updates by tracking changed files since the last commit.
+- The manifest.py module handles serialization of generated documentation into CONTEXT.md files with structured frontmatter.
+- Server.py provides HTTP access to manifests with path traversal protections, complementing the CLI-driven generation workflow.

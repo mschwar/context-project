@@ -10,10 +10,10 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 - **LLM Clients**: Anthropic and OpenAI supported (including Ollama and LM Studio). **BitNet is deprecated** — `create_client("bitnet")` raises an informative error directing users to Ollama or LM Studio.
 - **Language Parsers**: Python (`ast`-based), JavaScript/TypeScript, Rust, Go, Java, C#, Kotlin, Ruby, PHP, Swift, and Elixir. Wired into `generator._prepare_file_entry`; metadata is passed to the LLM prompt for richer summaries.
 - **File Watcher**: `ctx watch` — OS-native file watcher via `watchdog`. CONTEXT.md writes excluded to prevent infinite loops. 0.5 s per-file debounce.
-- **Test Coverage**: 311 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, `java_parser`, `csharp_parser`, `kotlin_parser`, `ruby_parser`, `php_parser`, `swift_parser`, `elixir_parser`, integration).
+- **Test Coverage**: 321 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, `java_parser`, `csharp_parser`, `kotlin_parser`, `ruby_parser`, `php_parser`, `swift_parser`, `elixir_parser`, integration).
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, `CONTRIBUTING.md`, and `PHASE16_HANDOFF.md` define the system and current execution order.
 
-> **Branch notice**: As of March 16, 2026, Phases 1–20 are complete on `main`. Phase 21 is the active development phase. New work should branch from `main`.
+> **Branch notice**: As of March 17, 2026, Phases 1–21 are complete on `main`. Phase 22 is the active development phase. New work should branch from `main`.
 
 > **Manifest refresh rule**: Any commit that adds or modifies source files must include a `ctx update .` pass to regenerate stale `CONTEXT.md` files before pushing. The `CTX Manifest Check` CI job enforces this and will fail otherwise.
 
@@ -327,26 +327,26 @@ Theme: Make ctx useful as part of a real AI-assisted development workflow.
 
 **Branch:** `feat/phase20-agent-integration`
 
-### Phase 21 — Health Truth & Diagnostics
+### Phase 21 — Health Truth & Diagnostics ✓
 Theme: make health-reporting and troubleshooting surfaces agree after real-world smoke testing.
-- Unify stale detection across CLI health/reporting surfaces (`ctx stats`, `ctx export --filter stale`, watch coverage, and follow-on health commands) so hash-based freshness and parent-directory staleness are reported consistently.
-- Extend `ctx verify` with coverage/freshness checks and machine-readable output so CI and gate closeout can validate more than frontmatter shape.
-- Handle unborn `HEAD` / empty repos cleanly in `ctx diff` and related git-aware flows instead of falling back with misleading "git unavailable" messaging.
+- Unified stale detection across CLI health/reporting surfaces (`ctx stats`, `ctx export --filter stale`, watch coverage, and follow-on health commands) so hash-based freshness and parent-directory staleness are reported consistently.
+- Extended `ctx verify` with coverage/freshness checks and machine-readable output so CI and gate closeout can validate more than frontmatter shape.
+- Handled unborn `HEAD` / empty repos cleanly in `ctx diff` and related git-aware flows instead of falling back with misleading "git unavailable" messaging.
 
 **Branch:** `feat/phase21-health-truth`
 
 ### Phase 22 — First-Run Operator UX
 Theme: make the first live run self-diagnosing and immediately fixable.
-- Add `ctx doctor` to report provider detection, connectivity, active proxy vars, git state, manifest coverage, and the recommended next command.
-- Improve zero-manifest repo guidance in read-only commands (`ctx verify`, `ctx diff`, `ctx status`) so fresh repos steer users toward `ctx init` rather than ambiguous "everything is valid" style output.
-- Expand shell-aware remediation for connectivity/configuration failures so PowerShell, CMD, and POSIX users get actionable commands.
+- Add a `ctx doctor` command to report provider detection, connectivity, active proxy vars, git state, manifest coverage, and the recommended next command in one place.
+- Improve zero-manifest guidance in `ctx verify`, `ctx diff`, and related read-only commands so fresh repos steer users toward `ctx init` rather than ambiguous "everything is valid" style output.
+- Expand shell-aware remediation depth so PowerShell, CMD, and POSIX users all get actionable proxy/config fix commands.
 
 **Branch:** `feat/phase22-first-run-ops`
 
 ### Phase 23 — External Repo Validation & Prompt Calibration
 Theme: prove ctx on real repositories outside its own codebase and feed the results back into summary quality.
-- Build a repeatable smoke matrix against at least three external repo archetypes (Python package, mixed-language application, docs/tooling-heavy repo).
-- Capture manifest/export snapshots and a lightweight quality rubric so regressions in structure, stale counts, and Notes usefulness are measurable.
-- Use the external findings to tune prompt templates, default ignores, and boilerplate-file handling for real-world repositories.
+- Build a repeatable validation matrix against at least three external repo archetypes (Python package, mixed-language application, docs/tooling-heavy repo).
+- Capture manifest/export snapshots and a lightweight rubric so regressions in structure, stale counts, and Notes usefulness are measurable.
+- Use external-repo findings to refine prompt templates, default ignores, and boilerplate-file handling for real-world repositories.
 
 **Branch:** `feat/phase23-external-validation`

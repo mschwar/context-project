@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-17T07:34:19Z'
+generated: '2026-03-17T07:49:57Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:a19877e9d0e3879a8de9f89831deb63b1bb1b2205e78d6ad2c4b7c3f61c8d3ac
+content_hash: sha256:0748b043da30f7e0dbceabe21a51edfa7ff7984e6b7a84b658f4731969fcd4c9
 files: 30
 dirs: 1
 tokens_total: 27817
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Comprehensive test suite covering CLI commands, language parsers, core generation logic, Git integration, and end-to-end workflows for the context project.
+Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, manifest generation, and LLM functionality for the context project.
 
 ## Files
 
@@ -50,7 +50,7 @@ Comprehensive test suite covering CLI commands, language parsers, core generatio
 
 ## Notes
 
-- Language parser tests are organized by language (Python, Go, Rust, Java, C#, etc.) and validate extraction of public symbols and structural elements.
-- Core functionality tests (generator, git, hasher, ignore, manifest) validate the manifest generation pipeline and file system operations.
-- Integration tests use a fake LLM client and sample project fixtures to verify end-to-end workflows.
-- conftest.py provides shared pytest fixtures for isolated test environments and temporary workspace directories.
+- Test organization mirrors core module structure with dedicated test files for each language parser, CLI command, and major subsystem.
+- Pytest fixtures in conftest.py provide isolated temporary directories and environment setup for all tests.
+- Integration tests validate end-to-end workflows using fake LLM clients and sample project fixtures.
+- Language parser tests follow a consistent pattern across multiple supported languages (Python, JavaScript/TypeScript, Go, Rust, Java, C#, Kotlin, PHP, Ruby, Swift, Elixir).

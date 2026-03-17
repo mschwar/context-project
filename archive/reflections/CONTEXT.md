@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-17T02:12:12Z'
+generated: '2026-03-17T07:55:47Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:8d42ad88098470ddeab8153624b967cf471d135b6d03661f5c10d2f8ac580ea6
-files: 15
+content_hash: sha256:a12b7e6407dff667b48fe3fe047af6b1255729d18950104932d6dad028f55b9d
+files: 16
 dirs: 0
-tokens_total: 13395
+tokens_total: 14313
 ---
 # C:/Users/Matty/Documents/context-project/archive/reflections
 
-This directory contains phase-by-phase project reflections documenting the evolution of the context-project from Phase 4 through Phase 18, capturing achievements, friction points, and forward-looking recommendations.
+This directory contains phase-by-phase reflections documenting the evolution, achievements, and recommendations of the context-project across multiple development cycles.
 
 ## Files
 
@@ -28,6 +28,7 @@ This directory contains phase-by-phase project reflections documenting the evolu
 - **2026-03-15-phase16-reflection.md** — Phase 16 reflection documenting observability improvements, test reliability gains, manifest refresh environment sensitivity issues, and recommendations for Phase 17.
 - **2026-03-16-phase17-reflection.md** — Phase 17 reflection documenting closeout reliability improvements: non-zero exit codes on errors and connectivity probing for provider setup validation.
 - **2026-03-16-phase18-reflection.md** — Phase 18 reflection documenting pre-flight connectivity checks and proxy guidance implementation with test coverage and future suggestions.
+- **2026-03-17-phase21-reflection.md** — Phase 21 reflection documenting centralized health-check implementation, empty-repo git handling, and recommendations for doctor command and external smoke testing.
 
 ## Subdirectories
 
@@ -35,6 +36,6 @@ This directory contains phase-by-phase project reflections documenting the evolu
 
 ## Notes
 
-- Reflections follow a consistent chronological naming convention (YYYY-MM-DD-phaseN-reflection.md) and span from Phase 4 through Phase 18, providing a continuous narrative of project evolution.
-- Each reflection documents feature implementations, test coverage growth, friction points encountered, and prioritized recommendations for the next phase, forming a structured retrospective trail.
-- The archive captures major milestones including parser language support expansion, CLI maturation, packaging and distribution, observability, and reliability hardening.
+- Reflections span phases 4–21 with gaps (phases 19–20 not documented), suggesting selective archival or ongoing development cycles.
+- Each reflection follows a consistent pattern: achievements, friction points, test coverage observations, and forward-looking recommendations for the next phase.
+- Themes progress from core features (caching, parsers, packaging) through CLI maturity (ergonomics, power-user features) to operational reliability (health checks, connectivity validation).

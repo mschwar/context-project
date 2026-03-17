@@ -3,9 +3,9 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–20 complete.
+- **Status:** Stable. Phases 1–21 complete.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 311 tests passing across all modules.
+- **Test Coverage:** 321 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
 - **Ecosystem:** manifest server (`ctx serve`), git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby + Elixir language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view (with `--format json`, `--quiet`, `--since`), `ctx export` (with `--filter`, `--depth`), `ctx stats` (with `--verbose`), `ctx clean`.
 
@@ -233,13 +233,14 @@ Theme: Make ctx useful as part of a real AI-assisted development workflow.
 - [x] **20.2 Agent handoff test** — Validated `ctx export --depth 1` and `ctx serve` as context sources for agents. Added 6 new tests covering export depth filtering, structure validation, serve endpoint testing, stale filtering, and end-to-end agent navigation workflow.
 - [x] **20.3 Summary quality audit** — Reviewed generated manifests, identified improvements for boilerplate file handling (`__init__.py`, `config.py`, `test_*.py`). Implemented prompt tuning with concrete examples and improved Notes section guidance in `DEFAULT_PROMPT_TEMPLATES`.
 
-## Phase 21 — Health Truth & Diagnostics
+## Phase 21 — Health Truth & Diagnostics ✓
 
 Theme: make health-reporting and troubleshooting surfaces agree after real-world smoke testing.
 
-- [ ] **21.1 Shared stale-truth engine** — unify hash-based freshness detection across `ctx stats`, `ctx export --filter stale`, watch coverage summaries, and any future health/coverage surfaces so parent-directory staleness is reported consistently.
-- [ ] **21.2 Stronger `ctx verify`** — extend `ctx verify` with stale/missing coverage checks and machine-readable output so CI and gate closeout can validate both manifest shape and manifest freshness.
-- [ ] **21.3 Unborn-HEAD git UX** — treat empty repos / unborn `HEAD` as a first-class git state in `ctx diff` and related git-aware flows instead of falling back with misleading "git unavailable" warnings.
+- [x] **21.1 Shared stale-truth engine** — unify hash-based freshness detection across `ctx stats`, `ctx export --filter stale`, watch coverage summaries, and any future health/coverage surfaces so parent-directory staleness is reported consistently.
+- [x] **21.2 Stronger `ctx verify`** — extend `ctx verify` with stale/missing coverage checks and machine-readable output so CI and gate closeout can validate both manifest shape and manifest freshness.
+- [x] **21.3 Unborn-HEAD git UX** — treat empty repos / unborn `HEAD` as a first-class git state in `ctx diff` and related git-aware flows instead of falling back with misleading "git unavailable" warnings.
+- [x] **21.Z Gate closeout** — reflection filed at `archive/reflections/2026-03-17-phase21-reflection.md`; closeout validation passed with `321` tests, `ctx update .`, `ctx status .`, `ctx verify . --format json`, and empty-repo `ctx diff` smoke coverage.
 
 **Branch:** `feat/phase21-health-truth`
 
