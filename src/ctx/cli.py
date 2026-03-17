@@ -593,6 +593,11 @@ def diff(path: str, since: Optional[str], output_format: str, quiet: bool, stat:
             prefix = "new" if manifest_path in set(new_files_sorted) else "mod"
             click.echo(f"  [{prefix}] {manifest_path}")
 
+    def _fallback_to_mtime() -> None:
+        if since is not None:
+            raise click.UsageError("--since requires git to be available and the path to be inside a git repository.")
+        click.echo("Warning: git not available or command failed. Falling back to mtime comparison.", err=True)
+
     # --- git path ---
     try:
         result = subprocess.run(
@@ -635,13 +640,9 @@ def diff(path: str, since: Optional[str], output_format: str, quiet: bool, stat:
             new_files_sorted = sorted(set(_split_lines(staged.stdout)) | set(_split_lines(untracked.stdout)))
             _emit_git_results([], new_files_sorted, "in repo without commits yet")
             return
-        if since is not None:
-            raise click.UsageError("--since requires git to be available and the path to be inside a git repository.")
-        click.echo("Warning: git not available or command failed. Falling back to mtime comparison.", err=True)
+        _fallback_to_mtime()
     except FileNotFoundError:
-        if since is not None:
-            raise click.UsageError("--since requires git to be available and the path to be inside a git repository.")
-        click.echo("Warning: git not available or command failed. Falling back to mtime comparison.", err=True)
+        _fallback_to_mtime()
 
     # --- mtime fallback (non-git repos) ---
     # Note: mtime path cannot distinguish modified vs new; all detected files use [stale].

@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-17T07:34:09Z'
+generated: '2026-03-17T07:46:05Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:6c29e109c613047eff6ff68c5dc4e418d38714aab3a4ceac9df4fbfcaf0cb9de
+content_hash: sha256:fe9d2815b9ae269f6e29ed4e8d4a71fb1f76eb58f673cdabd9e56ab4f9d03948
 files: 14
 dirs: 1
 tokens_total: 13443
@@ -35,6 +35,6 @@ Core implementation of ctx, a filesystem-native context layer that generates and
 ## Notes
 
 - The generator orchestrates a pipeline combining git state detection, ignore-pattern filtering, language detection, LLM summarization, and manifest serialization.
-- Configuration cascades from environment variables through .ctxconfig files to CLI flags, with automatic LLM provider detection.
+- Configuration is resolved hierarchically: environment variables override .ctxconfig files, which override defaults; provider detection enables automatic LLM selection.
 - Staleness detection via content hashing enables incremental updates; the watcher supports continuous monitoring for development workflows.
-- The server module provides HTTP access to manifests with path traversal protection, enabling integration with external tools.
+- The server module provides HTTP access to manifests with path traversal protection, enabling integration with external tools and agents.
