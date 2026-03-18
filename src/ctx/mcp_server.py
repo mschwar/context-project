@@ -13,6 +13,7 @@ from ctx import __version__
 from ctx import api
 
 
+# MCP uses date-stamped protocol revisions during initialize, not semver.
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOL_DEFINITIONS: list[dict[str, object]] = [
@@ -128,6 +129,52 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
 ]
 
 
+class MCPToolError(ValueError):
+    """Base class for client-visible MCP tool argument errors."""
+
+    def __init__(self, message: str, *, error_code: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
+class InvalidToolArgumentsError(MCPToolError):
+    """Raised when tool arguments fail schema or type validation."""
+
+    def __init__(self, message: str, *, error_code: str = "invalid_tool_arguments") -> None:
+        super().__init__(message, error_code=error_code)
+
+
+class AbsolutePathNotAllowedError(MCPToolError):
+    """Raised when a tool argument tries to use an absolute path."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(
+            f"Absolute paths not allowed: {path}",
+            error_code="absolute_path_not_allowed",
+        )
+
+
+class PathTraversalDeniedError(MCPToolError):
+    """Raised when a resolved path escapes the configured server root."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Path traversal denied: {path}", error_code="path_traversal_denied")
+
+
+class PathNotFoundError(MCPToolError):
+    """Raised when a requested relative path does not exist under the server root."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Path not found: {path}", error_code="path_not_found")
+
+
+class PathNotDirectoryError(MCPToolError):
+    """Raised when a requested path exists but is not a directory."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Path is not a directory: {path}", error_code="path_not_directory")
+
+
 class CtxMCPServer:
     """Stdio MCP server for ctx."""
 
@@ -216,6 +263,14 @@ class CtxMCPServer:
 
         try:
             result = handler(arguments)
+        except MCPToolError as exc:
+            self._write_error(
+                request_id,
+                -32602,
+                str(exc),
+                data={"code": exc.error_code},
+            )
+            return
         except Exception as exc:
             self._write_error(request_id, -32603, str(exc))
             return
@@ -248,7 +303,7 @@ class CtxMCPServer:
         path = self._resolve_path(arguments.get("path", "."))
         depth = arguments.get("depth")
         if depth is not None and not isinstance(depth, int):
-            raise ValueError("depth must be an integer")
+            raise InvalidToolArgumentsError("depth must be an integer", error_code="invalid_depth")
         result = api.export_context(
             path,
             filter_mode=str(arguments.get("filter", "all")),
@@ -267,32 +322,35 @@ class CtxMCPServer:
 
     def _resolve_path(self, relative: object) -> Path:
         if not isinstance(relative, str):
-            raise ValueError("path must be a string")
+            raise InvalidToolArgumentsError("path must be a string", error_code="invalid_path_type")
 
         candidate = Path(relative or ".")
         if candidate.is_absolute():
-            raise ValueError(f"Absolute paths not allowed: {relative}")
+            raise AbsolutePathNotAllowedError(relative)
 
         resolved = (self._root / candidate).resolve()
         if not resolved.is_relative_to(self._root):
-            raise ValueError(f"Path traversal denied: {relative}")
+            raise PathTraversalDeniedError(relative)
         if not resolved.exists():
-            raise ValueError(f"Path not found: {relative}")
+            raise PathNotFoundError(relative)
         if not resolved.is_dir():
-            raise ValueError(f"Path is not a directory: {relative}")
+            raise PathNotDirectoryError(relative)
         return resolved
 
     def _write_result(self, request_id: Any, result: Any) -> None:
         self._write_message({"jsonrpc": "2.0", "id": request_id, "result": result})
 
-    def _write_error(self, request_id: Any, code: int, message: str) -> None:
-        self._write_message(
-            {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {"code": code, "message": message},
-            }
-        )
+    def _write_error(
+        self,
+        request_id: Any,
+        code: int,
+        message: str,
+        data: dict[str, object] | None = None,
+    ) -> None:
+        error: dict[str, object] = {"code": code, "message": message}
+        if data is not None:
+            error["data"] = data
+        self._write_message({"jsonrpc": "2.0", "id": request_id, "error": error})
 
     @staticmethod
     def _write_message(payload: dict[str, object]) -> None:

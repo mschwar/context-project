@@ -228,10 +228,57 @@ def test_ctx_refresh_tool_call(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     assert payload["stale_directories"] == ["repo"]
 
 
+def test_tool_path_validation_returns_structured_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    responses = _run_server(
+        monkeypatch,
+        tmp_path,
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "ctx_check", "arguments": {"path": "../outside"}},
+            }
+        ),
+    )
+
+    error = responses[0]["error"]
+    assert error["code"] == -32602
+    assert error["message"] == "Path traversal denied: ../outside"
+    assert error["data"]["code"] == "path_traversal_denied"
+
+
+def test_invalid_depth_returns_structured_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / "repo"
+    target.mkdir()
+
+    responses = _run_server(
+        monkeypatch,
+        tmp_path,
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "ctx_export", "arguments": {"path": "repo", "depth": "deep"}},
+            }
+        ),
+    )
+
+    error = responses[0]["error"]
+    assert error["code"] == -32602
+    assert error["message"] == "depth must be an integer"
+    assert error["data"]["code"] == "invalid_depth"
+
+
 def test_path_traversal_is_blocked(tmp_path: Path) -> None:
     server = mcp_module.CtxMCPServer(tmp_path)
 
-    with pytest.raises(ValueError, match="Path traversal denied"):
+    with pytest.raises(mcp_module.PathTraversalDeniedError, match="Path traversal denied"):
         server._resolve_path("../outside")
 
 
@@ -239,7 +286,7 @@ def test_absolute_path_is_rejected(tmp_path: Path) -> None:
     server = mcp_module.CtxMCPServer(tmp_path)
     absolute = str((tmp_path.parent / "outside").resolve())
 
-    with pytest.raises(ValueError, match="Absolute paths not allowed"):
+    with pytest.raises(mcp_module.AbsolutePathNotAllowedError, match="Absolute paths not allowed"):
         server._resolve_path(absolute)
 
 
