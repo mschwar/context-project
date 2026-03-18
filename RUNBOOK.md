@@ -41,6 +41,8 @@ Update stale manifests based on content changes.
 ctx refresh /path/to/project
 ```
 
+If the target tree is a normal git checkout, `ctx refresh` can use git-aware selection. On extracted or non-git trees it now falls back cleanly to incremental refresh instead of failing before generation.
+
 > **Before pushing:** always run `ctx refresh .` and commit the resulting `CONTEXT.md` changes alongside your code. The pre-commit hook and `CTX Manifest Check` CI job both use `ctx check . --check-exit`, which is the canonical freshness gate.
 
 ### Check status
@@ -59,7 +61,7 @@ ctx check /path/to/project --diff --since main # compare against a specific ref
 ```
 
 ### Verify manifests
-Check CONTEXT.md frontmatter for required fields (generated, generator, model, content_hash, files, dirs, tokens_total).
+Check CONTEXT.md frontmatter, body structure, freshness, and coverage. Verify now catches missing sections, duplicate bullets, nonexistent files, missing real files, illegal `None` rows, and frontmatter/body count mismatches in addition to required fields (`generated`, `generator`, `model`, `content_hash`, `files`, `dirs`, `tokens_total`).
 ```bash
 ctx check /path/to/project --verify
 ```
@@ -152,7 +154,7 @@ python -m ctx update .
 
 ### Local Provider Still Hits Context Limits
 **Symptom**: A local OpenAI-compatible provider still returns HTTP 400 on a large directory.
-**Fix**: `ctx` already retries local providers with smaller fallbacks. If it still fails, lower `batch_size` or `max_file_tokens` in `.ctxconfig`.
+**Fix**: `ctx` already retries local providers with smaller fallbacks, auto-disables batching after the first malformed batch response, and reports `Local batch fallbacks: N` in refresh output. If it still fails, lower `batch_size` or `max_file_tokens` in `.ctxconfig`.
 
 ### `pytest` Command Not Found
 **Symptom**: `pytest` is missing from the shell.

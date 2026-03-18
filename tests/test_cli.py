@@ -1376,19 +1376,71 @@ def test_export_respects_custom_ctxignore(tmp_path) -> None:
 # --- 16E: ctx verify ---
 
 
-def _write_verify_manifest(directory: Path, root: Path, *, body: str = "# Manifest\n", tokens_total: int = 100) -> None:
-    """Write a valid manifest fixture for verify tests."""
+def _write_verify_manifest(
+    directory: Path,
+    root: Path,
+    *,
+    body: str | None = None,
+    purpose: str | None = None,
+    tokens_total: int = 100,
+) -> None:
+    """Write a manifest fixture for verify tests."""
     from ctx.hasher import hash_directory
-    from ctx.ignore import load_ignore_patterns
+    from ctx.ignore import load_ignore_patterns, should_ignore
     from ctx.manifest import write_manifest
 
     spec = load_ignore_patterns(root)
+    if body is None:
+        files = sorted(
+            child.name
+            for child in directory.iterdir()
+            if child.is_file()
+            and child.name != "CONTEXT.md"
+            and not should_ignore(child, spec, root)
+        )
+        subdirs = sorted(
+            child.name
+            for child in directory.iterdir()
+            if child.is_dir() and not should_ignore(child, spec, root)
+        )
+        lines = [
+            f"# {directory.as_posix()}",
+            "",
+            purpose or f"{directory.name or directory.as_posix()} directory.",
+            "",
+            "## Files",
+        ]
+        if files:
+            lines.extend(f"- **{name}** — Fixture summary for {name}" for name in files)
+        else:
+            lines.append("- None")
+        lines.extend(["", "## Subdirectories"])
+        if subdirs:
+            lines.extend(f"- **{name}/** — Fixture summary for {name}" for name in subdirs)
+        else:
+            lines.append("- None")
+        body = "\n".join(lines) + "\n"
+        files_count = len(files)
+        dirs_count = len(subdirs)
+    else:
+        files_count = sum(
+            1
+            for child in directory.iterdir()
+            if child.is_file()
+            and child.name != "CONTEXT.md"
+            and not should_ignore(child, spec, root)
+        )
+        dirs_count = sum(
+            1
+            for child in directory.iterdir()
+            if child.is_dir() and not should_ignore(child, spec, root)
+        )
     write_manifest(
         directory,
         model="test",
         content_hash=hash_directory(directory, spec, root),
-        files=0,
-        dirs=0,
+        files=files_count,
+        dirs=dirs_count,
         tokens_total=tokens_total,
         body=body,
     )
@@ -1404,8 +1456,8 @@ def test_verify_all_valid_manifests(tmp_path) -> None:
 
     sub = root / "sub"
     sub.mkdir()
-    _write_verify_manifest(sub, root, body="# Sub manifest\n", tokens_total=200)
-    _write_verify_manifest(root, root, body="# Root manifest\n", tokens_total=100)
+    _write_verify_manifest(sub, root, tokens_total=200)
+    _write_verify_manifest(root, root, tokens_total=100)
 
     result = runner.invoke(cli_module.cli, ["verify", str(root)])
 
@@ -1509,7 +1561,7 @@ files: 1
     )
 
     # Valid manifest written after child directories exist so the root hash is fresh.
-    _write_verify_manifest(root, root, body="# Root manifest\n")
+    _write_verify_manifest(root, root)
 
     result = runner.invoke(cli_module.cli, ["verify", str(root)])
 
@@ -1528,7 +1580,7 @@ def test_verify_respects_ctxignore(tmp_path) -> None:
     root.mkdir()
 
     # Valid manifest at root
-    _write_verify_manifest(root, root, body="# Root manifest\n")
+    _write_verify_manifest(root, root)
 
     # Invalid manifest in ignored directory
     ignored = root / ".pytest_cache"
@@ -1570,7 +1622,7 @@ def test_verify_reports_stale_manifests(tmp_path) -> None:
     root = tmp_path / "project"
     root.mkdir()
     (root / "main.py").write_text("print('v1')", encoding="utf-8")
-    _write_verify_manifest(root, root, body="# Root manifest\n")
+    _write_verify_manifest(root, root)
     (root / "main.py").write_text("print('v2')", encoding="utf-8")
 
     result = runner.invoke(cli_module.cli, ["verify", str(root)])
@@ -1589,7 +1641,7 @@ def test_verify_reports_missing_subdirectory_manifest(tmp_path) -> None:
     sub = root / "src"
     root.mkdir()
     sub.mkdir()
-    _write_verify_manifest(root, root, body="# Root manifest\n")
+    _write_verify_manifest(root, root)
 
     result = runner.invoke(cli_module.cli, ["verify", str(root)])
 
@@ -1612,8 +1664,8 @@ def test_verify_format_json_reports_health_categories(tmp_path) -> None:
     stale.mkdir()
     missing.mkdir()
     (stale / "main.py").write_text("print('v1')", encoding="utf-8")
-    _write_verify_manifest(stale, root, body="# Stale manifest\n")
-    _write_verify_manifest(root, root, body="# Root manifest\n")
+    _write_verify_manifest(stale, root)
+    _write_verify_manifest(root, root)
     (stale / "main.py").write_text("print('v2')", encoding="utf-8")
 
     result = runner.invoke(cli_module.cli, ["verify", "--format", "json", str(root)])
@@ -1625,6 +1677,41 @@ def test_verify_format_json_reports_health_categories(tmp_path) -> None:
     assert "." in output["stale"]
     assert "stale" in output["stale"]
     assert "missing" in output["missing"]
+
+
+def test_verify_reports_invalid_manifest_body(tmp_path) -> None:
+    """ctx verify should fail when a manifest body disagrees with the filesystem."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "real.py").write_text("print('hi')\n", encoding="utf-8")
+    _write_verify_manifest(
+        root,
+        root,
+        body="\n".join(
+            [
+                f"# {root.as_posix()}",
+                "",
+                "Project root.",
+                "",
+                "## Files",
+                "- **fake.py** — Hallucinated file",
+                "",
+                "## Subdirectories",
+                "- None",
+                "",
+            ]
+        ),
+    )
+
+    result = runner.invoke(cli_module.cli, ["verify", str(root)])
+
+    assert result.exit_code == 1
+    assert "Invalid manifest bodies:" in result.output
+    assert "Files section is missing real entries: real.py" in result.output
+    assert "Files section lists nonexistent entries: fake.py" in result.output
 
 
 # --- Phase 17.1: non-zero exit on refresh errors ---

@@ -61,6 +61,7 @@ cache_path: .ctx-cache/llm_cache.json
 ### `ctx refresh <path>`
 
 Generate or update `CONTEXT.md` manifests using the fastest valid strategy for the tree.
+When git metadata is available, refresh can use smart changed-file selection; on extracted or non-git trees it falls back cleanly to incremental refresh.
 
 Common flags:
 - `--force` — regenerate every directory
@@ -93,7 +94,8 @@ Common flags:
     "config_written": false,
     "setup_provider": null,
     "setup_model": null,
-    "setup_detected_via": null
+    "setup_detected_via": null,
+    "local_batch_fallbacks": 0
   },
   "errors": [],
   "recommended_next": null
@@ -105,7 +107,7 @@ Common flags:
 Report manifest health, validation results, coverage stats, or manifest diffs.
 
 Common flags:
-- `--verify` — validate frontmatter, freshness, and coverage
+- `--verify` — validate frontmatter, body structure, freshness, and coverage
 - `--stats` — emit aggregate coverage statistics
 - `--diff` — compare manifest changes via git or mtime fallback
 - `--check-exit` — exit `1` when health checks find issues
@@ -334,6 +336,8 @@ One-sentence purpose summary.
 ## Notes
 - optional agent hints
 ```
+
+`ctx` renders the `## Files` and `## Subdirectories` sections deterministically from the real filesystem. The model supplies only the directory-purpose sentence and optional `## Notes`, and `ctx check --verify` validates the final body against the directory contents.
 
 Generated files end with this footer comment:
 

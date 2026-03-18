@@ -40,11 +40,13 @@ from ctx.generator import (
     check_stale_dirs,
     generate_tree,
     inspect_directory_health,
+    validate_manifest_body,
     update_tree,
 )
 from ctx.ignore import load_ignore_patterns
 from ctx.llm import create_client
 from ctx.lock import CtxLock
+from ctx.manifest import read_manifest
 from ctx.output import OutputBroker, _classify_exception, build_envelope
 
 
@@ -389,6 +391,8 @@ def refresh(
                 click.echo("Estimated cost: $0.00 (local provider)")
             elif result.tokens_used > 0:
                 click.echo(f"Estimated cost: ${result.est_cost_usd:.2f} ({result.tokens_used:,} tokens)")
+            if result.local_batch_fallbacks > 0:
+                click.echo(f"Local batch fallbacks: {result.local_batch_fallbacks}")
             click.echo(f"Errors: {len(result.errors)}")
             if result.errors:
                 click.echo("Error details:")
@@ -440,6 +444,8 @@ def init(ctx: click.Context, path: str, provider: Optional[str], model: Optional
         click.echo(f"Files processed: {stats.files_processed}")
         click.echo(f"Tokens used: {stats.tokens_used}")
         _echo_cost_summary(stats, config.provider, config.resolved_model())
+        if stats.local_batch_fallbacks > 0:
+            click.echo(f"Local batch fallbacks: {stats.local_batch_fallbacks}")
         click.echo(f"Errors: {len(stats.errors)}")
         _echo_generation_errors(stats)
         _echo_budget_warning(stats, config)
@@ -454,6 +460,7 @@ def init(ctx: click.Context, path: str, provider: Optional[str], model: Optional
                 "errors_count": len(stats.errors),
                 "budget_exhausted": stats.budget_exhausted,
                 "strategy": "full" if overwrite else "incremental",
+                "local_batch_fallbacks": stats.local_batch_fallbacks,
             }
         )
         broker.set_tokens(stats.tokens_used, cost)
@@ -534,6 +541,8 @@ def update(ctx: click.Context, path: str, provider: Optional[str], model: Option
         click.echo(f"Directories skipped: {stats.dirs_skipped}")
         click.echo(f"Tokens used: {stats.tokens_used}")
         _echo_cost_summary(stats, config.provider, config.resolved_model())
+        if stats.local_batch_fallbacks > 0:
+            click.echo(f"Local batch fallbacks: {stats.local_batch_fallbacks}")
         click.echo(f"Errors: {len(stats.errors)}")
         _echo_generation_errors(stats)
         _echo_budget_warning(stats, config)
@@ -548,6 +557,7 @@ def update(ctx: click.Context, path: str, provider: Optional[str], model: Option
                 "errors_count": len(stats.errors),
                 "budget_exhausted": stats.budget_exhausted,
                 "strategy": "incremental",
+                "local_batch_fallbacks": stats.local_batch_fallbacks,
             }
         )
         broker.set_tokens(stats.tokens_used, cost)
@@ -737,6 +747,7 @@ def check(
         missing = [entry["path"] for entry in invalid_entries if entry["status"] == "missing"]
         stale = [entry["path"] for entry in invalid_entries if entry["status"] == "stale"]
         missing_fields = [entry for entry in invalid_entries if entry["status"] == "missing_fields"]
+        invalid_bodies = [entry for entry in invalid_entries if entry["status"] == "invalid_body"]
         if malformed:
             click.echo("Malformed frontmatter:")
             for rel in malformed:
@@ -745,6 +756,12 @@ def check(
             click.echo("Missing required fields:")
             for item in missing_fields:
                 click.echo(f"  {item['path']}: {', '.join(item['fields'])}")
+        if invalid_bodies:
+            click.echo("Invalid manifest bodies:")
+            for item in invalid_bodies:
+                click.echo(f"  {item['path']}:")
+                for issue in item["issues"]:
+                    click.echo(f"    - {issue}")
         if stale:
             click.echo("Stale manifests:")
             for rel in stale:
@@ -1449,6 +1466,7 @@ def verify(ctx: click.Context, path: str, output_format: str) -> None:
             if entry.status == "missing"
         )
         invalid_manifests: list[tuple[str, list[str]]] = []
+        invalid_bodies: list[tuple[str, list[str]]] = []
 
         for entry in health_entries:
             if entry.status == "missing" or entry.error is not None or entry.frontmatter is None:
@@ -1464,6 +1482,21 @@ def verify(ctx: click.Context, path: str, output_format: str) -> None:
                 invalid_manifests.append((entry.relative_path, missing_fields))
 
         invalid_field_paths = {rel for rel, _fields in invalid_manifests}
+        for entry in health_entries:
+            if (
+                entry.status != "fresh"
+                or entry.error is not None
+                or entry.frontmatter is None
+                or entry.relative_path in invalid_field_paths
+            ):
+                continue
+            manifest = read_manifest(entry.path)
+            if manifest is None:
+                continue
+            issues = validate_manifest_body(entry.path, root, spec, manifest)
+            if issues:
+                invalid_bodies.append((entry.relative_path, issues))
+
         stale_manifests = sorted(
             entry.relative_path for entry in health_entries
             if entry.status == "stale"
@@ -1471,7 +1504,13 @@ def verify(ctx: click.Context, path: str, output_format: str) -> None:
             and entry.relative_path not in invalid_field_paths
         )
 
-        invalid_paths = set(malformed_manifests) | invalid_field_paths | set(stale_manifests) | set(missing_manifests)
+        invalid_paths = (
+            set(malformed_manifests)
+            | invalid_field_paths
+            | {rel for rel, _issues in invalid_bodies}
+            | set(stale_manifests)
+            | set(missing_manifests)
+        )
         aggregate = {
             "dirs": len(health_entries),
             "fresh": sum(1 for entry in health_entries if entry.status == "fresh"),
@@ -1487,6 +1526,10 @@ def verify(ctx: click.Context, path: str, output_format: str) -> None:
                 {"path": rel, "fields": fields}
                 for rel, fields in sorted(invalid_manifests)
             ],
+            "invalid_body": [
+                {"path": rel, "issues": issues}
+                for rel, issues in sorted(invalid_bodies)
+            ],
             "stale": stale_manifests,
             "missing": missing_manifests,
         }
@@ -1499,6 +1542,10 @@ def verify(ctx: click.Context, path: str, output_format: str) -> None:
                 "missing_fields": [
                     {"path": rel, "fields": fields}
                     for rel, fields in sorted(invalid_manifests)
+                ],
+                "invalid_body": [
+                    {"path": rel, "issues": issues}
+                    for rel, issues in sorted(invalid_bodies)
                 ],
                 "stale": stale_manifests,
                 "missing": missing_manifests,
@@ -1515,6 +1562,13 @@ def verify(ctx: click.Context, path: str, output_format: str) -> None:
             for rel, fields in sorted(invalid_manifests):
                 field_list = ", ".join(fields)
                 click.echo(f"  {rel}: {field_list}")
+
+        if invalid_bodies:
+            click.echo("Invalid manifest bodies:")
+            for rel, issues in sorted(invalid_bodies):
+                click.echo(f"  {rel}:")
+                for issue in issues:
+                    click.echo(f"    - {issue}")
 
         if stale_manifests:
             click.echo("Stale manifests:")

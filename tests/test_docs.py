@@ -1,4 +1,4 @@
-"""Documentation and package metadata checks for Stage 6."""
+"""Documentation and package metadata checks for the current roadmap state."""
 
 from __future__ import annotations
 
@@ -76,8 +76,12 @@ def test_workflow_patterns_use_canonical_check_commands() -> None:
     assert "### Natural Language Triggers" in agents
     assert "CTX_OUTPUT=json python -m ctx check . --check-exit" in agents
     assert "`update ctx` / `update context` / `refresh manifests`" in agents
+    assert '"local_batch_fallbacks": 0' in agents
+    assert "validate frontmatter, body structure, freshness, and coverage" in agents
 
     assert "pre-commit hook and `CTX Manifest Check` CI job both use `ctx check . --check-exit`" in runbook
+    assert "falls back cleanly to incremental refresh" in runbook
+    assert "duplicate bullets, nonexistent files, missing real files" in runbook
 
 
 def test_afo_closeout_artifact_and_phase24_scope_exist() -> None:
@@ -92,12 +96,13 @@ def test_afo_closeout_artifact_and_phase24_scope_exist() -> None:
 
     assert "AFO Stage 1–6 Closeout ✓" in state
     assert "## Phase 24 — Manifest Trust & External Validation" in state
-    assert "git-optional refresh" in state
-    assert "Body-level verification" in state
+    assert "[x] **24.1 git-optional refresh**" in state
+    assert "[x] **24.3 Body-level verification**" in state
+    assert "local-provider fallback counts are surfaced" in state
 
     assert "## AFO Stage 1–6 Closeout" in overhaul
     assert "## Phase 24 — Manifest Trust & External Validation" in overhaul
-    assert "local-provider adaptive batching" in overhaul
+    assert "[x] **24.6 local-provider adaptive batching**" in overhaul
 
 
 def test_pyproject_agent_metadata_present() -> None:

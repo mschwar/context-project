@@ -14,10 +14,12 @@ from ctx.generator import (
     inspect_directory_health,
     is_binary_file,
     update_tree,
+    validate_manifest_body,
 )
+from ctx.hasher import hash_directory
 from ctx.ignore import load_ignore_patterns
 from ctx.llm import FileSummary, LLMResult, SubdirSummary
-from ctx.manifest import read_manifest
+from ctx.manifest import read_manifest, write_manifest
 
 
 class FakeLLMClient:
@@ -89,6 +91,13 @@ def test_is_binary_file_binary(tmp_path) -> None:
         assert is_binary_file(path) is True
 
 
+def test_is_binary_file_handles_utf8_multibyte_boundary(tmp_path) -> None:
+    path = tmp_path / "boundary.ts"
+    path.write_bytes((b"a" * 8191) + "é".encode("utf-8"))
+
+    assert is_binary_file(path) is False
+
+
 def test_format_binary_info(tmp_path) -> None:
     spreadsheet = tmp_path / "report.xlsx"
     spreadsheet.write_bytes(b"x" * 512)
@@ -116,6 +125,49 @@ def test_generate_tree_creates_manifests(tmp_path) -> None:
         assert manifest is not None
         assert manifest.frontmatter.model == "fake-llm-model"
         assert manifest.body.startswith(f"# {directory.as_posix()}")
+
+
+def test_generate_tree_renders_manifest_sections_deterministically(tmp_path) -> None:
+    class HallucinatingLLMClient(FakeLLMClient):
+        def summarize_directory(
+            self,
+            dir_path: Path,
+            file_summaries: list[FileSummary],
+            subdir_summaries: list[SubdirSummary],
+        ) -> LLMResult:
+            self.directory_calls.append((dir_path, file_summaries, subdir_summaries))
+            body = "\n".join(
+                [
+                    f"# {dir_path.as_posix()}",
+                    "",
+                    "Purpose inferred from real summaries.",
+                    "",
+                    "## Files",
+                    "- **hallucinated.py** — Does not exist",
+                    "- None",
+                    "",
+                    "## Subdirectories",
+                    "- **ghost/** — Does not exist",
+                    "",
+                    "## Notes",
+                    "- Keep summaries grounded in the real tree",
+                ]
+            )
+            return LLMResult(text=body, input_tokens=7, output_tokens=3)
+
+    root = _copy_sample_project(tmp_path)
+    spec = load_ignore_patterns(root)
+    generate_tree(root, Config(api_key="test-key"), HallucinatingLLMClient(), spec)
+
+    manifest = read_manifest(root)
+    assert manifest is not None
+    assert "- **README.md** — Summary for README.md" in manifest.body
+    assert "- **docs/** — Purpose inferred from real summaries." in manifest.body
+    assert "- **src/** — Purpose inferred from real summaries." in manifest.body
+    assert "hallucinated.py" not in manifest.body
+    assert "ghost/" not in manifest.body
+    assert "- None" not in manifest.body
+    assert "- Keep summaries grounded in the real tree" in manifest.body
 
 
 def test_generate_tree_bottom_up(tmp_path) -> None:
@@ -292,3 +344,48 @@ def test_check_stale_dirs_respects_changed_files_filter(tmp_path) -> None:
     stale_names = {d.name for d in stale}
     assert "docs" in stale_names or "." in stale_names  # docs or root
     assert "src" not in stale_names
+
+
+def test_validate_manifest_body_reports_hallucinations_and_illegal_none(tmp_path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "real.py").write_text("print('hi')\n", encoding="utf-8")
+    (root / "pkg").mkdir()
+    spec = load_ignore_patterns(root)
+    body = "\n".join(
+        [
+            f"# {root.as_posix()}",
+            "",
+            "Project root.",
+            "",
+            "## Files",
+            "- **real.py** — Real file",
+            "- **fake.py** — Hallucinated file",
+            "",
+            "## Subdirectories",
+            "- **pkg** — Missing slash",
+            "",
+            "## Notes",
+            "- None",
+            "- Helpful note",
+            "",
+        ]
+    )
+    write_manifest(
+        root,
+        model="test-model",
+        content_hash=hash_directory(root, spec, root),
+        files=1,
+        dirs=1,
+        tokens_total=10,
+        body=body,
+    )
+
+    manifest = read_manifest(root)
+    assert manifest is not None
+
+    issues = validate_manifest_body(root, root, spec, manifest)
+
+    assert any("Files section lists nonexistent entries: fake.py" in issue for issue in issues)
+    assert any("Subdirectories entry is missing a trailing slash: pkg" in issue for issue in issues)
+    assert any("Notes section contains an illegal None row." in issue for issue in issues)

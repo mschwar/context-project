@@ -3,12 +3,13 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–21 complete; AFO Stages 1–6 are complete and closeout is documented. Phase 24 is the active follow-on scope.
+- **Status:** Stable. Phases 1–21 and Phase 24 are complete; AFO Stages 1–6 are complete and closeout is documented.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 407 tests passing across all modules.
+- **Test Coverage:** 419 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
 - **Agent Surface:** canonical `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands backed by `src/ctx/api.py`, with hidden legacy aliases preserved for compatibility.
 - **Configuration:** full `CTX_*` env-var parity for scalar config fields, shared cost estimation, zero-config refresh bootstrap for env/local providers, and hard `max_tokens_per_run` / `max_usd_per_run` guardrails.
+- **Manifest Trust:** refresh is git-optional on extracted trees, `## Files` / `## Subdirectories` are rendered deterministically from the real filesystem, `ctx check --verify` validates manifest bodies, UTF-8 boundary reads no longer misclassify valid text as binary, and local-provider fallback counts are surfaced in CLI/API results.
 - **Documentation:** `AGENTS.md` is now the machine-readable onboarding contract, `README.md` is demoted to a short human-facing pitch, and generated manifests append a source footer.
 - **MCP Integration:** `ctx serve --mcp` now exposes a stdio JSON-RPC server backed by `api.py`; HTTP serving remains available via the optional `[serve]` extra.
 
@@ -325,13 +326,13 @@ After all 6 stages land: bump `__version__` from `0.8.0` to `1.0.0`.
 
 Carry-forward items from the AFO Stage 1–6 closeout reflection and live-repo validation on `gstack-main`.
 
-- [ ] **24.1 git-optional refresh** — defer `get_changed_files()` until the smart-refresh path is actually selected, and fall back cleanly on non-git extracted trees.
-- [ ] **24.2 Deterministic manifest structure** — render `## Files` and `## Subdirectories` from the real filesystem instead of letting the LLM author those lists.
-- [ ] **24.3 Body-level verification** — extend `ctx check --verify` to catch duplicate bullets, nonexistent files, missing real files, illegal `None` rows, and frontmatter/body count mismatches.
-- [ ] **24.4 UTF-8-safe binary detection** — fix multibyte boundary handling in `is_binary_file()` so valid text files are not labeled binary.
-- [ ] **24.5 Repo-specific summary calibration** — reduce boilerplate summaries, require repo-specific nouns where evidence exists, and describe `SKILL.md` / prompt files accurately.
-- [ ] **24.6 Local-provider adaptive batching** — default to safer batch sizes or auto-disable batching after the first malformed batch response, and surface fallback counts in CLI/API results.
-- [ ] **24.7 External validation fixtures** — add non-git extracted-tree, UTF-8 boundary, malformed-but-fresh manifest-body, and snapshot/rubric regression coverage from live-repo runs.
+- [x] **24.1 git-optional refresh** — `ctx refresh` now attempts git diff only when manifests already exist and cleanly falls back to incremental refresh on non-git extracted trees.
+- [x] **24.2 Deterministic manifest structure** — generator now extracts only directory purpose/notes from the model and renders `## Files` / `## Subdirectories` from the real filesystem.
+- [x] **24.3 Body-level verification** — `ctx check --verify` now catches duplicate bullets, nonexistent files, missing real files, illegal `None` rows, missing sections, and frontmatter/body count mismatches.
+- [x] **24.4 UTF-8-safe binary detection** — `is_binary_file()` now uses incremental UTF-8 decoding so multibyte boundary reads do not misclassify valid text files as binary.
+- [x] **24.5 Repo-specific summary calibration** — prompt templates now push repo-specific nouns, ban generic phrases like `main entry point` / `central hub`, and describe `SKILL.md` / prompt files accurately.
+- [x] **24.6 Local-provider adaptive batching** — OpenAI-compatible local providers now default to safer small batches, auto-disable batching after the first malformed batch response, and surface `local_batch_fallbacks` in refresh/init/update results.
+- [x] **24.7 External validation fixtures** — regression coverage now includes non-git extracted-tree refresh fallback, UTF-8 boundary text files, malformed-but-fresh manifest bodies, deterministic manifest rendering, and local-provider fallback behavior derived from the `gstack-main` findings.
 
 ## Post-AFO Backlog
 
