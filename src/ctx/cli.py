@@ -27,6 +27,7 @@ from ctx.config import (
     LOCAL_PROVIDERS,
     PROVIDER_DETECTED_VIA,
     PROXY_ENV_VARS,
+    estimate_cost as _estimate_cost,
     MissingApiKeyError,
     detect_provider,
     load_config,
@@ -65,56 +66,6 @@ def _format_elapsed(seconds: float) -> str:
     minutes = int(seconds // 60)
     secs = int(seconds % 60)
     return f"{minutes}m {secs}s"
-
-
-# Pricing per 1M tokens in USD.
-_PRICING_DATA: dict[str, dict] = {
-    "anthropic": {
-        "models": [
-            ("claude-3-opus", 15.0),
-            ("claude-3-sonnet", 3.0),
-            ("claude-3-haiku", 0.25),
-        ],
-        "default": 3.0,  # Sonnet pricing
-    },
-    "openai": {
-        "models": [
-            ("gpt-4o", 5.0),
-            ("gpt-4-o", 5.0),
-            ("gpt-4", 30.0),
-            ("gpt-3.5-turbo", 0.5),
-            ("gpt-3.5", 0.5),
-        ],
-        "default": 5.0,  # GPT-4o pricing
-    },
-    "ollama": {"default": 0.0},
-    "lmstudio": {"default": 0.0},
-}
-_DEFAULT_UNKNOWN_PROVIDER_PRICE = 3.0  # Default for unknown providers
-
-
-def _estimate_cost(tokens: int, provider: str, model: str) -> float:
-    """Estimate cost in USD based on tokens used and provider pricing.
-
-    Pricing is per 1M tokens (input + output averaged/estimated).
-    These are approximate prices as of early 2025.
-    """
-    provider_lower = provider.lower()
-    model_lower = model.lower()
-
-    provider_pricing = _PRICING_DATA.get(provider_lower)
-    if not provider_pricing:
-        return tokens * _DEFAULT_UNKNOWN_PROVIDER_PRICE / 1_000_000
-
-    # Local providers have a default of 0.0 and no specific models
-    if "models" not in provider_pricing:
-        return tokens * provider_pricing["default"] / 1_000_000
-
-    for model_key, price_per_million in provider_pricing["models"]:
-        if model_key in model_lower:
-            return tokens * price_per_million / 1_000_000
-
-    return tokens * provider_pricing["default"] / 1_000_000
 
 
 def _echo_cost_summary(stats: GenerateStats, provider: str, model: str) -> None:
@@ -303,6 +254,23 @@ def _exit_for_broker(broker: OutputBroker, *, json_mode: bool) -> None:
         sys.exit(1)
 
 
+def _echo_legacy_warning(
+    command_name: str,
+    replacement: str,
+    *,
+    json_mode: bool,
+    suppress: bool = False,
+) -> None:
+    """Warn humans when they invoke a hidden legacy command."""
+
+    if json_mode or suppress:
+        return
+    click.echo(
+        f"Warning: `ctx {command_name}` is deprecated. Use `ctx {replacement}` instead.",
+        err=True,
+    )
+
+
 class CtxGroup(click.Group):
     """Click group with JSON-safe global exception handling."""
 
@@ -393,13 +361,16 @@ def refresh(
         broker.set_tokens(result.tokens_used, result.est_cost_usd)
         if result.errors:
             for error in result.errors:
-                broker.add_error("partial_failure", error)
+                if result.budget_guardrail and error == result.budget_guardrail:
+                    broker.add_error("budget_exhausted", error)
+                else:
+                    broker.add_error("partial_failure", error)
 
         if not json_mode:
             if result.setup_provider:
                 click.echo(f"Detected: {result.setup_provider} ({result.setup_detected_via or result.setup_provider})")
-                if do_setup and not dry_run:
-                    click.echo(f"Config written to {Path(path) / '.ctxconfig'}")
+            if result.config_written:
+                click.echo(f"Config written to {Path(path) / '.ctxconfig'}")
             if dry_run:
                 if not result.stale_directories:
                     click.echo("All manifests are fresh. Nothing to regenerate.")
@@ -418,6 +389,9 @@ def refresh(
                 click.echo(f"Estimated cost: ${result.est_cost_usd:.2f} ({result.tokens_used:,} tokens)")
             click.echo(f"Errors: {len(result.errors)}")
             if result.errors:
+                click.echo("Error details:")
+                for error in result.errors:
+                    click.echo(f"  - {error}")
                 sys.exit(1)
     _exit_for_broker(broker, json_mode=json_mode)
 
@@ -435,6 +409,7 @@ def refresh(
 def init(ctx: click.Context, path: str, provider: Optional[str], model: Optional[str], max_depth: Optional[int], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], overwrite: bool) -> None:
     """Generate CONTEXT.md files for a directory tree."""
     json_mode = _json_mode(ctx)
+    _echo_legacy_warning("init", "refresh", json_mode=json_mode)
     with OutputBroker(command="refresh", json_mode=json_mode) as broker:
         progress_state = ProgressState(start_time=time.time())
         target_path, config, spec, client, progress_cb = _build_generation_runtime(
@@ -500,6 +475,7 @@ def init(ctx: click.Context, path: str, provider: Optional[str], model: Optional
 def update(ctx: click.Context, path: str, provider: Optional[str], model: Optional[str], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], dry_run: bool) -> None:
     """Incrementally refresh stale CONTEXT.md files."""
     json_mode = _json_mode(ctx)
+    _echo_legacy_warning("update", "refresh", json_mode=json_mode)
     with OutputBroker(command="refresh", json_mode=json_mode) as broker:
         target_path = Path(path)
         spec = load_ignore_patterns(target_path)
@@ -600,6 +576,7 @@ def status(ctx: click.Context, path: str, check_exit_code: bool) -> None:
         5. If check_exit_code is True and stale or missing > 0, sys.exit(1).
     """
     json_mode = _json_mode(ctx)
+    _echo_legacy_warning("status", "check", json_mode=json_mode)
     with OutputBroker(command="check", json_mode=json_mode) as broker:
         target_path = Path(path)
         spec = load_ignore_patterns(target_path)
@@ -797,6 +774,7 @@ def smart_update(ctx: click.Context, path: str, provider: Optional[str], model: 
     from ctx.git import get_changed_files
 
     json_mode = _json_mode(ctx)
+    _echo_legacy_warning("smart-update", "refresh", json_mode=json_mode)
     with OutputBroker(command="refresh", json_mode=json_mode) as broker:
         target_path = Path(path)
         spec = load_ignore_patterns(target_path)
@@ -906,6 +884,7 @@ def smart_update(ctx: click.Context, path: str, provider: Optional[str], model: 
 def watch(ctx: click.Context, path: str, provider: Optional[str], model: Optional[str], base_url: Optional[str], cache_path: Optional[str]) -> None:
     """Watch a directory tree and regenerate manifests on file changes."""
     json_mode = _json_mode(ctx)
+    _echo_legacy_warning("watch", "refresh --watch", json_mode=json_mode)
     with OutputBroker(command="refresh", json_mode=json_mode) as broker:
         from ctx.watcher import run_watch
 
@@ -929,6 +908,7 @@ def watch(ctx: click.Context, path: str, provider: Optional[str], model: Optiona
 def setup(ctx: click.Context, path: str, check_only: bool) -> None:
     """Auto-detect LLM provider and write .ctxconfig."""
     json_mode = _json_mode(ctx)
+    _echo_legacy_warning("setup", "refresh --setup", json_mode=json_mode)
     with OutputBroker(command="refresh", json_mode=json_mode) as broker:
         target_path = Path(path)
         config_file = target_path / ".ctxconfig"
@@ -976,9 +956,9 @@ def setup(ctx: click.Context, path: str, check_only: bool) -> None:
         base_url_value = DEFAULT_BASE_URLS.get(provider_name)
         write_default_config(target_path, provider_name, model=model_name, base_url=base_url_value)
         click.echo(f"Config written to {config_file}")
-        click.echo("\nNext step: run `ctx init .` to generate manifests.")
+        click.echo("\nNext step: run `ctx refresh .` to generate manifests.")
         broker.set_data({"configured": True, "provider": provider_name, "model": model_name})
-        broker.set_recommended_next("ctx init .")
+        broker.set_recommended_next("ctx refresh .")
     _exit_for_broker(broker, json_mode=json_mode)
 
 
@@ -1005,6 +985,7 @@ def diff(ctx: click.Context, path: str, since: Optional[str], output_format: str
     from ctx.git import is_unborn_head_error
 
     json_mode = _json_mode(ctx)
+    _echo_legacy_warning("diff", "check --diff", json_mode=json_mode, suppress=output_format == "json" or quiet)
     with OutputBroker(command="check", json_mode=json_mode) as broker:
         target_path = Path(path)
         ref = since or "HEAD"
@@ -1250,6 +1231,7 @@ def stats(ctx: click.Context, path: str, verbose: bool, output_format: str) -> N
       tokens      — sum of tokens_total from all manifest frontmatters
     """
     json_mode = _json_mode(ctx)
+    _echo_legacy_warning("stats", "check --stats", json_mode=json_mode, suppress=output_format == "json")
     with OutputBroker(command="check", json_mode=json_mode) as broker:
         root = Path(path).resolve()
         spec = load_ignore_patterns(root)
@@ -1377,6 +1359,7 @@ def reset(ctx: click.Context, path: str, yes: bool, dry_run: bool) -> None:
 def clean(ctx: click.Context, path: str, yes: bool, dry_run: bool) -> None:
     """Remove all CONTEXT.md files from the directory tree."""
     json_mode = _json_mode(ctx)
+    _echo_legacy_warning("clean", "reset", json_mode=json_mode)
     with OutputBroker(command="reset", json_mode=json_mode) as broker:
         root = Path(path).resolve()
         manifests = sorted(root.rglob("CONTEXT.md"))
@@ -1439,6 +1422,7 @@ def verify(ctx: click.Context, path: str, output_format: str) -> None:
       - Exit 0 if all manifests are valid, fresh, and present; exit 1 otherwise
     """
     json_mode = _json_mode(ctx)
+    _echo_legacy_warning("verify", "check --verify", json_mode=json_mode, suppress=output_format == "json")
     with OutputBroker(command="check", json_mode=json_mode) as broker:
         root = Path(path).resolve()
         spec = load_ignore_patterns(root)

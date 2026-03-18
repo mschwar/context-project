@@ -1,6 +1,6 @@
 # Agent-First Overhaul: Comprehensive Plan
 
-> **Status:** Draft — March 17, 2026
+> **Status:** Living plan — Stages 1–3 implemented as of March 18, 2026
 > **Authors:** Matt Schwartz, Claude (Technical Lead)
 > **Supersedes:** Phases 22–23 in `state.md`
 

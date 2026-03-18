@@ -3,11 +3,12 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–21 complete.
+- **Status:** Stable. Phases 1–21 complete; AFO Stages 1–3 implemented.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 321 tests passing across all modules.
+- **Test Coverage:** 378 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
-- **Ecosystem:** manifest server (`ctx serve`), git-aware updates (`ctx smart-update`), file watcher (`ctx watch`), CI/CD GitHub Action, Python + JS/TS + Rust + Go + Java + C# + Kotlin + Ruby + Elixir language parsers, model-aware disk cache, token budget enforcement, `--dry-run` preview, `ctx setup` auto-detection, `ctx diff` manifest change view (with `--format json`, `--quiet`, `--since`), `ctx export` (with `--filter`, `--depth`), `ctx stats` (with `--verbose`), `ctx clean`.
+- **Agent Surface:** canonical `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands backed by `src/ctx/api.py`, with hidden legacy aliases preserved for compatibility.
+- **Configuration:** full `CTX_*` env-var parity for scalar config fields, shared cost estimation, zero-config refresh bootstrap for env/local providers, and hard `max_tokens_per_run` / `max_usd_per_run` guardrails.
 
 ## Completed Milestones
 
@@ -268,18 +269,19 @@ Theme: pivot ctx from a human-operated CLI to agent-first infrastructure. Core e
 
 ### AFO Stage 2 — Unified API
 
-- [ ] **2.1 `api.py` module** — 4 public functions (`refresh`, `check`, `export_context`, `reset`) returning typed dataclasses. Zero Click dependency.
-- [ ] **2.2 Command collapse** — 12 old commands → 4 canonical + `serve`. CLI shrinks from ~1300 to ~500 lines.
-- [ ] **2.3 Hidden aliases** — old command names remain as hidden Click commands with deprecation warning in human mode only.
-- [ ] **2.4 Refresh strategy tree** — auto-selects full/smart/incremental based on manifest state and git availability.
+- [x] **2.1 `api.py` module** — 4 public functions (`refresh`, `check`, `export_context`, `reset`) returning typed dataclasses. Zero Click dependency.
+- [x] **2.2 Command collapse** — canonical `refresh` / `check` / `export` / `reset` commands now front the agent surface, with `serve` left standalone.
+- [x] **2.3 Hidden aliases** — legacy command names remain hidden, still work, and emit deprecation warnings in human mode only.
+- [x] **2.4 Refresh strategy tree** — `refresh` auto-selects full/smart/incremental based on manifest state and git availability.
 
-**Branch:** `feat/afo-stage2`
+**Branch:** `feat/afo-stage2` (verified complete; available on `main`)
 
 ### AFO Stage 3 — Non-Interactive Config
 
-- [ ] **3.1 Env var parity** — every `.ctxconfig` field gets a `CTX_*` env var.
-- [ ] **3.2 Budget guardrails** — `max_tokens_per_run` and `max_usd_per_run` in Config, hard limits not overridable via CLI flags.
-- [ ] **3.3 `estimate_cost` shared** — move from `cli.py` to `config.py`.
+- [x] **3.1 Env var parity** — scalar `.ctxconfig` fields now map to `CTX_*` env vars, including base URL, depth, token/file limits, cache controls, debounce, extensions, and hard guardrails.
+- [x] **3.2 Budget guardrails** — `max_tokens_per_run` and `max_usd_per_run` are on `Config`, enforced in `api.refresh()`, and remain intentionally unavailable as CLI flags.
+- [x] **3.3 `estimate_cost` shared** — pricing logic now lives in `config.py` and is reused by the CLI and unified API.
+- [x] **3.4 Zero-config refresh bootstrap** — `ctx refresh` now infers env-only OpenAI setups, auto-detects local providers on unconfigured repos, writes `.ctxconfig` when needed, and lets dry-run/check-style refresh paths load config without API keys.
 
 **Branch:** `feat/afo-stage3`
 
@@ -313,4 +315,4 @@ After all 6 stages land: bump `__version__` from `0.8.0` to `1.0.0`.
 
 ## Post-AFO Backlog
 
-- [ ] **Error taxonomy: `confirmation_required` code** — `reset` without `--yes` in JSON mode currently uses `unknown_error` (the spec fallback). Consider adding a dedicated error code so agents can distinguish "missing flag" from "bug." Revisit when building `api.py` in Stage 2.
+- [ ] **Legacy command docs cleanup in ancillary specs** — sweep remaining AFO reference docs/examples that still show legacy command names where the canonical `refresh` / `check` surface should be primary.

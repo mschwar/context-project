@@ -99,7 +99,7 @@ def test_setup_writes_config_when_none_exists(tmp_path, monkeypatch) -> None:
     assert (tmp_path / ".ctxconfig").exists()
     assert "anthropic" in (tmp_path / ".ctxconfig").read_text(encoding="utf-8")
     assert "Config written" in result.output
-    assert "ctx init ." in result.output
+    assert "ctx refresh ." in result.output
 
 
 def test_setup_aborts_when_user_declines_overwrite(tmp_path, monkeypatch) -> None:

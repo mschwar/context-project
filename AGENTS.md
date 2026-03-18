@@ -10,10 +10,12 @@ Build and maintain `ctx`, a filesystem-native context layer that generates recur
 - **LLM Clients**: Anthropic and OpenAI supported (including Ollama and LM Studio). **BitNet is deprecated** — `create_client("bitnet")` raises an informative error directing users to Ollama or LM Studio.
 - **Language Parsers**: Python (`ast`-based), JavaScript/TypeScript, Rust, Go, Java, C#, Kotlin, Ruby, PHP, Swift, and Elixir. Wired into `generator._prepare_file_entry`; metadata is passed to the LLM prompt for richer summaries.
 - **File Watcher**: `ctx watch` — OS-native file watcher via `watchdog`. CONTEXT.md writes excluded to prevent infinite loops. 0.5 s per-file debounce.
-- **Test Coverage**: 321 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, `java_parser`, `csharp_parser`, `kotlin_parser`, `ruby_parser`, `php_parser`, `swift_parser`, `elixir_parser`, integration).
+- **Test Coverage**: 378 tests across all modules (`cli`, `config`, `generator`, `hasher`, `ignore`, `llm`, `manifest`, `server`, `language_detector`, `python_parser`, `js_ts_parser`, `rust_parser`, `go_parser`, `watcher`, `java_parser`, `csharp_parser`, `kotlin_parser`, `ruby_parser`, `php_parser`, `swift_parser`, `elixir_parser`, integration).
+- **Agent Surface**: canonical `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands are live; hidden legacy aliases remain for compatibility and warn in human mode.
+- **Configuration**: scalar `.ctxconfig` fields have `CTX_*` env var parity; `ctx refresh` supports zero-config bootstrap for env/local providers; hard `max_tokens_per_run` / `max_usd_per_run` guardrails are enforced outside the CLI flag surface.
 - **Documentation**: `architecture.md`, `rules.md`, `state.md`, `RUNBOOK.md`, `CONTRIBUTING.md`, and `PHASE16_HANDOFF.md` define the system and current execution order.
 
-> **Branch notice**: As of March 17, 2026, Phases 1–21 are complete on `main`. Phase 22 is the active development phase. New work should branch from `main`.
+> **Branch notice**: Phases 22–23 were superseded by the Agent-First Overhaul (AFO). New work should branch from `main` and follow the active AFO stage tracked in `state.md`.
 
 > **Manifest refresh rule**: Any commit that adds or modifies source files must include a `ctx update .` pass to regenerate stale `CONTEXT.md` files before pushing. The `CTX Manifest Check` CI job enforces this and will fail otherwise.
 
