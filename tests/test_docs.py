@@ -67,8 +67,7 @@ def test_workflow_patterns_use_canonical_check_commands() -> None:
     assert "ctx check . --check-exit" in pre_commit
     assert "status . --check-exit-code" not in pre_commit
 
-    assert "python -m ctx check . --check-exit" in workflow
-    assert "CTX_OUTPUT: json" in workflow
+    assert "CTX_OUTPUT=json python -m ctx check . --check-exit" in workflow
     assert "status . --check-exit-code" not in workflow
 
     assert "### Session-End Manifest Refresh" in agents
