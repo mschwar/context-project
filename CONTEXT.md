@@ -1,29 +1,29 @@
 ---
-generated: '2026-03-18T20:38:48Z'
+generated: '2026-03-18T20:45:53Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:56fdc501756e2d1141071aaa6cef2f925824dd53e288d7d2c7f000a1ee6ca1e5
+content_hash: sha256:23bee866922bf0a11ea91aedca3bb4864391fff40fa810c10bbbe7f9c43292c3
 files: 19
 dirs: 8
-tokens_total: 15076
+tokens_total: 15036
 ---
 # C:/Users/Matty/Documents/context-project
 
-A Python CLI tool and agent-first infrastructure system that generates hierarchical CONTEXT.md manifests to enable AI agents to navigate and understand directory structures efficiently.
+A Python CLI tool and agent-first infrastructure project that generates hierarchical CONTEXT.md manifests to enable AI agents to navigate and understand directory structures autonomously.
 
 ## Files
 
 - **.ctxignore.default** — Default ignore patterns for ctx tool, excluding version control, dependencies, IDE files, and temporary artifacts.
 - **.gitattributes** — Configures Git to auto-detect text files and normalize line endings to LF.
 - **.gitignore** — Specifies files and directories to exclude from version control and context generation.
-- **.pre-commit-hooks.yaml** — Pre-commit hook configuration that checks if ctx manifests are fresh before commits.
+- **.pre-commit-hooks.yaml** — Pre-commit hook configuration that validates CONTEXT.md manifests are fresh before commits.
 - **=4.0** — Empty or malformed file with no discernible purpose.
-- **AGENTS.md** — Documentation of ctx tool features, configuration, commands, error codes, and manifest format for agent integration.
-- **AGENT_FIRST_OVERHAUL.md** — Comprehensive plan for reorienting ctx as agent-first infrastructure with six staged rollout phases.
+- **AGENTS.md** — Comprehensive agent-oriented documentation covering ctx installation, configuration, commands, error codes, and integration patterns.
+- **AGENT_FIRST_OVERHAUL.md** — Living plan for agent-first infrastructure overhaul with six implementation stages to make ctx autonomous and machine-consumable.
 - **CONTRIBUTING.md** — Developer workflow guidelines for agentic SDLC including context maintenance, implementation blocks, and test-driven autonomy.
 - **GATE_CLOSEOUT.md** — Defines the mandatory closeout sequence for each project phase, including validation, reflection, suggestion disposition, and founder sign-off.
 - **README.md** — Quick-start guide directing users to install ctx-tool, set API keys, and consult AGENTS.md for command contract.
-- **RUNBOOK.md** — Operational runbook covering installation, CLI usage, testing, release publishing, and common failure modes.
+- **RUNBOOK.md** — Operational runbook documenting how to run tests, use CLI commands, publish releases, and troubleshoot common failures.
 - **architecture.md** — System design overview covering bottom-up generation, content hashing, and component responsibilities.
 - **commitlint.config.mjs** — Configuration file specifying commitlint extends conventional commit rules.
 - **mcp.json** — MCP server configuration file exposing ctx as a Model Context Protocol service for agent integration.
@@ -31,7 +31,7 @@ A Python CLI tool and agent-first infrastructure system that generates hierarchi
 - **package.json** — Node.js package metadata and development dependencies for the ctx project.
 - **pyproject.toml** — Python package metadata defining ctx-tool distribution with dependencies, entry points, and optional extras.
 - **rules.md** — Engineering standards and agentic rules for code quality, testing, and manifest protocol compliance.
-- **state.md** — Development status document tracking completed phases, milestones, and current health of the ctx project as of March 2026.
+- **state.md** — Development status tracking current health, completed milestones through Phase 21, and upcoming roadmap phases with implementation details.
 
 ## Subdirectories
 
@@ -42,13 +42,12 @@ A Python CLI tool and agent-first infrastructure system that generates hierarchi
 - **docs/** — Documentation and architectural specifications including design decisions and implementation guidelines.
 - **documents/** — Strategic planning and architectural thesis documents focusing on agent-first design principles and system overhaul strategies.
 - **src/** — Source code for the context management system that generates and maintains filesystem-native documentation for AI agents.
-- **tests/** — Comprehensive test suite covering unit, integration, and end-to-end testing for the context manifest generation system.
+- **tests/** — Comprehensive test suite covering unit, integration, and end-to-end testing for CLI, API, parsers, and core functionality.
 
 ## Notes
 
-- The project uses a multi-layered documentation strategy: AGENTS.md and RUNBOOK.md serve as user-facing references, while CONTRIBUTING.md and rules.md guide developer workflows in an agentic SDLC model.
-- Git hooks are configured at multiple levels (.githooks, .husky) to enforce manifest freshness and conventional commits before code integration.
-- The project exposes ctx as both a CLI tool (via pyproject.toml entry points) and an MCP server (via mcp.json), enabling agent integration across multiple interfaces.
-- GATE_CLOSEOUT.md and AGENT_FIRST_OVERHAUL.md indicate a structured, phase-gated development approach with explicit rollout and validation sequences.
-- State tracking (state.md) and archive materials suggest active iteration on the agent-first infrastructure model with historical decision documentation.
+- The project follows an agent-first architecture with dual packaging (Python via pyproject.toml and Node.js via package.json) to support both CLI and MCP server integration.
+- Git hooks are enforced through both .githooks and .husky directories with pre-commit validation of CONTEXT.md freshness.
+- Development workflow is governed by CONTRIBUTING.md and GATE_CLOSEOUT.md, establishing structured phases with mandatory validation and founder sign-off.
+- The state.md file tracks progress through 21+ implementation phases, indicating an iterative, milestone-driven development approach.
 <!-- Generated by ctx (https://pypi.org/project/ctx-tool/) -->

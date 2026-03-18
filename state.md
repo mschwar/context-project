@@ -3,9 +3,9 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–21 complete; AFO Stages 1–5 implemented.
+- **Status:** Stable. Phases 1–21 complete; AFO Stages 1–6 implemented.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 405 tests passing across all modules.
+- **Test Coverage:** 406 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
 - **Agent Surface:** canonical `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands backed by `src/ctx/api.py`, with hidden legacy aliases preserved for compatibility.
 - **Configuration:** full `CTX_*` env-var parity for scalar config fields, shared cost estimation, zero-config refresh bootstrap for env/local providers, and hard `max_tokens_per_run` / `max_usd_per_run` guardrails.
@@ -304,8 +304,8 @@ Theme: pivot ctx from a human-operated CLI to agent-first infrastructure. Core e
 
 ### AFO Stage 6 — Workflow Patterns
 
-- [ ] **6.1 Pre-commit hook** — update `.pre-commit-hooks.yaml` to `ctx check . --check-exit`.
-- [ ] **6.2 CI workflow** — update `.github/workflows/ctx-check.yml` with canonical commands.
+- [x] **6.1 Pre-commit hook** — `.pre-commit-hooks.yaml` now uses `ctx check . --check-exit`.
+- [x] **6.2 CI workflow** — `.github/workflows/ctx-check.yml` now uses `python -m ctx check . --check-exit` with `CTX_OUTPUT=json`.
 
 **Branch:** `feat/afo-stage6`
 

@@ -41,7 +41,7 @@ Update stale manifests based on content changes.
 ctx refresh /path/to/project
 ```
 
-> **Before pushing:** always run `ctx refresh .` and commit the resulting `CONTEXT.md` changes alongside your code. The `CTX Manifest Check` CI job currently runs the legacy equivalent `ctx status . --check-exit-code`; the canonical health command is `ctx check . --check-exit`.
+> **Before pushing:** always run `ctx refresh .` and commit the resulting `CONTEXT.md` changes alongside your code. The pre-commit hook and `CTX Manifest Check` CI job both use `ctx check . --check-exit`, which is the canonical freshness gate.
 
 ### Check status
 See how many manifests are stale or missing.

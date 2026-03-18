@@ -1,4 +1,4 @@
-"""Documentation and package metadata checks for Stage 5."""
+"""Documentation and package metadata checks for Stage 6."""
 
 from __future__ import annotations
 
@@ -56,6 +56,27 @@ def test_readme_is_demoted_and_short() -> None:
     assert "[AGENTS.md](./AGENTS.md)" in text
     assert "pip install ctx-tool" in text
     assert "ctx refresh ." in text
+
+
+def test_workflow_patterns_use_canonical_check_commands() -> None:
+    pre_commit = (REPO_ROOT / ".pre-commit-hooks.yaml").read_text(encoding="utf-8")
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ctx-check.yml").read_text(encoding="utf-8")
+    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    runbook = (REPO_ROOT / "RUNBOOK.md").read_text(encoding="utf-8")
+
+    assert "ctx check . --check-exit" in pre_commit
+    assert "status . --check-exit-code" not in pre_commit
+
+    assert "CTX_OUTPUT=json python -m ctx check . --check-exit" in workflow
+    assert "status . --check-exit-code" not in workflow
+
+    assert "### Session-End Manifest Refresh" in agents
+    assert "### First 3 Commands" in agents
+    assert "### Natural Language Triggers" in agents
+    assert "CTX_OUTPUT=json python -m ctx check . --check-exit" in agents
+    assert "`update ctx` / `update context` / `refresh manifests`" in agents
+
+    assert "pre-commit hook and `CTX Manifest Check` CI job both use `ctx check . --check-exit`" in runbook
 
 
 def test_pyproject_agent_metadata_present() -> None:

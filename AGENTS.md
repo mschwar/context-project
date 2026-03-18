@@ -250,10 +250,31 @@ ctx check . --check-exit --output json
 ctx export . --depth 1 --output json
 ```
 
+### Session-End Manifest Refresh
+
+Before ending a coding session that changed source files:
+
+```bash
+ctx refresh .
+ctx check . --check-exit
+```
+
+If `ctx check` still reports stale manifests, rerun `ctx refresh . --force` on the affected path.
+
+### First 3 Commands
+
+When an incoming agent lands in an unfamiliar repo:
+
+```bash
+ctx check . --output json
+ctx refresh . --output json
+ctx export . --depth 1 --output json
+```
+
 ### CI Freshness Gate
 
 ```bash
-ctx check . --check-exit
+CTX_OUTPUT=json python -m ctx check . --check-exit
 ```
 
 ### Pre-commit Hook
@@ -264,7 +285,16 @@ repos:
     rev: v0.8.0
     hooks:
       - id: ctx-check
+        entry: ctx check . --check-exit
 ```
+
+### Natural Language Triggers
+
+| User phrase | Canonical command |
+|-------------|-------------------|
+| `update ctx` / `update context` / `refresh manifests` | `ctx refresh .` |
+| `check ctx` / `is context fresh` | `ctx check .` |
+| `show me the context` / `what's in this repo` | `ctx export . --depth 1` |
 
 ### HTTP Manifest Server (optional)
 
