@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-18T18:17:52Z'
+generated: '2026-03-18T18:26:26Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:4c2874d4cb4bed47a9b86a6cfec18c425d5e3369e357de72a03b7417686c07ba
+content_hash: sha256:a03e0ac31a561656bb284f09001bf8a3dc579726f656e3522da19daa46ba3d1d
 files: 18
 dirs: 9
 tokens_total: 15270
 ---
 # C:/Users/Matty/Documents/context-project
 
-A filesystem-native manifest system that generates persistent CONTEXT.md files to enable AI agents to navigate and understand large codebases through hierarchical directory summaries.
+A filesystem-native context layer tool (ctx) that generates persistent CONTEXT.md manifests to enable AI agents to navigate and understand large codebases without reading raw files.
 
 ## Files
 
@@ -18,7 +18,7 @@ A filesystem-native manifest system that generates persistent CONTEXT.md files t
 - **.gitignore** — Specifies files and directories to exclude from version control and context generation.
 - **.pre-commit-hooks.yaml** — Pre-commit hook configuration that checks if ctx manifests are fresh before commits.
 - **=4.0** — Empty or malformed file with no discernible purpose.
-- **AGENTS.md** — Canonical onboarding and workflow contract for agents contributing to ctx, defining mission, current state, rules, and SDLC guardrails.
+- **AGENTS.md** — Canonical onboarding and workflow contract for agents contributing to ctx, defining mission, current state, rules, required behavior, and SDLC guardrails.
 - **AGENT_FIRST_OVERHAUL.md** — Comprehensive plan for Agent-First Overhaul reframing ctx as autonomous agent infrastructure with six staged rollout phases.
 - **CONTRIBUTING.md** — Guidelines for contributing to ctx with agentic SDLC principles and test-driven development.
 - **GATE_CLOSEOUT.md** — Defines the mandatory closeout sequence for each project phase, including validation, reflection, suggestion disposition, and founder sign-off.
@@ -30,24 +30,24 @@ A filesystem-native manifest system that generates persistent CONTEXT.md files t
 - **package.json** — Node.js package metadata and development dependencies for the ctx project.
 - **pyproject.toml** — Python project configuration specifying dependencies, entry points, and build system.
 - **rules.md** — Engineering standards and agentic rules for code quality, testing, and manifest protocol compliance.
-- **state.md** — Development status and completed milestones tracking ctx's evolution from foundation through Phase 9, with current health and roadmap.
+- **state.md** — Development status tracker documenting completed milestones, current health, and active phases for the ctx filesystem-native context layer project.
 
 ## Subdirectories
 
 - **.claude/** — Configuration directory storing local settings and permissions for the context project's Claude integration.
-- **.githooks/** — Git hooks directory for automated pre-commit testing and validation.
-- **.github/** — GitHub configuration and automation for the context-project repository.
-- **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
+- **.githooks/** — Git hooks that enforce automated testing and code quality checks before commits are made to the repository.
+- **.github/** — GitHub configuration files and automation workflows that support CI/CD processes and custom actions for the context-project.
+- **.husky/** — Git hooks that enforce code quality standards and branching workflows through automated validation at commit and push stages.
 - **archive/** — Design documents, AI analysis, and planning materials for the ctx project.
-- **docs/** — Architectural documentation and design specifications for the context-project.
-- **documents/** — Strategic planning and architectural thesis documents focusing on agent-first design philosophy and system overhaul strategies.
-- **src/** — Source code for the filesystem-native context layer that generates and maintains CONTEXT.md manifests through LLM-powered directory summarization.
-- **tests/** — Comprehensive test suite covering unit, integration, and end-to-end testing for CLI, API, parsers, and core generation workflows.
+- **docs/** — Documentation and architectural specifications for the context-project, including design decisions and implementation guidelines.
+- **documents/** — Strategic planning and architectural thesis documents for the context-project, focusing on agent-first design principles and system overhaul strategies.
+- **src/** — Source code for a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agent documentation.
+- **tests/** — Comprehensive test suite covering unit, integration, and end-to-end testing for the context manifest generation system, including CLI, parsers, configuration, and LLM integration.
 
 ## Notes
 
-- The project uses a hybrid tech stack with Python (core generation engine) and Node.js (development tooling and Git hooks).
-- Agentic SDLC principles are central to the project philosophy; see AGENTS.md and CONTRIBUTING.md for workflow contracts and guardrails.
-- Pre-commit hooks enforce manifest freshness and conventional commit standards via Husky and commitlint.
-- Phase-gated development with mandatory closeout sequences defined in GATE_CLOSEOUT.md ensures structured progression and founder validation.
-- The Agent-First Overhaul represents a major architectural shift; see AGENT_FIRST_OVERHAUL.md and state.md for roadmap and current phase status.
+- The project enforces agentic SDLC principles through AGENTS.md, CONTRIBUTING.md, and rules.md, establishing a contract for agent-driven development workflows.
+- Git hooks (.githooks, .husky) and pre-commit configuration enforce manifest freshness and conventional commits before code integration.
+- Dual language support: Python (pyproject.toml, src/) for core CLI and Node.js (package.json) for development tooling and Git automation.
+- State tracking (state.md) and gate closeout procedures (GATE_CLOSEOUT.md) provide phase-based project governance and validation checkpoints.
+- Archive and documents directories preserve design evolution and strategic planning artifacts separate from active source and documentation.

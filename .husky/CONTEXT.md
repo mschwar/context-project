@@ -1,21 +1,21 @@
 ---
-generated: '2026-03-14T21:12:36Z'
-generator: ctx/0.1.0
+generated: '2026-03-18T18:25:33Z'
+generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:a2431413ad3eac49579ba6cff51e5f71bcbb877f13d2412901d76fbdad40a1ba
+content_hash: sha256:1d26177144e9831bcaa5b36aa7df67228e20cd02b16fa727237ecdf62c162bc9
 files: 3
 dirs: 0
-tokens_total: 174
+tokens_total: 200
 ---
 # C:/Users/Matty/Documents/context-project/.husky
 
-Husky configuration directory containing Git hooks for commit message validation and branch protection.
+This directory contains Git hooks that enforce code quality standards and branching workflows through automated validation at commit and push stages.
 
 ## Files
 
-- **commit-msg** — Git hook that validates commit messages using commitlint.
-- **pre-commit** — Git hook that prevents direct commits to main or master branches.
-- **pre-push** — Git hook that prevents direct pushes to main or master branches.
+- **commit-msg** — Git hook validating commit messages against conventional commit standards using commitlint.
+- **pre-commit** — Git hook preventing direct commits to main or master branches, enforcing feature branch workflow.
+- **pre-push** — Git hook preventing direct pushes to main or master branches, requiring pull request workflow.
 
 ## Subdirectories
 
@@ -23,4 +23,5 @@ Husky configuration directory containing Git hooks for commit message validation
 
 ## Notes
 
-- These hooks enforce commit message standards and protect primary branches from direct modifications.
+- These hooks work together to enforce a pull request-based workflow: commits are restricted to feature branches, commit messages must follow conventional commit format, and pushes to protected branches are blocked.
+- Husky manages these Git hooks, ensuring they are installed and executed consistently across all developer environments.

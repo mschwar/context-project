@@ -1,19 +1,19 @@
 ---
-generated: '2026-03-14T05:54:51Z'
-generator: ctx/0.1.0
+generated: '2026-03-18T18:25:31Z'
+generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:f85fea4453e7e1deb6b8b3e3b0fdd75888be8fa0a61d5519fdcde5983304d592
+content_hash: sha256:5afc0e54b6b49a5385aa3858670ecfbf72c363d21eaa4eb0203d8c782417e21f
 files: 1
 dirs: 0
-tokens_total: 35
+tokens_total: 40
 ---
 # C:/Users/Matty/Documents/context-project/.githooks
 
-Git hooks directory for automated pre-commit testing and validation.
+This directory contains Git hooks that enforce automated testing and code quality checks before commits are made to the repository.
 
 ## Files
 
-- **pre-commit** — Bash script that runs pytest with quiet output and short traceback before commits
+- **pre-commit** — Git pre-commit hook that runs pytest with quiet output and short traceback format before commits.
 
 ## Subdirectories
 
@@ -21,4 +21,5 @@ Git hooks directory for automated pre-commit testing and validation.
 
 ## Notes
 
-- Git hooks in this directory require proper permissions and configuration to execute automatically
+- The pre-commit hook enforces test passage as a gating mechanism for commits, reducing the likelihood of broken code entering the repository.
+- This hook should be installed into the Git hooks directory (typically `.git/hooks/`) to be active; consider documenting setup instructions in the project README.

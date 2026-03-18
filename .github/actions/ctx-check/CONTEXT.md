@@ -1,19 +1,19 @@
 ---
-generated: '2026-03-14T05:54:40Z'
-generator: ctx/0.1.0
+generated: '2026-03-18T18:25:19Z'
+generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:b256a294c350a6dac91d4c9704adce34e25cf2bbe0180b5d8e3c8f47d79b3467
+content_hash: sha256:42a4d0a6019d0e7b78f4b6aefa77516be9eb6a37f4c91d84857da17e182b4160
 files: 1
 dirs: 0
-tokens_total: 247
+tokens_total: 242
 ---
 # C:/Users/Matty/Documents/context-project/.github/actions/ctx-check
 
-GitHub Action that validates freshness of CONTEXT.md files in a ctx project using Python-based status checks.
+A GitHub Action that validates the freshness and correctness of CONTEXT.md files in ctx projects.
 
 ## Files
 
-- **action.yml** — GitHub Action configuration that checks if CONTEXT.md files are fresh in a ctx project by running status checks with Python.
+- **action.yml** — GitHub Action that validates CONTEXT.md freshness in ctx projects by running status checks.
 
 ## Subdirectories
 
@@ -21,6 +21,5 @@ GitHub Action that validates freshness of CONTEXT.md files in a ctx project usin
 
 ## Notes
 
-- This is a custom GitHub Action for the context-project workflow
-- Requires Python environment to execute status checks
-- Designed to ensure CONTEXT.md documentation stays current
+- This action is designed to integrate into GitHub workflows as a reusable action for automated CONTEXT.md validation.
+- Part of the broader ctx project's CI/CD pipeline to ensure documentation stays synchronized with codebase changes.

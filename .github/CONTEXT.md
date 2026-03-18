@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-14T22:42:46Z'
+generated: '2026-03-18T18:25:30Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:47a47d5aae904c3cef433706a03914bb017cc6ee71009e9e6c8acc929a83ec01
+content_hash: sha256:474decd03332b8fb7e76030a25f9824007e9a760d84d035d910d53e968389cef
 files: 0
 dirs: 2
 tokens_total: 0
 ---
 # C:/Users/Matty/Documents/context-project/.github
 
-GitHub configuration and automation for the context-project repository.
+This directory contains GitHub configuration files and automation workflows that support CI/CD processes and custom actions for the context-project.
 
 ## Files
 
@@ -17,9 +17,10 @@ GitHub configuration and automation for the context-project repository.
 
 ## Subdirectories
 
-- **actions/** — GitHub Actions for the context-project workflow automation.
-- **workflows/** — Contains GitHub Actions workflows that automate testing, validation, and publishing for the context-project.
+- **actions/** — This directory contains custom GitHub Actions that support automation and validation workflows for the context-project.
+- **workflows/** — This directory contains GitHub Actions workflows that automate CI/CD processes including manifest validation, testing, pull request checks, and package publishing.
 
 ## Notes
 
-- This directory follows the standard GitHub repository structure for storing workflow definitions and custom actions.
+- The `.github` directory follows GitHub's standard convention for repository-level configuration and automation.
+- Custom actions in `actions/` are likely consumed by workflows in `workflows/` to support the CI/CD pipeline.

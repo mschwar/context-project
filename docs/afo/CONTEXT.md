@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-18T08:19:33Z'
+generated: '2026-03-18T18:25:24Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:2bca68f40c82d357115cdbb429491ccab84c5cf231a1909eca1293cf6bb68c82
+content_hash: sha256:2759dbf45f021ca16cafdcd677e6a72fd4068e311cffde488ce769d28b5a1b32
 files: 8
 dirs: 0
 tokens_total: 16226
 ---
 # C:/Users/Matty/Documents/context-project/docs/afo
 
-Architecture and design specifications for the ctx command-line tool, covering JSON envelope conventions, API unification, concurrency safety, MCP server integration, and agent workflows.
+Architecture and design specifications for the ctx command-line tool, covering JSON output conventions, API unification, concurrency safety, MCP server integration, and agent workflows.
 
 ## Files
 
@@ -28,5 +28,6 @@ Architecture and design specifications for the ctx command-line tool, covering J
 
 ## Notes
 
-- These specifications form a coherent architecture: conventions (00) establish the JSON envelope contract, output-broker (01) implements structured output, unified-api (02) simplifies the command surface, config (03) handles initialization, concurrency (04) ensures safety, mcp-server (05) enables tool integration, docs (06) provides agent discovery, and workflows (07) demonstrate real-world usage patterns.
-- The progression from low-level concerns (envelopes, output) to high-level patterns (workflows) suggests these should be implemented in order.
+- These specifications form a coherent architecture: conventions (00) establish the JSON contract, OutputBroker (01) implements it, the unified API (02) simplifies the CLI surface, config (03) handles initialization, concurrency (04) ensures safety, MCP (05) enables tool integration, and docs/discovery (06) + workflows (07) guide adoption.
+- The progression from low-level concerns (output formatting, locking) to high-level patterns (agent workflows) suggests these should be implemented in order.
+- Cross-module dependencies: OutputBroker depends on conventions; unified API depends on both; MCP server depends on unified API; workflows depend on all prior layers.

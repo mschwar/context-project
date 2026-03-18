@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-18T18:17:42Z'
+generated: '2026-03-18T18:25:42Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:e81eb6f5d0576bfcf5b73f1c5749b4acb7ba7e23c70bede8c534a14af5f13177
+content_hash: sha256:c36d10905a7a4c740c48799d874f0be877bd95261f74f382aa284b28555dc16a
 files: 34
 dirs: 1
-tokens_total: 33538
+tokens_total: 33626
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Comprehensive test suite covering unit, integration, and end-to-end testing for the context project's CLI, API, parsers, and core generation workflows.
+Comprehensive test suite covering unit, integration, and end-to-end testing for the context manifest generation system, including CLI, parsers, configuration, and LLM integration.
 
 ## Files
 
@@ -25,7 +25,7 @@ Comprehensive test suite covering unit, integration, and end-to-end testing for 
 - **test_generator.py** — Unit tests for the generation engine covering manifest creation, tree traversal, staleness detection, and token budget enforcement.
 - **test_git.py** — Unit tests for Git integration covering changed file detection, staged/unstaged deduplication, and unborn HEAD handling.
 - **test_go_parser.py** — Tests for Go language parser extracting functions, types, constants, and variables.
-- **test_hasher.py** — Tests for file and directory content hashing with ignore pattern support.
+- **test_hasher.py** — Unit tests for file and directory hashing functionality covering basic hashing, line ending normalization, ignore patterns, symlink loops, and staleness detection.
 - **test_ignore.py** — Tests for ignore pattern loading, merging, and path matching against default and user-defined ignore files.
 - **test_integration.py** — End-to-end integration tests verifying manifest generation workflow using a fake LLM client on sample project fixture.
 - **test_java_parser.py** — Tests Java parser extraction of public classes, interfaces, enums, records, and methods with modifiers.
@@ -54,7 +54,7 @@ Comprehensive test suite covering unit, integration, and end-to-end testing for 
 
 ## Notes
 
-- Test organization mirrors core module structure: parsers (language-specific), CLI/API, generation engine, and infrastructure (Git, hashing, locking).
-- Parser tests follow a consistent pattern across 10+ languages, validating extraction of language-specific constructs.
-- Integration tests use conftest fixtures for isolated filesystem environments and fake LLM clients to avoid external dependencies.
-- Compatibility tests ensure backward compatibility with legacy CLI surfaces alongside canonical commands.
+- Test organization mirrors core module structure with dedicated test files for each language parser, CLI command, and major subsystem.
+- conftest.py provides shared pytest fixtures for filesystem isolation and temporary directory management across all tests.
+- Integration tests in test_integration.py and test_cli.py validate end-to-end workflows using sample fixtures.
+- Language parser tests (test_*_parser.py) follow consistent patterns for extraction validation across 10+ supported languages.
