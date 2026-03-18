@@ -144,7 +144,7 @@ def test_refresh_applies_max_tokens_per_run_guardrail(tmp_path, monkeypatch) -> 
 
     result = api_module.refresh(tmp_path)
 
-    assert captured_config is not None
+    assert isinstance(captured_config, Config)
     assert captured_config.token_budget == 5
     assert result.budget_exhausted is True
     assert result.budget_guardrail is not None

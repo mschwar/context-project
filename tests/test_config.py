@@ -242,11 +242,11 @@ def test_load_config_env_parity_for_scalar_fields(monkeypatch, tmp_path) -> None
     assert config.max_depth == 5
     assert config.token_budget == 20000
     assert config.max_tokens_per_run == 15000
-    assert config.max_usd_per_run == 0.75
+    assert config.max_usd_per_run == pytest.approx(0.75)
     assert config.batch_size == 4
     assert config.cache_path == ""
     assert config.max_cache_entries == 5000
-    assert config.watch_debounce_seconds == 1.5
+    assert config.watch_debounce_seconds == pytest.approx(1.5)
     assert config.extensions == [".py", ".md"]
 
 
@@ -318,9 +318,9 @@ def test_load_config_reads_guardrails_from_ctxconfig(monkeypatch, tmp_path) -> N
     config = load_config(tmp_path)
 
     assert config.max_tokens_per_run == 12345
-    assert config.max_usd_per_run == 0.25
+    assert config.max_usd_per_run == pytest.approx(0.25)
 
 
 def test_estimate_cost_shared_helper() -> None:
     assert 2.5 < estimate_cost(1_000_000, "anthropic", "claude-3-sonnet") < 3.5
-    assert estimate_cost(1_000_000, "ollama", "llama3.2") == 0.0
+    assert estimate_cost(1_000_000, "ollama", "llama3.2") == pytest.approx(0.0)

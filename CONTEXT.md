@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-18T18:45:49Z'
+generated: '2026-03-18T18:50:42Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:075de21e5b4404ad3d6a234de522f77f4dabae3297ba67a293dca8fb097c9dad
+content_hash: sha256:281690ac721ad50c5e16fae9239bd34d157d3e0b949a26b603d1f88cbb5ad3f8
 files: 18
 dirs: 8
 tokens_total: 15290
@@ -41,12 +41,12 @@ A Python CLI tool and filesystem-native context layer that generates hierarchica
 - **docs/** — Documentation and architectural specifications for the context-project, including design decisions and implementation guidelines.
 - **documents/** — Strategic planning and architectural thesis documents for the context-project, focusing on agent-first design principles and system overhaul strategies.
 - **src/** — Source code for a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agent documentation.
-- **tests/** — Comprehensive test suite covering unit, integration, and end-to-end testing for the context manifest generation system, including CLI, parsers, configuration, and LLM integration.
+- **tests/** — Comprehensive test suite covering unit, integration, and end-to-end testing for the context project's CLI, API, parsers, and core functionality.
 
 ## Notes
 
 - The project enforces agentic SDLC principles through AGENTS.md, CONTRIBUTING.md, and rules.md, establishing a contract for agent-driven development workflows.
 - Git hooks (.githooks, .husky) and pre-commit configuration ensure manifest freshness and code quality before commits.
-- Dual package management (Node.js and Python) reflects tooling for linting/hooks (JavaScript) and core CLI implementation (Python).
-- The Agent-First Overhaul represents a major architectural shift; state.md tracks progress through staged rollout phases.
-- GATE_CLOSEOUT.md defines mandatory phase closeout sequences, integrating validation and founder sign-off into the development lifecycle.
+- Dual language support: Python (pyproject.toml, src/) for core CLI and Node.js (package.json) for development tooling (commitlint, Husky).
+- State tracking (state.md) and gate closeout procedures (GATE_CLOSEOUT.md) provide visibility into project phases and mandatory validation checkpoints.
+- Archive and documents directories preserve design evolution and strategic planning artifacts separate from active source code.

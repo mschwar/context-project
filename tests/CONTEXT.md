@@ -1,22 +1,22 @@
 ---
-generated: '2026-03-18T18:45:37Z'
+generated: '2026-03-18T18:50:35Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:4400cd9867ad309cbb8f9f9596d20d0d4adaf35dedaed75676c30de1660c606d
+content_hash: sha256:56cca88bceb0f59303fd3bbbba2973274b292205b6f52096a726a249e3f2b352
 files: 34
 dirs: 1
 tokens_total: 33680
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Comprehensive test suite covering unit, integration, and end-to-end testing for the context manifest generation system, including CLI, parsers, configuration, and LLM integration.
+Comprehensive test suite covering unit, integration, and end-to-end testing for the context project's CLI, API, parsers, and core functionality.
 
 ## Files
 
 - **__init__.py** — Package initialization file for tests directory.
 - **conftest.py** — Pytest fixtures for isolated filesystem tests and temporary directory management.
 - **test_agent_handoff.py** — Unit tests for agent handoff workflow validating ctx export and ctx serve as context sources for agent navigation.
-- **test_api.py** — Unit tests for the unified API module covering refresh strategies, guardrails, and provider detection.
+- **test_api.py** — Unit tests for the unified API module covering refresh strategies, configuration, guardrails, and export/reset operations.
 - **test_cli.py** — Integration tests for CLI commands verifying dependency wiring, output formatting, and end-to-end workflows.
 - **test_cli_compat.py** — Compatibility tests ensuring legacy command surfaces remain functional and match canonical commands.
 - **test_config.py** — Unit tests for configuration loading from files, environment variables, and CLI arguments with precedence rules.
@@ -54,8 +54,8 @@ Comprehensive test suite covering unit, integration, and end-to-end testing for 
 
 ## Notes
 
-- Test organization mirrors core module structure with dedicated test files for each language parser (Python, JavaScript/TypeScript, Go, Rust, Java, C#, PHP, Ruby, Kotlin, Swift, Elixir).
-- conftest.py provides shared pytest fixtures for filesystem isolation and temporary directory management across all tests.
-- Integration tests in test_integration.py and test_cli.py validate end-to-end workflows using sample project fixtures.
-- Parser tests validate language-specific extraction of public APIs, type definitions, and structural elements.
-- Configuration and CLI tests verify precedence rules, dependency injection, and output formatting.
+- Test organization mirrors the main codebase structure with dedicated test modules for each parser language (Python, JavaScript/TypeScript, Go, Rust, Java, Kotlin, C#, PHP, Ruby, Swift, Elixir).
+- Parser tests validate extraction of language-specific constructs (classes, functions, interfaces, enums, etc.) and serve as regression guards for AST parsing logic.
+- Integration tests use a fake LLM client and sample project fixtures to verify end-to-end manifest generation workflows.
+- CLI and API tests verify dependency injection, configuration precedence, and output formatting across multiple command surfaces.
+- conftest.py provides shared pytest fixtures for filesystem isolation and temporary directory management across all test modules.
