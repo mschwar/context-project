@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import codecs
 import math
-import re
 import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -77,7 +76,6 @@ class DirectoryHealth:
 
 # Type alias for progress callback: (current_dir, dirs_done, dirs_total, tokens_used)
 ProgressCallback = Callable[[Path, int, int, int], None]
-_NAMED_BULLET_RE = re.compile(r"^- \*\*(.+?)\*\* — .+$")
 
 
 def _relative_path_str(path: Path, root: Path) -> str:
@@ -213,6 +211,21 @@ def _parse_manifest_sections(body: str) -> tuple[str | None, str | None, dict[st
     return heading, purpose, sections
 
 
+def _parse_named_bullet(line: str) -> str | None:
+    prefix = "- **"
+    separator = "** — "
+    if not line.startswith(prefix):
+        return None
+    end = line.find(separator, len(prefix))
+    if end == -1:
+        return None
+    name = line[len(prefix) : end].strip()
+    summary = line[end + len(separator) :].strip()
+    if not name or not summary:
+        return None
+    return name
+
+
 def _validate_named_section(
     lines: list[str],
     expected_names: list[str],
@@ -230,11 +243,10 @@ def _validate_named_section(
 
     seen: list[str] = []
     for line in lines:
-        match = _NAMED_BULLET_RE.match(line)
-        if match is None:
+        name = _parse_named_bullet(line)
+        if name is None:
             issues.append(f"{section_label} section contains a malformed bullet: {line}")
             continue
-        name = match.group(1)
         if expect_directories:
             if not name.endswith("/"):
                 issues.append(f"{section_label} entry is missing a trailing slash: {name}")
