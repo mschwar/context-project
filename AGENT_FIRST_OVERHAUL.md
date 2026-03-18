@@ -1,6 +1,6 @@
 # Agent-First Overhaul: Comprehensive Plan
 
-> **Status:** Living plan — Stages 1–6 implemented as of March 18, 2026
+> **Status:** Living plan — Stages 1–6 implemented and closeout documented as of March 18, 2026
 > **Authors:** Matt Schwartz, Claude (Technical Lead)
 > **Supersedes:** Phases 22–23 in `state.md`
 
@@ -374,6 +374,26 @@ This is documentation, not code — it goes in `AGENTS.md` as a mapping table ag
 **Tests:** Integration tests for each pattern (mock git hook, mock CI run).
 
 **Definition of done:** A human can say "set up ctx for my project" and their agent has a clear, documented path to wire it in — regardless of whether the workflow is session-based, commit-based, or CI-based.
+
+---
+
+## AFO Stage 1–6 Closeout
+
+- **Validation:** merged `main` revalidated during closeout with `pytest`, `ctx update .`, and `ctx check .`.
+- **Reflection artifact:** `archive/reflections/2026-03-18-afo-stage1-6-reflection.md`
+- **Carry-forward:** manifest-trust and external-validation follow-on work is now tracked in Phase 24 below.
+
+## Phase 24 — Manifest Trust & External Validation
+
+Carry-forward scope from the AFO Stage 1–6 closeout reflection and live-repo validation reports.
+
+- [ ] **24.1 git-optional refresh** — defer `get_changed_files()` until the smart-refresh path is actually selected, and fall back cleanly on non-git extracted trees.
+- [ ] **24.2 Deterministic manifest structure** — render `## Files` and `## Subdirectories` from the real filesystem instead of letting the LLM author those lists.
+- [ ] **24.3 body-level verification** — extend `ctx check --verify` to catch duplicate bullets, nonexistent files, missing real files, illegal `None` rows, and frontmatter/body count mismatches.
+- [ ] **24.4 UTF-8-safe binary detection** — fix multibyte boundary handling in `is_binary_file()` so valid text files are not labeled binary.
+- [ ] **24.5 Prompt calibration for repo-specific summaries** — reduce boilerplate summaries, require repo-specific nouns where evidence exists, and describe `SKILL.md` / prompt files accurately.
+- [ ] **24.6 local-provider adaptive batching** — default to safer batch sizes or auto-disable batching after the first malformed batch response, and surface fallback counts in CLI/API results.
+- [ ] **24.7 external validation fixtures** — add non-git extracted-tree, UTF-8 boundary, malformed-but-fresh manifest-body, and snapshot/rubric regression coverage from live-repo runs.
 
 ---
 
