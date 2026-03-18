@@ -308,3 +308,9 @@ Theme: pivot ctx from a human-operated CLI to agent-first infrastructure. Core e
 ### AFO Version Bump — 1.0.0
 
 After all 6 stages land: bump `__version__` from `0.8.0` to `1.0.0`.
+
+---
+
+## Post-AFO Backlog
+
+- [ ] **Error taxonomy: `confirmation_required` code** — `reset` without `--yes` in JSON mode currently uses `unknown_error` (the spec fallback). Consider adding a dedicated error code so agents can distinguish "missing flag" from "bug." Revisit when building `api.py` in Stage 2.
