@@ -174,6 +174,17 @@ def test_version_command_outputs_version() -> None:
     assert f"ctx, version {__version__}" in result.output
 
 
+def test_refresh_help_omits_hard_budget_guardrail_flags() -> None:
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    result = runner.invoke(cli_module.cli, ["refresh", "--help"])
+
+    assert result.exit_code == 0
+    assert "--max-tokens-per-run" not in result.output
+    assert "--max-usd-per-run" not in result.output
+
+
 # --- dry-run ---
 
 
@@ -239,6 +250,34 @@ def test_update_surfaces_budget_warning_when_exhausted(tmp_path, monkeypatch) ->
     result = runner.invoke(cli_module.cli, ["update", str(root)])
 
     assert "budget" in result.output.lower()
+
+
+def test_refresh_json_reports_budget_exhausted_code(tmp_path, monkeypatch) -> None:
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    budget_error = "Token budget guardrail reached: 5 tokens used (limit 5)."
+
+    monkeypatch.setattr(
+        cli_module.api,
+        "refresh",
+        lambda *_a, **_kw: cli_module.api.RefreshResult(
+            dirs_processed=1,
+            dirs_skipped=0,
+            files_processed=1,
+            tokens_used=5,
+            errors=[budget_error],
+            budget_exhausted=True,
+            strategy="incremental",
+            est_cost_usd=0.0,
+            stale_directories=[],
+            budget_guardrail=budget_error,
+        ),
+    )
+
+    result = runner.invoke(cli_module.cli, ["refresh", str(tmp_path)], env={"CTX_OUTPUT": "json"})
+
+    assert result.exit_code == 2
+    assert '"code": "budget_exhausted"' in result.output
 
 
 # --- init --overwrite ---

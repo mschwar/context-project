@@ -2,7 +2,7 @@
 
 Resolution order (highest priority first):
 1. CLI flags (passed through from Click)
-2. Environment variables: CTX_PROVIDER, CTX_MODEL, ANTHROPIC_API_KEY, OPENAI_API_KEY
+2. Environment variables: CTX_* plus provider API keys
 3. .ctxconfig YAML file in target directory or parents
 4. Built-in defaults
 
@@ -15,7 +15,9 @@ Built-in defaults:
         - lmstudio: "loaded-model"
     max_file_tokens: 8000  (truncate files larger than this before sending to LLM)
     max_depth: None  (unlimited)
-    token_budget: None  (unlimited — set to cap total tokens per run)
+    token_budget: None  (generator-level budget)
+    max_tokens_per_run: None  (hard token guardrail)
+    max_usd_per_run: None  (hard USD guardrail)
     batch_size: None  (send all files in a single LLM call — set to limit files per call for small-context providers)
     extensions: None  (all text files)
     base_url: None  (provider default — override for custom endpoints)
@@ -103,6 +105,8 @@ class Config:
     max_file_tokens: int = 8000
     max_depth: Optional[int] = None
     token_budget: Optional[int] = None  # None = unlimited
+    max_tokens_per_run: Optional[int] = None  # None = unlimited hard token guardrail
+    max_usd_per_run: Optional[float] = None  # None = unlimited hard USD guardrail
     batch_size: Optional[int] = None  # None = send all files in one call
     extensions: Optional[list[str]] = None  # None = all text files
     cache_path: Optional[str] = None  # None = default .ctx-cache/llm_cache.json; "" = disable
@@ -119,6 +123,28 @@ class Config:
 
         provider = (self.provider or DEFAULT_PROVIDER).strip().lower() or DEFAULT_PROVIDER
         return self.model.strip() or DEFAULT_MODELS.get(provider, DEFAULT_MODELS[DEFAULT_PROVIDER])
+
+
+def _env_text(name: str) -> str | None:
+    """Return a trimmed env var value when set and non-empty."""
+
+    value = os.getenv(name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _parse_optional_int(value: str) -> int | None:
+    """Parse an int env/config value, allowing the string 'none'."""
+
+    return None if value.lower() == "none" else int(value)
+
+
+def _parse_optional_float(value: str) -> float | None:
+    """Parse a float env/config value, allowing the string 'none'."""
+
+    return None if value.lower() == "none" else float(value)
 
 
 def detect_provider(
@@ -240,6 +266,7 @@ def load_config(
         6. Return the Config.
     """
     config = Config()
+    provider_explicit = False
 
     start_dir = target_path if target_path.is_dir() else target_path.parent
     for directory in (start_dir, *start_dir.parents):
@@ -253,6 +280,7 @@ def load_config(
 
         if "provider" in data and data["provider"] is not None:
             config.provider = str(data["provider"]).strip()
+            provider_explicit = True
         if "model" in data and data["model"] is not None:
             config.model = str(data["model"]).strip()
         if "max_file_tokens" in data and data["max_file_tokens"] is not None:
@@ -261,6 +289,14 @@ def load_config(
             config.max_depth = None if data["max_depth"] is None else int(data["max_depth"])
         if "token_budget" in data:
             config.token_budget = None if data["token_budget"] is None else int(data["token_budget"])
+        if "max_tokens_per_run" in data:
+            config.max_tokens_per_run = (
+                None if data["max_tokens_per_run"] is None else int(data["max_tokens_per_run"])
+            )
+        if "max_usd_per_run" in data:
+            config.max_usd_per_run = (
+                None if data["max_usd_per_run"] is None else float(data["max_usd_per_run"])
+            )
         if "batch_size" in data:
             config.batch_size = None if data["batch_size"] is None else int(data["batch_size"])
         if "max_cache_entries" in data and data["max_cache_entries"] is not None:
@@ -289,15 +325,51 @@ def load_config(
 
         break
 
-    env_provider = os.getenv("CTX_PROVIDER")
-    env_model = os.getenv("CTX_MODEL")
+    env_provider = _env_text("CTX_PROVIDER")
+    env_model = _env_text("CTX_MODEL")
     if env_provider:
         config.provider = env_provider.strip()
+        provider_explicit = True
     if env_model:
         config.model = env_model.strip()
+    env_base_url = _env_text("CTX_BASE_URL")
+    if env_base_url:
+        config.base_url = env_base_url
+    env_max_file_tokens = _env_text("CTX_MAX_FILE_TOKENS")
+    if env_max_file_tokens is not None:
+        config.max_file_tokens = int(env_max_file_tokens)
+    env_max_depth = _env_text("CTX_MAX_DEPTH")
+    if env_max_depth is not None:
+        config.max_depth = _parse_optional_int(env_max_depth)
+    env_token_budget = _env_text("CTX_TOKEN_BUDGET")
+    if env_token_budget is not None:
+        config.token_budget = _parse_optional_int(env_token_budget)
+    env_max_tokens_per_run = _env_text("CTX_MAX_TOKENS_PER_RUN")
+    if env_max_tokens_per_run is not None:
+        config.max_tokens_per_run = _parse_optional_int(env_max_tokens_per_run)
+    env_max_usd_per_run = _env_text("CTX_MAX_USD_PER_RUN")
+    if env_max_usd_per_run is not None:
+        config.max_usd_per_run = _parse_optional_float(env_max_usd_per_run)
+    env_batch_size = _env_text("CTX_BATCH_SIZE")
+    if env_batch_size is not None:
+        config.batch_size = _parse_optional_int(env_batch_size)
+    env_cache_path = os.getenv("CTX_CACHE_PATH")
+    if env_cache_path is not None:
+        config.cache_path = env_cache_path
+    env_max_cache_entries = _env_text("CTX_MAX_CACHE_ENTRIES")
+    if env_max_cache_entries is not None:
+        config.max_cache_entries = int(env_max_cache_entries)
+    env_watch_debounce = _env_text("CTX_WATCH_DEBOUNCE")
+    if env_watch_debounce is not None:
+        config.watch_debounce_seconds = float(env_watch_debounce)
+    env_extensions = os.getenv("CTX_EXTENSIONS")
+    if env_extensions is not None:
+        parsed_extensions = [item.strip() for item in env_extensions.split(",") if item.strip()]
+        config.extensions = parsed_extensions or None
 
     if provider is not None:
         config.provider = provider
+        provider_explicit = True
     if model is not None:
         config.model = model
     if max_depth is not None:
@@ -308,6 +380,14 @@ def load_config(
         config.base_url = base_url
     if cache_path is not None:
         config.cache_path = cache_path
+
+    if not provider_explicit:
+        # Support env-only setups where the operator exported an API key but
+        # did not also set CTX_PROVIDER or write a .ctxconfig file yet.
+        if os.getenv("ANTHROPIC_API_KEY", "").strip():
+            config.provider = "anthropic"
+        elif os.getenv("OPENAI_API_KEY", "").strip():
+            config.provider = "openai"
 
     config.provider = config.provider.strip().lower()
     if config.provider not in DEFAULT_MODELS:

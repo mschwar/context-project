@@ -52,7 +52,30 @@ def test_legacy_init_remains_invokable(tmp_path, monkeypatch) -> None:
     result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
 
     assert result.exit_code == 0
+    assert "deprecated" in result.output
     assert "Directories processed: 1" in result.output
+
+
+def test_legacy_init_has_no_deprecation_warning_in_json_mode(tmp_path, monkeypatch) -> None:
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    monkeypatch.setattr(
+        cli_module,
+        "_build_generation_runtime",
+        lambda *a, **kw: (Path(a[0]), type("Cfg", (), {"token_budget": None, "provider": "openai", "resolved_model": staticmethod(lambda: "gpt-test")})(), object(), object(), lambda *x: None),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "generate_tree",
+        lambda *a, **kw: cli_module.GenerateStats(dirs_processed=1, files_processed=1, tokens_used=0),
+    )
+    monkeypatch.setattr(cli_module, "CtxLock", type("L", (), {"__init__": lambda self, *a, **kw: None, "__enter__": lambda self: self, "__exit__": lambda self, *e: None}))
+
+    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)], env={"CTX_OUTPUT": "json"})
+
+    assert result.exit_code == 0
+    assert "deprecated" not in result.output
 
 
 def test_status_and_check_health_match(tmp_path, monkeypatch) -> None:

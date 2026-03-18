@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 import pytest
 
 import ctx.api as api_module
 import ctx.git as git_module
 from ctx.api import ConfirmationRequiredError
-from ctx.config import Config
+from ctx.config import Config, MissingApiKeyError
 from ctx.generator import GenerateStats
 
 
@@ -102,6 +103,7 @@ def test_refresh_setup_detects_and_writes_config(tmp_path, monkeypatch) -> None:
 
     assert writes
     assert result.setup_provider == "openai"
+    assert result.config_written is True
 
 
 def test_refresh_dry_run_uses_stale_check_without_llm(tmp_path, monkeypatch) -> None:
@@ -121,6 +123,98 @@ def test_refresh_dry_run_uses_stale_check_without_llm(tmp_path, monkeypatch) -> 
 def test_refresh_setup_and_watch_are_mutually_exclusive(tmp_path) -> None:
     with pytest.raises(ValueError):
         api_module.refresh(tmp_path, setup=True, watch=True)
+
+
+def test_refresh_applies_max_tokens_per_run_guardrail(tmp_path, monkeypatch) -> None:
+    captured_config: Config | None = None
+    config = Config(provider="openai", model="test-model", api_key="test-key", max_tokens_per_run=5)
+
+    def fake_runtime(*_args, **_kwargs):
+        return config, object(), object()
+
+    def fake_update_tree(_root, runtime_config, *_args, **_kwargs):
+        nonlocal captured_config
+        captured_config = runtime_config
+        return GenerateStats(dirs_processed=1, tokens_used=5, budget_exhausted=True)
+
+    monkeypatch.setattr(api_module, "_build_generation_runtime", fake_runtime)
+    monkeypatch.setattr(api_module, "CtxLock", _NoopLock)
+    monkeypatch.setattr(api_module, "_has_manifests", lambda _root: True)
+    monkeypatch.setattr(git_module, "get_changed_files", lambda _root: [])
+    monkeypatch.setattr(api_module, "update_tree", fake_update_tree)
+
+    result = api_module.refresh(tmp_path)
+
+    assert isinstance(captured_config, Config)
+    assert captured_config.token_budget == 5
+    assert result.budget_exhausted is True
+    assert result.budget_guardrail is not None
+    assert "Token budget guardrail reached" in result.budget_guardrail
+
+
+def test_refresh_reraises_missing_api_key_with_context(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        api_module,
+        "_build_generation_runtime",
+        lambda *_a, **_kw: (_ for _ in ()).throw(MissingApiKeyError("Missing required environment variable: OPENAI_API_KEY")),
+    )
+    monkeypatch.setattr(api_module, "_has_manifests", lambda _root: False)
+    monkeypatch.setattr(git_module, "get_changed_files", lambda _root: [])
+
+    with pytest.raises(MissingApiKeyError, match="while loading provider 'openai'"):
+        api_module.refresh(tmp_path, provider="openai")
+
+    config_path = tmp_path / ".ctxconfig"
+    monkeypatch.setattr(api_module, "_find_config_path", lambda _root: config_path)
+    with pytest.raises(MissingApiKeyError, match=re.escape(f"while loading configuration from {config_path}")):
+        api_module.refresh(tmp_path)
+
+
+def test_refresh_applies_max_usd_per_run_guardrail(tmp_path, monkeypatch) -> None:
+    config = Config(provider="anthropic", model="claude-3-sonnet", api_key="test-key", max_usd_per_run=0.001)
+    monkeypatch.setattr(api_module, "_build_generation_runtime", lambda *_a, **_kw: (config, object(), object()))
+    monkeypatch.setattr(api_module, "CtxLock", _NoopLock)
+    monkeypatch.setattr(api_module, "_has_manifests", lambda _root: True)
+    monkeypatch.setattr(git_module, "get_changed_files", lambda _root: [])
+    monkeypatch.setattr(api_module, "update_tree", lambda *_a, **_kw: GenerateStats(dirs_processed=1, tokens_used=1000))
+
+    result = api_module.refresh(tmp_path)
+
+    assert result.budget_exhausted is True
+    assert result.budget_guardrail is not None
+    assert "USD budget guardrail reached" in result.budget_guardrail
+
+
+def test_refresh_auto_detects_local_provider_when_unconfigured(tmp_path, monkeypatch) -> None:
+    runtime_calls: list[tuple] = []
+    writes: list[tuple[Path, str, str | None, str | None]] = []
+
+    def fake_runtime(root, **kwargs):
+        runtime_calls.append((root, kwargs))
+        if len(runtime_calls) == 1:
+            raise MissingApiKeyError("Missing required environment variable: ANTHROPIC_API_KEY")
+        config = Config(provider="ollama", model="llama3.2", api_key="not-needed", base_url="http://localhost:11434/v1")
+        return config, object(), object()
+
+    monkeypatch.setattr(api_module, "_build_generation_runtime", fake_runtime)
+    monkeypatch.setattr(api_module, "CtxLock", _NoopLock)
+    monkeypatch.setattr(api_module, "_find_config_path", lambda _root: None)
+    monkeypatch.setattr(api_module, "_has_manifests", lambda _root: False)
+    monkeypatch.setattr(git_module, "get_changed_files", lambda _root: [])
+    monkeypatch.setattr(api_module, "detect_provider", lambda: ("ollama", "llama3.2"))
+    monkeypatch.setattr(
+        api_module,
+        "write_default_config",
+        lambda path, provider, model, base_url: writes.append((path, provider, model, base_url)),
+    )
+    monkeypatch.setattr(api_module, "generate_tree", lambda *_a, **_kw: GenerateStats(dirs_processed=1))
+
+    result = api_module.refresh(tmp_path)
+
+    assert len(runtime_calls) == 2
+    assert writes == [(tmp_path, "ollama", "llama3.2", "http://localhost:11434/v1")]
+    assert result.setup_provider == "ollama"
+    assert result.config_written is True
 
 
 def test_check_health_mode(tmp_path, monkeypatch) -> None:

@@ -47,6 +47,15 @@ def test_hash_file_binary(tmp_path) -> None:
     assert hash_file(file_path) == _expected_hash(payload)
 
 
+def test_hash_file_normalizes_text_line_endings(tmp_path) -> None:
+    lf_file = tmp_path / "lf.txt"
+    crlf_file = tmp_path / "crlf.txt"
+    lf_file.write_bytes(b"line one\nline two\n")
+    crlf_file.write_bytes(b"line one\r\nline two\r\n")
+
+    assert hash_file(lf_file) == hash_file(crlf_file)
+
+
 def test_hash_file_logs_warning_on_error(caplog, tmp_path) -> None:
     missing_file = tmp_path / "missing.txt"
 

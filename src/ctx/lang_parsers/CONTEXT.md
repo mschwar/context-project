@@ -1,8 +1,8 @@
 ---
-generated: '2026-03-15T04:39:00Z'
+generated: '2026-03-18T18:25:20Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:d19fb41304f33136a9352a92b332d5ddb714832fc91e348f38e0b460b1cff6a3
+content_hash: sha256:c29ba8beab3d3794d1d393f56c8553171039154bd51610f38ceda5dfe28e7f77
 files: 11
 dirs: 0
 tokens_total: 5211
@@ -31,6 +31,6 @@ Language-specific parsers that extract public APIs and structural elements from 
 
 ## Notes
 
-- Each parser is tailored to its language's syntax and visibility conventions (e.g., capitalization in Go, public keyword in Java/C#, module exports in JavaScript/TypeScript).
-- Parsers use a mix of regex-based and AST-based approaches depending on language complexity.
-- These modules likely share a common interface for integration with the broader context-project system.
+- Each parser is language-specific and uses either regex patterns or language-native AST parsing (Python) to identify public APIs.
+- Parsers follow a consistent pattern of extracting visibility-qualified declarations (public, exported, or top-level) appropriate to each language's conventions.
+- This module likely serves as the core extraction engine for the context-project's code analysis pipeline.

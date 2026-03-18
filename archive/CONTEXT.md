@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-18T08:19:41Z'
+generated: '2026-03-18T18:25:31Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:ff81727f87c6f8b860126e0dcdf7b13b94ca90e90422dae54f66d863ff197645
+content_hash: sha256:a9634b6361a97570ab0a4db2b55fa45382fadb63be8cd9c50bf51b27f71f3351
 files: 6
 dirs: 1
 tokens_total: 6967
 ---
 # C:/Users/Matty/Documents/context-project/archive
 
-This directory contains design documents, AI analysis, and planning materials for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
+This directory contains design documents, AI analysis, and planning materials for the ctx project—a Python CLI tool that generates hierarchical CONTEXT.md manifests to enable AI agents to navigate and understand directory structures without reading raw files.
 
 ## Files
 
@@ -26,6 +26,5 @@ This directory contains design documents, AI analysis, and planning materials fo
 
 ## Notes
 
-- This archive represents the ideation and design phase of the ctx project, with multiple AI model analyses (GPT, Grok, Opus) converging on a markdown+YAML manifest format.
-- The progression from "Core Idea" through various model evaluations to "Opus4.6" shows iterative refinement toward a single CONTEXT.md-per-directory standard.
-- Cross-reference the reflections/ subdirectory for phase-level summaries and lessons learned during development.
+- The archive documents the iterative design process of ctx through multiple AI model analyses (GPT, Grok, Opus), converging on a markdown+YAML format with per-directory CONTEXT.md files.
+- Core architectural decision: single CONTEXT.md per directory with structured metadata enables hierarchical navigation without full file reads, supporting coarse-to-fine agent retrieval patterns.

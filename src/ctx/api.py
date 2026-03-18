@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections import Counter
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from typing import Callable, Optional
 from ctx.config import (
     DEFAULT_BASE_URLS,
     LOCAL_PROVIDERS,
+    MissingApiKeyError,
     PROVIDER_DETECTED_VIA,
     Config,
     detect_provider,
@@ -38,6 +40,10 @@ class ConfirmationRequiredError(Exception):
     """Raised when a destructive operation requires explicit confirmation."""
 
 
+class BudgetExhaustedError(Exception):
+    """Raised when refresh exceeds a hard per-run token or USD guardrail."""
+
+
 @dataclass
 class RefreshResult:
     """Result of a refresh operation."""
@@ -51,6 +57,8 @@ class RefreshResult:
     strategy: str  # "full", "incremental", "smart"
     est_cost_usd: float
     stale_directories: list[str]
+    budget_guardrail: str | None = None
+    config_written: bool = False
     setup_provider: str | None = None
     setup_model: str | None = None
     setup_detected_via: str | None = None
@@ -117,6 +125,17 @@ def _build_generation_runtime(
     return config, spec, client
 
 
+def _find_config_path(target_path: Path) -> Path | None:
+    """Return the nearest .ctxconfig for a path, if any."""
+
+    start_dir = target_path if target_path.is_dir() else target_path.parent
+    for directory in (start_dir, *start_dir.parents):
+        config_path = directory / ".ctxconfig"
+        if config_path.exists():
+            return config_path
+    return None
+
+
 def _has_manifests(root: Path) -> bool:
     return any(root.rglob("CONTEXT.md"))
 
@@ -125,6 +144,35 @@ def _directory_within_depth(path: Path, root: Path, depth: Optional[int]) -> boo
     if depth is None:
         return True
     return len(path.relative_to(root).parts) <= depth
+
+
+def _apply_token_guardrail(config: Config) -> None:
+    """Fold the hard token guardrail into the generator token budget."""
+
+    if config.max_tokens_per_run is None:
+        return
+    # A smaller explicit token_budget is already stricter, so only clamp when
+    # the generator budget is unset or looser than the hard per-run ceiling.
+    if config.token_budget is None or config.token_budget > config.max_tokens_per_run:
+        config.token_budget = config.max_tokens_per_run
+
+
+def _budget_guardrail_message(config: Config, stats: GenerateStats) -> str | None:
+    """Return a hard-budget error message when a Stage 3 guardrail is hit."""
+
+    if config.max_tokens_per_run is not None and stats.tokens_used >= config.max_tokens_per_run:
+        return (
+            f"Token budget guardrail reached: {stats.tokens_used:,} tokens used "
+            f"(limit {config.max_tokens_per_run:,})."
+        )
+    if config.max_usd_per_run is not None:
+        est_cost = estimate_cost(stats.tokens_used, config.provider, config.resolved_model())
+        if est_cost >= config.max_usd_per_run:
+            return (
+                f"USD budget guardrail reached: ${est_cost:.4f} estimated spend "
+                f"(limit ${config.max_usd_per_run:.4f})."
+            )
+    return None
 
 
 def refresh(
@@ -154,6 +202,7 @@ def refresh(
     setup_provider: str | None = None
     setup_model: str | None = None
     setup_detected_via: str | None = None
+    config_written = False
 
     if setup:
         detected = detect_provider()
@@ -170,19 +219,10 @@ def refresh(
                 model=setup_model,
                 base_url=DEFAULT_BASE_URLS.get(setup_provider),
             )
+            config_written = True
         provider = provider or setup_provider
         model = model or setup_model
         base_url = base_url or DEFAULT_BASE_URLS.get(setup_provider)
-
-    config, spec, client = _build_generation_runtime(
-        root,
-        provider=provider,
-        model=model,
-        max_depth=max_depth,
-        token_budget=token_budget,
-        base_url=base_url,
-        cache_path=cache_path,
-    )
 
     changed_files = get_changed_files(root)
     if force:
@@ -195,6 +235,17 @@ def refresh(
         strategy = "incremental"
 
     if dry_run:
+        config = load_config(
+            root,
+            provider=provider,
+            model=model,
+            max_depth=max_depth,
+            token_budget=token_budget,
+            base_url=base_url,
+            cache_path=cache_path,
+            require_api_key=False,
+        )
+        spec = load_ignore_patterns(root)
         stale = check_stale_dirs(root, config, spec, changed_files=changed_files if strategy == "smart" else None)
         return RefreshResult(
             dirs_processed=0,
@@ -206,10 +257,53 @@ def refresh(
             strategy=strategy,
             est_cost_usd=0.0,
             stale_directories=[_path_relative(directory, root) for directory in stale],
+            config_written=config_written,
             setup_provider=setup_provider,
             setup_model=setup_model,
             setup_detected_via=setup_detected_via,
         )
+
+    try:
+        config, spec, client = _build_generation_runtime(
+            root,
+            provider=provider,
+            model=model,
+            max_depth=max_depth,
+            token_budget=token_budget,
+            base_url=base_url,
+            cache_path=cache_path,
+        )
+    except MissingApiKeyError as exc:
+        config_path = _find_config_path(root)
+        if provider is not None:
+            raise MissingApiKeyError(f"{exc} (while loading provider '{provider}')") from exc
+        if config_path is not None:
+            raise MissingApiKeyError(f"{exc} (while loading configuration from {config_path})") from exc
+        env_provider = os.getenv("CTX_PROVIDER", "").strip()
+        if env_provider:
+            raise MissingApiKeyError(
+                f"{exc} (while loading provider '{env_provider}' from CTX_PROVIDER)"
+            ) from exc
+        detected = detect_provider()
+        if detected is None:
+            raise
+        setup_provider, setup_model = detected
+        setup_detected_via = PROVIDER_DETECTED_VIA.get(setup_provider, setup_provider)
+        detected_base_url = DEFAULT_BASE_URLS.get(setup_provider)
+        if setup_provider in LOCAL_PROVIDERS and not dry_run:
+            write_default_config(root, setup_provider, model=setup_model, base_url=detected_base_url)
+            config_written = True
+        config, spec, client = _build_generation_runtime(
+            root,
+            provider=setup_provider,
+            model=model or setup_model,
+            max_depth=max_depth,
+            token_budget=token_budget,
+            base_url=base_url or detected_base_url,
+            cache_path=cache_path,
+        )
+
+    _apply_token_guardrail(config)
 
     with CtxLock(root, command="refresh"):
         stats: GenerateStats
@@ -220,7 +314,12 @@ def refresh(
         else:
             stats = update_tree(root, config, client, spec, progress=progress)
 
-    if watch:
+    budget_guardrail = _budget_guardrail_message(config, stats)
+    errors = list(stats.errors)
+    if budget_guardrail is not None:
+        errors.append(budget_guardrail)
+
+    if watch and not errors:
         run_watch(root, config, client, spec)
 
     return RefreshResult(
@@ -228,11 +327,13 @@ def refresh(
         dirs_skipped=stats.dirs_skipped,
         files_processed=stats.files_processed,
         tokens_used=stats.tokens_used,
-        errors=list(stats.errors),
-        budget_exhausted=stats.budget_exhausted,
+        errors=errors,
+        budget_exhausted=stats.budget_exhausted or budget_guardrail is not None,
         strategy=strategy,
         est_cost_usd=estimate_cost(stats.tokens_used, config.provider, config.resolved_model()),
         stale_directories=[],
+        budget_guardrail=budget_guardrail,
+        config_written=config_written,
         setup_provider=setup_provider,
         setup_model=setup_model,
         setup_detected_via=setup_detected_via,

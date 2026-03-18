@@ -44,16 +44,23 @@ def hash_file(path: Path) -> str:
         3. Return f"sha256:{digest.hexdigest()}".
         4. On read error, log and return a stable error sentinel hash.
     """
-    digest = hashlib.sha256()
     try:
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(8192), b""):
-                digest.update(chunk)
+        payload = path.read_bytes()
     except OSError as exc:
         logger.warning("Failed to hash file %s: %s", path, exc)
         return ERROR_HASH
 
-    return f"sha256:{digest.hexdigest()}"
+    # Normalize text line endings so manifest freshness is stable across
+    # Windows (CRLF) and POSIX (LF) checkouts of the same git content.
+    if b"\x00" not in payload:
+        try:
+            normalized = payload.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+        except UnicodeDecodeError:
+            pass
+        else:
+            payload = normalized
+
+    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
 
 
 def _path_identity(path: Path) -> str:
