@@ -1,4 +1,4 @@
-"""Documentation and package metadata checks for Stage 4."""
+"""Documentation and package metadata checks for Stage 5."""
 
 from __future__ import annotations
 
@@ -29,9 +29,10 @@ def test_agents_contract_sections_and_examples() -> None:
     assert re.search(r"^## schema_version\s+1\s*$", text, flags=re.MULTILINE)
 
     json_blocks = re.findall(r"```json\n(.*?)\n```", text, flags=re.DOTALL)
-    assert len(json_blocks) == 4
+    assert len(json_blocks) == 5
     for block in json_blocks:
         json.loads(block)
+    assert any('"mcpServers"' in block for block in json_blocks)
 
     for code in [
         "provider_not_configured",

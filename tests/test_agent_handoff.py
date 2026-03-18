@@ -323,7 +323,7 @@ def test_serve_endpoints_for_agent_api(tmp_path) -> None:
     # Root endpoint
     response = client.get("/")
     assert response.status_code == 200
-    assert "ctx MCP Server" in response.json()["message"]
+    assert response.json()["message"] == "ctx HTTP server is running"
     
     # Test error handling
     response = client.get("/mcp/context/nonexistent")

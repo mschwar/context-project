@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ctx": {
+      "command": "ctx",
+      "args": ["serve", "--mcp"],
+      "description": "Filesystem-native context layer that generates and manages CONTEXT.md manifests for agent navigation."
+    }
+  }
+}

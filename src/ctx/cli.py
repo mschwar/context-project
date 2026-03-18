@@ -1544,19 +1544,30 @@ def verify(ctx: click.Context, path: str, output_format: str) -> None:
 
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, resolve_path=True))
-@click.option("--host", default="127.0.0.1", help="Host address for the server.")
-@click.option("--port", type=int, default=8000, help="Port for the server.")
+@click.option("--host", default="127.0.0.1", help="Host address for the HTTP server.")
+@click.option("--port", type=int, default=8000, help="Port for the HTTP server.")
+@click.option("--mcp", is_flag=True, help="Launch stdio MCP server instead of HTTP.")
 @click.pass_context
-def serve(ctx: click.Context, path: str, host: str, port: int) -> None:
-    """Start the MCP server to expose CONTEXT.md manifests.
-    
-    Serves manifests from the specified PATH (default: current directory).
-    All manifest paths are resolved relative to this root.
-    """
-    from ctx.server import start_server
+def serve(ctx: click.Context, path: str, host: str, port: int, mcp: bool) -> None:
+    """Start the ctx server.
 
+    Default mode serves manifests over HTTP. With --mcp, start the stdio MCP server.
+    """
     root = Path(path).resolve()
-    click.echo(f"Starting ctx MCP server on http://{host}:{port}")
+    if mcp:
+        from ctx.mcp_server import CtxMCPServer
+
+        CtxMCPServer(root).run()
+        return
+
+    try:
+        from ctx.server import start_server
+    except ImportError as exc:
+        raise click.UsageError(
+            "HTTP server requires FastAPI. Install with: pip install ctx-tool[serve]"
+        ) from exc
+
+    click.echo(f"Starting ctx HTTP server on http://{host}:{port}")
     click.echo(f"Serving manifests from: {root}")
     start_server(host=host, port=port, root=root)
 

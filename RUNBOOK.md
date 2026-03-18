@@ -74,12 +74,17 @@ ctx check /path/to/project --stats --output json
 ```
 
 ### Serve manifests
-Serve manifests over HTTP.
+Serve manifests over HTTP or expose the stdio MCP server.
 ```bash
-ctx serve [PATH]
+ctx serve [PATH]          # HTTP mode
+ctx serve --mcp [PATH]    # stdio MCP mode
 ```
 
-Serves manifests from the specified PATH (default: current directory). All manifest paths are resolved relative to this root.
+HTTP mode serves manifests from the specified PATH (default: current directory). All manifest paths are resolved relative to this root.
+If FastAPI is not installed, add HTTP support with:
+```bash
+pip install ctx-tool[serve]
+```
 
 ### Watch for changes
 Watch for file changes and auto-regenerate manifests.
