@@ -9,6 +9,7 @@ Commands:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -41,6 +42,8 @@ from ctx.generator import (
 )
 from ctx.ignore import load_ignore_patterns
 from ctx.llm import create_client
+from ctx.lock import CtxLock
+from ctx.output import OutputBroker, _classify_exception, build_envelope
 
 
 @dataclass
@@ -137,6 +140,7 @@ def _build_generation_runtime(
     base_url: Optional[str] = None,
     cache_path: Optional[str] = None,
     progress_state: Optional[ProgressState] = None,
+    json_mode: bool = False,
 ) -> tuple[Path, object, object, object, Callable[[Path, int, int, int], None]]:
     target_path = Path(path)
     load_config_kwargs: dict[str, Optional[str] | int] = {
@@ -173,11 +177,15 @@ def _build_generation_runtime(
     spec = load_ignore_patterns(target_path)
     client = create_client(config)
     state = progress_state if progress_state is not None else ProgressState(start_time=time.time())
-    progress_cb = _progress_callback(state)
+    progress_cb = _progress_callback(state, json_mode=json_mode)
     return target_path, config, spec, client, progress_cb
 
 
-def _progress_callback(state: ProgressState) -> Callable[[Path, int, int, int], None]:
+def _progress_callback(
+    state: ProgressState,
+    *,
+    json_mode: bool = False,
+) -> Callable[[Path, int, int, int], None]:
     """Create a progress callback that shows elapsed time and running token total.
 
     Args:
@@ -189,6 +197,8 @@ def _progress_callback(state: ProgressState) -> Callable[[Path, int, int, int], 
 
     def callback(current_dir: Path, done: int, total: int, tokens_used: int) -> None:
         state.tokens_accumulated = tokens_used
+        if json_mode:
+            return
         elapsed = state.elapsed()
         elapsed_str = _format_elapsed(elapsed)
         tokens_str = f"{tokens_used:,} tokens"
@@ -277,11 +287,60 @@ def _display_status_path(path: str) -> str:
     return "." if path == "." else f"./{path}"
 
 
-@click.group()
+def _json_mode(ctx: click.Context) -> bool:
+    return bool(ctx.obj and ctx.obj.get("json_mode"))
+
+
+def _exit_for_broker(broker: OutputBroker, *, json_mode: bool) -> None:
+    if not json_mode:
+        return
+    if broker.handled_exception:
+        sys.exit(1)
+    if broker.errors and broker.data:
+        sys.exit(2)
+    if broker.errors:
+        sys.exit(1)
+
+
+class CtxGroup(click.Group):
+    """Click group with JSON-safe global exception handling."""
+
+    def invoke(self, ctx: click.Context) -> None:
+        started = time.time()
+        try:
+            super().invoke(ctx)
+        except Exception as exc:
+            if _json_mode(ctx):
+                code, message, hint = _classify_exception(exc)
+                envelope = build_envelope(
+                    command=ctx.invoked_subcommand or "unknown",
+                    elapsed_ms=int((time.time() - started) * 1000),
+                    data={},
+                    errors=[{"code": code, "message": message, "hint": hint, "path": None}],
+                    status="error",
+                )
+                click.echo(json.dumps(envelope))
+                ctx.exit(1)
+            raise
+
+
+@click.group(cls=CtxGroup)
 @click.version_option(version=__version__, prog_name="ctx")
-def cli() -> None:
+@click.option(
+    "--output",
+    "output_mode",
+    type=click.Choice(["human", "json"]),
+    default=None,
+    help="Output format. Default: human.",
+)
+@click.pass_context
+def cli(ctx: click.Context, output_mode: str | None) -> None:
     """ctx — Filesystem-native context layer for AI agents."""
-    pass
+    ctx.ensure_object(dict)
+    resolved_output_mode = output_mode
+    if resolved_output_mode is None:
+        resolved_output_mode = os.environ.get("CTX_OUTPUT", "human").strip().lower()
+    ctx.obj["json_mode"] = resolved_output_mode == "json"
 
 
 @cli.command()
@@ -293,38 +352,61 @@ def cli() -> None:
 @click.option("--base-url", default=None, help="Custom API base URL.")
 @click.option("--cache-path", default=None, help="Disk cache file path. Set to '' to disable.")
 @click.option("--overwrite/--no-overwrite", default=True, help="Regenerate all manifests (default) or skip already-fresh ones.")
-def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Optional[int], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], overwrite: bool) -> None:
+@click.pass_context
+def init(ctx: click.Context, path: str, provider: Optional[str], model: Optional[str], max_depth: Optional[int], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], overwrite: bool) -> None:
     """Generate CONTEXT.md files for a directory tree."""
-    progress_state = ProgressState(start_time=time.time())
-    target_path, config, spec, client, progress_cb = _build_generation_runtime(
-        path,
-        provider=provider,
-        model=model,
-        max_depth=max_depth,
-        token_budget=token_budget,
-        base_url=base_url,
-        cache_path=cache_path,
-        progress_state=progress_state,
-    )
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="refresh", json_mode=json_mode) as broker:
+        progress_state = ProgressState(start_time=time.time())
+        target_path, config, spec, client, progress_cb = _build_generation_runtime(
+            path,
+            provider=provider,
+            model=model,
+            max_depth=max_depth,
+            token_budget=token_budget,
+            base_url=base_url,
+            cache_path=cache_path,
+            progress_state=progress_state,
+            json_mode=json_mode,
+        )
 
-    click.echo(f"ctx init: generating manifests for {target_path}")
-    if not overwrite:
-        click.echo("Mode: incremental (skipping fresh manifests)")
-    if config.token_budget:
-        click.echo(f"Token budget: {config.token_budget:,}")
-    if overwrite:
-        stats = generate_tree(target_path, config, client, spec, progress=progress_cb)
-    else:
-        stats = update_tree(target_path, config, client, spec, progress=progress_cb)
-    click.echo(f"Directories processed: {stats.dirs_processed}")
-    click.echo(f"Files processed: {stats.files_processed}")
-    click.echo(f"Tokens used: {stats.tokens_used}")
-    _echo_cost_summary(stats, config.provider, config.resolved_model())
-    click.echo(f"Errors: {len(stats.errors)}")
-    _echo_generation_errors(stats)
-    _echo_budget_warning(stats, config)
-    if stats.errors:
-        sys.exit(1)
+        click.echo(f"ctx init: generating manifests for {target_path}")
+        if not overwrite:
+            click.echo("Mode: incremental (skipping fresh manifests)")
+        if config.token_budget:
+            click.echo(f"Token budget: {config.token_budget:,}")
+        with CtxLock(target_path, command="refresh"):
+            if overwrite:
+                stats = generate_tree(target_path, config, client, spec, progress=progress_cb)
+            else:
+                stats = update_tree(target_path, config, client, spec, progress=progress_cb)
+        click.echo(f"Directories processed: {stats.dirs_processed}")
+        click.echo(f"Files processed: {stats.files_processed}")
+        click.echo(f"Tokens used: {stats.tokens_used}")
+        _echo_cost_summary(stats, config.provider, config.resolved_model())
+        click.echo(f"Errors: {len(stats.errors)}")
+        _echo_generation_errors(stats)
+        _echo_budget_warning(stats, config)
+
+        cost = _estimate_cost(stats.tokens_used, config.provider, config.resolved_model())
+        broker.set_data(
+            {
+                "dirs_processed": stats.dirs_processed,
+                "dirs_skipped": stats.dirs_skipped,
+                "files_processed": stats.files_processed,
+                "tokens_used": stats.tokens_used,
+                "errors_count": len(stats.errors),
+                "budget_exhausted": stats.budget_exhausted,
+                "strategy": "full" if overwrite else "incremental",
+            }
+        )
+        broker.set_tokens(stats.tokens_used, cost)
+        if stats.errors:
+            for error in stats.errors:
+                broker.add_error("partial_failure", error)
+            if not json_mode:
+                sys.exit(1)
+    _exit_for_broker(broker, json_mode=json_mode)
 
 
 @cli.command()
@@ -335,50 +417,96 @@ def init(path: str, provider: Optional[str], model: Optional[str], max_depth: Op
 @click.option("--base-url", default=None, help="Custom API base URL.")
 @click.option("--cache-path", default=None, help="Disk cache file path. Set to '' to disable.")
 @click.option("--dry-run", is_flag=True, help="List stale directories without regenerating.")
-def update(path: str, provider: Optional[str], model: Optional[str], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], dry_run: bool) -> None:
+@click.pass_context
+def update(ctx: click.Context, path: str, provider: Optional[str], model: Optional[str], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], dry_run: bool) -> None:
     """Incrementally refresh stale CONTEXT.md files."""
-    target_path = Path(path)
-    spec = load_ignore_patterns(target_path)
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="refresh", json_mode=json_mode) as broker:
+        target_path = Path(path)
+        spec = load_ignore_patterns(target_path)
 
-    if dry_run:
-        config = load_config(target_path, provider=provider, model=model, token_budget=token_budget, base_url=base_url, cache_path=cache_path, require_api_key=False)
-        stale = check_stale_dirs(target_path, config, spec)
-        if not stale:
-            click.echo("All manifests are fresh. Nothing to regenerate.")
+        if dry_run:
+            config = load_config(target_path, provider=provider, model=model, token_budget=token_budget, base_url=base_url, cache_path=cache_path, require_api_key=False)
+            stale = check_stale_dirs(target_path, config, spec)
+            if not stale:
+                click.echo("All manifests are fresh. Nothing to regenerate.")
+                broker.set_data(
+                    {
+                        "dirs_processed": 0,
+                        "dirs_skipped": 0,
+                        "files_processed": 0,
+                        "tokens_used": 0,
+                        "errors_count": 0,
+                        "budget_exhausted": False,
+                        "strategy": "incremental",
+                    }
+                )
+                return
+            _echo_stale_dirs(stale, target_path)
+            broker.set_data(
+                {
+                    "dirs_processed": 0,
+                    "dirs_skipped": len(stale),
+                    "files_processed": 0,
+                    "tokens_used": 0,
+                    "errors_count": 0,
+                    "budget_exhausted": False,
+                    "strategy": "incremental",
+                }
+            )
             return
-        _echo_stale_dirs(stale, target_path)
-        return
 
-    progress_state = ProgressState(start_time=time.time())
-    target_path, config, spec, client, progress_cb = _build_generation_runtime(
-        path,
-        provider=provider,
-        model=model,
-        token_budget=token_budget,
-        base_url=base_url,
-        cache_path=cache_path,
-        progress_state=progress_state,
-    )
+        progress_state = ProgressState(start_time=time.time())
+        target_path, config, spec, client, progress_cb = _build_generation_runtime(
+            path,
+            provider=provider,
+            model=model,
+            token_budget=token_budget,
+            base_url=base_url,
+            cache_path=cache_path,
+            progress_state=progress_state,
+            json_mode=json_mode,
+        )
 
-    click.echo(f"ctx update: refreshing manifests for {target_path}")
-    if config.token_budget:
-        click.echo(f"Token budget: {config.token_budget:,}")
-    stats = update_tree(target_path, config, client, spec, progress=progress_cb)
-    click.echo(f"Directories refreshed: {stats.dirs_processed}")
-    click.echo(f"Directories skipped: {stats.dirs_skipped}")
-    click.echo(f"Tokens used: {stats.tokens_used}")
-    _echo_cost_summary(stats, config.provider, config.resolved_model())
-    click.echo(f"Errors: {len(stats.errors)}")
-    _echo_generation_errors(stats)
-    _echo_budget_warning(stats, config)
-    if stats.errors:
-        sys.exit(1)
+        click.echo(f"ctx update: refreshing manifests for {target_path}")
+        if config.token_budget:
+            click.echo(f"Token budget: {config.token_budget:,}")
+        with CtxLock(target_path, command="refresh"):
+            stats = update_tree(target_path, config, client, spec, progress=progress_cb)
+        click.echo(f"Directories refreshed: {stats.dirs_processed}")
+        click.echo(f"Directories skipped: {stats.dirs_skipped}")
+        click.echo(f"Tokens used: {stats.tokens_used}")
+        _echo_cost_summary(stats, config.provider, config.resolved_model())
+        click.echo(f"Errors: {len(stats.errors)}")
+        _echo_generation_errors(stats)
+        _echo_budget_warning(stats, config)
+
+        cost = _estimate_cost(stats.tokens_used, config.provider, config.resolved_model())
+        broker.set_data(
+            {
+                "dirs_processed": stats.dirs_processed,
+                "dirs_skipped": stats.dirs_skipped,
+                "files_processed": stats.files_processed,
+                "tokens_used": stats.tokens_used,
+                "errors_count": len(stats.errors),
+                "budget_exhausted": stats.budget_exhausted,
+                "strategy": "incremental",
+            }
+        )
+        broker.set_tokens(stats.tokens_used, cost)
+        if stats.errors:
+            for error in stats.errors:
+                broker.add_error("partial_failure", error)
+            if not json_mode:
+                sys.exit(1)
+    _exit_for_broker(broker, json_mode=json_mode)
 
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True), default=".", required=False)
 @click.option("--check-exit-code", is_flag=True, help="Exit with code 1 if any manifests are stale or missing.")
-def status(path: str, check_exit_code: bool) -> None:
+@click.pass_context
+def status(ctx: click.Context, path: str, check_exit_code: bool) -> None:
     """Show manifest health across a directory tree.
 
     Implementation:
@@ -392,22 +520,65 @@ def status(path: str, check_exit_code: bool) -> None:
         4. Print summary counts: N fresh, N stale, N missing.
         5. If check_exit_code is True and stale or missing > 0, sys.exit(1).
     """
-    target_path = Path(path)
-    spec = load_ignore_patterns(target_path)
-    results = inspect_directory_health(target_path, spec, target_path)
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="check", json_mode=json_mode) as broker:
+        target_path = Path(path)
+        spec = load_ignore_patterns(target_path)
+        results = inspect_directory_health(target_path, spec, target_path)
 
-    click.echo("STATUS   PATH")
-    for result in results:
-        click.echo(f"{result.status:<8} {_display_status_path(result.relative_path)}")
+        click.echo("STATUS   PATH")
+        for result in results:
+            click.echo(f"{result.status:<8} {_display_status_path(result.relative_path)}")
 
-    counts = Counter(result.status for result in results)
-    click.echo(
-        f"{counts.get('fresh', 0)} fresh, {counts.get('stale', 0)} stale, "
-        f"{counts.get('missing', 0)} missing"
-    )
+        counts = Counter(result.status for result in results)
+        click.echo(
+            f"{counts.get('fresh', 0)} fresh, {counts.get('stale', 0)} stale, "
+            f"{counts.get('missing', 0)} missing"
+        )
+        broker.set_data(
+            {
+                "mode": "health",
+                "directories": [
+                    {"path": entry.relative_path, "status": entry.status}
+                    for entry in results
+                ],
+                "summary": {
+                    "total": len(results),
+                    "fresh": counts.get("fresh", 0),
+                    "stale": counts.get("stale", 0),
+                    "missing": counts.get("missing", 0),
+                },
+            }
+        )
 
-    if check_exit_code and (counts.get("stale", 0) > 0 or counts.get("missing", 0) > 0):
-        sys.exit(1)
+        has_issues = counts.get("stale", 0) > 0 or counts.get("missing", 0) > 0
+        if check_exit_code and has_issues:
+            if json_mode:
+                if counts.get("stale", 0) > 0:
+                    broker.add_error("stale_manifests", "Stale manifests detected.")
+                if counts.get("missing", 0) > 0:
+                    broker.add_error("no_manifests", "Missing manifests detected.")
+            else:
+                sys.exit(1)
+    _exit_for_broker(broker, json_mode=json_mode)
+
+
+@cli.command(name="check")
+@click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True), default=".", required=False)
+@click.option("--check-exit-code", is_flag=True, help="Exit with code 1 if any manifests are stale or missing.")
+@click.option(
+    "--output",
+    "output_mode",
+    type=click.Choice(["human", "json"]),
+    default=None,
+    help="Output format override.",
+)
+@click.pass_context
+def check(ctx: click.Context, path: str, check_exit_code: bool, output_mode: str | None) -> None:
+    """Alias of ctx status for the agent-first check surface."""
+    if output_mode is not None:
+        ctx.obj["json_mode"] = output_mode == "json"
+    ctx.invoke(status, path=path, check_exit_code=check_exit_code)
 
 
 @cli.command()
@@ -418,53 +589,109 @@ def status(path: str, check_exit_code: bool) -> None:
 @click.option("--base-url", default=None, help="Custom API base URL.")
 @click.option("--cache-path", default=None, help="Disk cache file path. Set to '' to disable.")
 @click.option("--dry-run", is_flag=True, help="List affected directories without regenerating.")
-def smart_update(path: str, provider: Optional[str], model: Optional[str], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], dry_run: bool) -> None:
+@click.pass_context
+def smart_update(ctx: click.Context, path: str, provider: Optional[str], model: Optional[str], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], dry_run: bool) -> None:
     """Incrementally refresh stale CONTEXT.md files, focusing on git-changed files."""
     from ctx.git import get_changed_files
 
-    target_path = Path(path)
-    spec = load_ignore_patterns(target_path)
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="refresh", json_mode=json_mode) as broker:
+        target_path = Path(path)
+        spec = load_ignore_patterns(target_path)
 
-    changed_files = get_changed_files(target_path)
-    if not changed_files:
-        click.echo("No git-changed files detected. Nothing to update.")
-        return
-
-    if dry_run:
-        config = load_config(target_path, provider=provider, model=model, token_budget=token_budget, base_url=base_url, cache_path=cache_path, require_api_key=False)
-        stale = check_stale_dirs(target_path, config, spec, changed_files=changed_files)
-        click.echo(f"Detected {len(changed_files)} changed files.")
-        if not stale:
-            click.echo("All affected manifests are fresh. Nothing to regenerate.")
+        changed_files = get_changed_files(target_path)
+        if not changed_files:
+            click.echo("No git-changed files detected. Nothing to update.")
+            broker.set_data(
+                {
+                    "dirs_processed": 0,
+                    "dirs_skipped": 0,
+                    "files_processed": 0,
+                    "tokens_used": 0,
+                    "errors_count": 0,
+                    "budget_exhausted": False,
+                    "strategy": "smart",
+                }
+            )
             return
-        _echo_stale_dirs(stale, target_path)
-        return
 
-    progress_state = ProgressState(start_time=time.time())
-    target_path, config, spec, client, progress_cb = _build_generation_runtime(
-        path,
-        provider=provider,
-        model=model,
-        token_budget=token_budget,
-        base_url=base_url,
-        cache_path=cache_path,
-        progress_state=progress_state,
-    )
+        if dry_run:
+            config = load_config(target_path, provider=provider, model=model, token_budget=token_budget, base_url=base_url, cache_path=cache_path, require_api_key=False)
+            stale = check_stale_dirs(target_path, config, spec, changed_files=changed_files)
+            click.echo(f"Detected {len(changed_files)} changed files.")
+            if not stale:
+                click.echo("All affected manifests are fresh. Nothing to regenerate.")
+                broker.set_data(
+                    {
+                        "dirs_processed": 0,
+                        "dirs_skipped": 0,
+                        "files_processed": 0,
+                        "tokens_used": 0,
+                        "errors_count": 0,
+                        "budget_exhausted": False,
+                        "strategy": "smart",
+                    }
+                )
+                return
+            _echo_stale_dirs(stale, target_path)
+            broker.set_data(
+                {
+                    "dirs_processed": 0,
+                    "dirs_skipped": len(stale),
+                    "files_processed": 0,
+                    "tokens_used": 0,
+                    "errors_count": 0,
+                    "budget_exhausted": False,
+                    "strategy": "smart",
+                }
+            )
+            return
 
-    click.echo(f"ctx smart-update: refreshing manifests for {target_path} based on git changes")
-    click.echo(f"Detected {len(changed_files)} changed files. Processing affected directories.")
-    if config.token_budget:
-        click.echo(f"Token budget: {config.token_budget:,}")
-    stats = update_tree(target_path, config, client, spec, progress=progress_cb, changed_files=changed_files)
-    click.echo(f"Directories refreshed: {stats.dirs_processed}")
-    click.echo(f"Directories skipped: {stats.dirs_skipped}")
-    click.echo(f"Tokens used: {stats.tokens_used}")
-    _echo_cost_summary(stats, config.provider, config.resolved_model())
-    click.echo(f"Errors: {len(stats.errors)}")
-    _echo_generation_errors(stats)
-    _echo_budget_warning(stats, config)
-    if stats.errors:
-        sys.exit(1)
+        progress_state = ProgressState(start_time=time.time())
+        target_path, config, spec, client, progress_cb = _build_generation_runtime(
+            path,
+            provider=provider,
+            model=model,
+            token_budget=token_budget,
+            base_url=base_url,
+            cache_path=cache_path,
+            progress_state=progress_state,
+            json_mode=json_mode,
+        )
+
+        click.echo(f"ctx smart-update: refreshing manifests for {target_path} based on git changes")
+        click.echo(f"Detected {len(changed_files)} changed files. Processing affected directories.")
+        if config.token_budget:
+            click.echo(f"Token budget: {config.token_budget:,}")
+        with CtxLock(target_path, command="refresh"):
+            stats = update_tree(target_path, config, client, spec, progress=progress_cb, changed_files=changed_files)
+        click.echo(f"Directories refreshed: {stats.dirs_processed}")
+        click.echo(f"Directories skipped: {stats.dirs_skipped}")
+        click.echo(f"Tokens used: {stats.tokens_used}")
+        _echo_cost_summary(stats, config.provider, config.resolved_model())
+        click.echo(f"Errors: {len(stats.errors)}")
+        _echo_generation_errors(stats)
+        _echo_budget_warning(stats, config)
+
+        cost = _estimate_cost(stats.tokens_used, config.provider, config.resolved_model())
+        broker.set_data(
+            {
+                "dirs_processed": stats.dirs_processed,
+                "dirs_skipped": stats.dirs_skipped,
+                "files_processed": stats.files_processed,
+                "tokens_used": stats.tokens_used,
+                "errors_count": len(stats.errors),
+                "budget_exhausted": stats.budget_exhausted,
+                "strategy": "smart",
+            }
+        )
+        broker.set_tokens(stats.tokens_used, cost)
+        if stats.errors:
+            for error in stats.errors:
+                broker.add_error("partial_failure", error)
+            if not json_mode:
+                sys.exit(1)
+    _exit_for_broker(broker, json_mode=json_mode)
 
 
 @cli.command()
@@ -473,65 +700,84 @@ def smart_update(path: str, provider: Optional[str], model: Optional[str], token
 @click.option("--model", default=None, help="Model name.")
 @click.option("--base-url", default=None, help="Base URL for local providers.")
 @click.option("--cache-path", default=None, help="Path to LLM disk cache file.")
-def watch(path: str, provider: Optional[str], model: Optional[str], base_url: Optional[str], cache_path: Optional[str]) -> None:
+@click.pass_context
+def watch(ctx: click.Context, path: str, provider: Optional[str], model: Optional[str], base_url: Optional[str], cache_path: Optional[str]) -> None:
     """Watch a directory tree and regenerate manifests on file changes."""
-    from ctx.watcher import run_watch
-    target_path, config, spec, client, _ = _build_generation_runtime(
-        path,
-        provider=provider,
-        model=model,
-        base_url=base_url,
-        cache_path=cache_path,
-    )
-    run_watch(target_path, config, client, spec)
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="refresh", json_mode=json_mode) as broker:
+        from ctx.watcher import run_watch
+
+        target_path, config, spec, client, _ = _build_generation_runtime(
+            path,
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            cache_path=cache_path,
+            json_mode=json_mode,
+        )
+        broker.set_data({"watching": str(target_path)})
+        run_watch(target_path, config, client, spec)
+    _exit_for_broker(broker, json_mode=json_mode)
 
 
 @cli.command()
 @click.argument("path", default=".", required=False)
 @click.option("--check", "check_only", is_flag=True, help="Print detected provider without writing config.")
-def setup(path: str, check_only: bool) -> None:
+@click.pass_context
+def setup(ctx: click.Context, path: str, check_only: bool) -> None:
     """Auto-detect LLM provider and write .ctxconfig."""
-    target_path = Path(path)
-    config_file = target_path / ".ctxconfig"
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="refresh", json_mode=json_mode) as broker:
+        target_path = Path(path)
+        config_file = target_path / ".ctxconfig"
 
-    def _probe_msg(provider: str) -> None:
-        label = {"ollama": "Ollama", "lmstudio": "LM Studio"}.get(provider, provider)
-        click.echo(f"Probing {label}...")
+        def _probe_msg(provider: str) -> None:
+            label = {"ollama": "Ollama", "lmstudio": "LM Studio"}.get(provider, provider)
+            click.echo(f"Probing {label}...")
 
-    if not check_only and config_file.exists():
-        click.echo(f".ctxconfig already exists:\n\n{config_file.read_text(encoding='utf-8')}")
-        if not click.confirm("Overwrite?", default=False):
-            click.echo("Cancelled.")
+        if not check_only and config_file.exists():
+            click.echo(f".ctxconfig already exists:\n\n{config_file.read_text(encoding='utf-8')}")
+            if not click.confirm("Overwrite?", default=False):
+                click.echo("Cancelled.")
+                broker.set_data({"configured": False, "provider": None, "model": None})
+                return
+
+        result = detect_provider(_probe_callback=_probe_msg)
+        if result is None:
+            raise click.UsageError(
+                "No LLM provider detected.\n"
+                "  Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or start Ollama / LM Studio first."
+            )
+
+        provider_name, model_name = result
+        detected_via = PROVIDER_DETECTED_VIA.get(provider_name, provider_name)
+        click.echo(f"Detected: {provider_name} ({detected_via})")
+
+        if check_only:
+            ok = True
+            conn_error = None
+            if provider_name in ("anthropic", "openai"):
+                api_key_env = "ANTHROPIC_API_KEY" if provider_name == "anthropic" else "OPENAI_API_KEY"
+                api_key = os.getenv(api_key_env, "")
+                ok, conn_error = probe_provider_connectivity(provider_name, api_key)
+                if ok:
+                    click.echo("Connectivity: OK")
+                else:
+                    click.echo(f"Connectivity: FAILED — {conn_error}", err=True)
+                    _echo_proxy_guidance(_active_proxy_vars())
+                    if not json_mode:
+                        sys.exit(1)
+                    broker.add_error("provider_unreachable", str(conn_error), hint="Run ctx setup --check")
+            broker.set_data({"configured": False, "provider": provider_name, "model": model_name, "check_only": True, "connectivity_ok": ok})
             return
 
-    result = detect_provider(_probe_callback=_probe_msg)
-    if result is None:
-        raise click.UsageError(
-            "No LLM provider detected.\n"
-            "  Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or start Ollama / LM Studio first."
-        )
-
-    provider, model = result
-    detected_via = PROVIDER_DETECTED_VIA.get(provider, provider)
-    click.echo(f"Detected: {provider} ({detected_via})")
-
-    if check_only:
-        if provider in ("anthropic", "openai"):
-            api_key_env = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
-            api_key = os.getenv(api_key_env, "")
-            ok, conn_error = probe_provider_connectivity(provider, api_key)
-            if ok:
-                click.echo("Connectivity: OK")
-            else:
-                click.echo(f"Connectivity: FAILED — {conn_error}", err=True)
-                _echo_proxy_guidance(_active_proxy_vars())
-                sys.exit(1)
-        return
-
-    base_url = DEFAULT_BASE_URLS.get(provider)
-    write_default_config(target_path, provider, model=model, base_url=base_url)
-    click.echo(f"Config written to {config_file}")
-    click.echo("\nNext step: run `ctx init .` to generate manifests.")
+        base_url_value = DEFAULT_BASE_URLS.get(provider_name)
+        write_default_config(target_path, provider_name, model=model_name, base_url=base_url_value)
+        click.echo(f"Config written to {config_file}")
+        click.echo("\nNext step: run `ctx init .` to generate manifests.")
+        broker.set_data({"configured": True, "provider": provider_name, "model": model_name})
+        broker.set_recommended_next("ctx init .")
+    _exit_for_broker(broker, json_mode=json_mode)
 
 
 @cli.command()
@@ -540,7 +786,8 @@ def setup(path: str, check_only: bool) -> None:
 @click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format.")
 @click.option("--quiet", is_flag=True, help="Exit code only: exit 1 if changes, exit 0 if clean. No stdout.")
 @click.option("--stat", is_flag=True, help="Print summary count only, not file list.")
-def diff(path: str, since: Optional[str], output_format: str, quiet: bool, stat: bool) -> None:
+@click.pass_context
+def diff(ctx: click.Context, path: str, since: Optional[str], output_format: str, quiet: bool, stat: bool) -> None:
     """Show CONTEXT.md files that changed since the last generation run.
 
     Uses git when available; falls back to mtime comparison when outside a
@@ -551,85 +798,68 @@ def diff(path: str, since: Optional[str], output_format: str, quiet: bool, stat:
       [new]   — manifest untracked/new (git path)
       [stale] — manifest older than source files (mtime fallback path)
     """
-    import json
     import subprocess
 
     from ctx.git import is_unborn_head_error
 
-    target_path = Path(path)
-    ref = since or "HEAD"
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="check", json_mode=json_mode) as broker:
+        target_path = Path(path)
+        ref = since or "HEAD"
 
-    def _split_lines(stdout: str) -> list[str]:
-        return [line.strip() for line in stdout.splitlines() if line.strip()]
+        def _split_lines(stdout: str) -> list[str]:
+            return [line.strip() for line in stdout.splitlines() if line.strip()]
 
-    def _emit_git_results(modified_files: list[str], new_files_sorted: list[str], label: str) -> None:
-        all_changed = sorted(set(modified_files) | set(new_files_sorted))
+        def _emit_git_results(modified_files: list[str], new_files_sorted: list[str], label: str) -> None:
+            all_changed = sorted(set(modified_files) | set(new_files_sorted))
+            data = {"mode": "diff", "modified": modified_files, "new": new_files_sorted, "stale": []}
+            broker.set_data(data)
 
-        if quiet:
-            if all_changed:
-                sys.exit(1)
-            return
+            if quiet:
+                if all_changed and not json_mode:
+                    sys.exit(1)
+                if all_changed and json_mode:
+                    broker.add_error("stale_manifests", "Manifest changes detected.")
+                return
 
-        if stat:
-            mod_count = len(modified_files)
-            new_count = len(new_files_sorted)
-            parts = []
-            if mod_count:
-                parts.append(f"{mod_count} modified")
-            if new_count:
-                parts.append(f"{new_count} new")
-            click.echo(", ".join(parts) if parts else f"No CONTEXT.md files changed {label}.")
-            return
+            if stat:
+                mod_count = len(modified_files)
+                new_count = len(new_files_sorted)
+                parts = []
+                if mod_count:
+                    parts.append(f"{mod_count} modified")
+                if new_count:
+                    parts.append(f"{new_count} new")
+                click.echo(", ".join(parts) if parts else f"No CONTEXT.md files changed {label}.")
+                return
 
-        if output_format == "json":
-            click.echo(json.dumps({"modified": modified_files, "new": new_files_sorted}))
-            return
+            if output_format == "json" and not json_mode:
+                click.echo(json.dumps({"modified": modified_files, "new": new_files_sorted}))
+                return
 
-        if not all_changed:
-            click.echo(f"No CONTEXT.md files changed {label}.")
-            return
-        click.echo(f"{len(all_changed)} CONTEXT.md file{'s' if len(all_changed) != 1 else ''} changed {label}:")
-        for manifest_path in all_changed:
-            prefix = "new" if manifest_path in set(new_files_sorted) else "mod"
-            click.echo(f"  [{prefix}] {manifest_path}")
+            if not all_changed:
+                click.echo(f"No CONTEXT.md files changed {label}.")
+                return
+            click.echo(f"{len(all_changed)} CONTEXT.md file{'s' if len(all_changed) != 1 else ''} changed {label}:")
+            for manifest_path in all_changed:
+                prefix = "new" if manifest_path in set(new_files_sorted) else "mod"
+                click.echo(f"  [{prefix}] {manifest_path}")
 
-    def _fallback_to_mtime() -> None:
-        if since is not None:
-            raise click.UsageError("--since requires git to be available and the path to be inside a git repository.")
-        click.echo("Warning: git not available or command failed. Falling back to mtime comparison.", err=True)
+        def _fallback_to_mtime() -> None:
+            if since is not None:
+                raise click.UsageError("--since requires git to be available and the path to be inside a git repository.")
+            click.echo("Warning: git not available or command failed. Falling back to mtime comparison.", err=True)
 
-    # --- git path ---
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", ref, "--", "*/CONTEXT.md", "CONTEXT.md"],
-            cwd=str(target_path),
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        changed = _split_lines(result.stdout)
-        untracked = subprocess.run(
-            ["git", "ls-files", "--others", "--exclude-standard", "--", "*/CONTEXT.md", "CONTEXT.md"],
-            cwd=str(target_path),
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        new_files = _split_lines(untracked.stdout)
-        new_files_set = set(new_files)
-        modified_files = sorted(f for f in changed if f not in new_files_set)
-        new_files_sorted = sorted(new_files_set)
-        _emit_git_results(modified_files, new_files_sorted, f"since {ref}")
-        return
-    except subprocess.CalledProcessError as exc:
-        if since is None and ref == "HEAD" and is_unborn_head_error(exc.stderr):
-            staged = subprocess.run(
-                ["git", "diff", "--cached", "--name-only", "--", "*/CONTEXT.md", "CONTEXT.md"],
+        # --- git path ---
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--name-only", ref, "--", "*/CONTEXT.md", "CONTEXT.md"],
                 cwd=str(target_path),
                 capture_output=True,
                 text=True,
                 check=True,
             )
+            changed = _split_lines(result.stdout)
             untracked = subprocess.run(
                 ["git", "ls-files", "--others", "--exclude-standard", "--", "*/CONTEXT.md", "CONTEXT.md"],
                 cwd=str(target_path),
@@ -637,52 +867,78 @@ def diff(path: str, since: Optional[str], output_format: str, quiet: bool, stat:
                 text=True,
                 check=True,
             )
-            new_files_sorted = sorted(set(_split_lines(staged.stdout)) | set(_split_lines(untracked.stdout)))
-            _emit_git_results([], new_files_sorted, "in repo without commits yet")
+            new_files = _split_lines(untracked.stdout)
+            new_files_set = set(new_files)
+            modified_files = sorted(f for f in changed if f not in new_files_set)
+            new_files_sorted = sorted(new_files_set)
+            _emit_git_results(modified_files, new_files_sorted, f"since {ref}")
             return
-        _fallback_to_mtime()
-    except FileNotFoundError:
-        _fallback_to_mtime()
+        except subprocess.CalledProcessError as exc:
+            if since is None and ref == "HEAD" and is_unborn_head_error(exc.stderr):
+                staged = subprocess.run(
+                    ["git", "diff", "--cached", "--name-only", "--", "*/CONTEXT.md", "CONTEXT.md"],
+                    cwd=str(target_path),
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                untracked = subprocess.run(
+                    ["git", "ls-files", "--others", "--exclude-standard", "--", "*/CONTEXT.md", "CONTEXT.md"],
+                    cwd=str(target_path),
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                new_files_sorted = sorted(set(_split_lines(staged.stdout)) | set(_split_lines(untracked.stdout)))
+                _emit_git_results([], new_files_sorted, "in repo without commits yet")
+                return
+            _fallback_to_mtime()
+        except FileNotFoundError:
+            _fallback_to_mtime()
 
-    # --- mtime fallback (non-git repos) ---
-    # Note: mtime path cannot distinguish modified vs new; all detected files use [stale].
-    click.echo("Warning: git not available. Falling back to mtime comparison.", err=True)
-    stale: list[str] = []
-    for manifest in sorted(target_path.rglob("CONTEXT.md")):
-        try:
-            manifest_mtime = manifest.stat().st_mtime
-            if any(
-                f.stat().st_mtime > manifest_mtime
-                for f in manifest.parent.iterdir()
-                if f.is_file() and f.name != "CONTEXT.md"
-            ):
-                try:
-                    rel = manifest.relative_to(target_path).as_posix()
-                except ValueError:
-                    rel = manifest.as_posix()
-                stale.append(rel)
-        except OSError:
-            continue
+        # --- mtime fallback (non-git repos) ---
+        # Note: mtime path cannot distinguish modified vs new; all detected files use [stale].
+        click.echo("Warning: git not available. Falling back to mtime comparison.", err=True)
+        stale: list[str] = []
+        for manifest in sorted(target_path.rglob("CONTEXT.md")):
+            try:
+                manifest_mtime = manifest.stat().st_mtime
+                if any(
+                    f.stat().st_mtime > manifest_mtime
+                    for f in manifest.parent.iterdir()
+                    if f.is_file() and f.name != "CONTEXT.md"
+                ):
+                    try:
+                        rel = manifest.relative_to(target_path).as_posix()
+                    except ValueError:
+                        rel = manifest.as_posix()
+                    stale.append(rel)
+            except OSError:
+                continue
 
-    if quiet:
-        if stale:
-            sys.exit(1)
-        return
+        broker.set_data({"mode": "diff", "modified": [], "new": [], "stale": stale})
+        if quiet:
+            if stale and not json_mode:
+                sys.exit(1)
+            if stale and json_mode:
+                broker.add_error("stale_manifests", "Stale manifests detected.")
+            return
 
-    if stat:
-        click.echo(f"{len(stale)} stale" if stale else "No CONTEXT.md files appear stale (mtime check).")
-        return
+        if stat:
+            click.echo(f"{len(stale)} stale" if stale else "No CONTEXT.md files appear stale (mtime check).")
+            return
 
-    if output_format == "json":
-        click.echo(json.dumps({"stale": stale}))
-        return
+        if output_format == "json" and not json_mode:
+            click.echo(json.dumps({"stale": stale}))
+            return
 
-    if not stale:
-        click.echo("No CONTEXT.md files appear stale (mtime check).")
-        return
-    click.echo(f"{len(stale)} CONTEXT.md file{'s' if len(stale) != 1 else ''} may be stale (mtime check):")
-    for f in stale:
-        click.echo(f"  [stale] {f}")
+        if not stale:
+            click.echo("No CONTEXT.md files appear stale (mtime check).")
+            return
+        click.echo(f"{len(stale)} CONTEXT.md file{'s' if len(stale) != 1 else ''} may be stale (mtime check):")
+        for f in stale:
+            click.echo(f"  [stale] {f}")
+    _exit_for_broker(broker, json_mode=json_mode)
 
 
 def _directory_within_depth(path: Path, root: Path, depth: Optional[int]) -> bool:
@@ -702,7 +958,8 @@ def _directory_within_depth(path: Path, root: Path, depth: Optional[int]) -> boo
     help="Which manifests to export: all (default), stale, or missing.",
 )
 @click.option("--depth", type=int, default=None, help="Limit export to N levels of nesting (0 = root only).")
-def export(path: str, output: Optional[str], filter_mode: str, depth: Optional[int]) -> None:
+@click.pass_context
+def export(ctx: click.Context, path: str, output: Optional[str], filter_mode: str, depth: Optional[int]) -> None:
     """Concatenate all CONTEXT.md files to stdout or a file.
 
     Each manifest is prefixed with a header line:
@@ -710,57 +967,77 @@ def export(path: str, output: Optional[str], filter_mode: str, depth: Optional[i
 
     Respects .ctxignore patterns (same as ctx init/update).
     """
-    root = Path(path).resolve()
-    spec = load_ignore_patterns(root)
-    health_entries = [
-        entry for entry in inspect_directory_health(root, spec, root)
-        if _directory_within_depth(entry.path, root, depth)
-    ]
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="export", json_mode=json_mode) as broker:
+        root = Path(path).resolve()
+        spec = load_ignore_patterns(root)
+        health_entries = [
+            entry for entry in inspect_directory_health(root, spec, root)
+            if _directory_within_depth(entry.path, root, depth)
+        ]
 
-    if filter_mode == "missing":
-        missing_dirs = []
-        for entry in health_entries:
-            if entry.status != "missing":
-                continue
-            rel_display = entry.relative_path if entry.relative_path != "." else ""
-            missing_dirs.append((rel_display + "/") if rel_display else "./")
-        content = "\n".join(f"# {d} [MISSING]" for d in missing_dirs)
+        if filter_mode == "missing":
+            missing_dirs = []
+            for entry in health_entries:
+                if entry.status != "missing":
+                    continue
+                rel_display = entry.relative_path if entry.relative_path != "." else ""
+                missing_dirs.append((rel_display + "/") if rel_display else "./")
+            content = "\n".join(f"# {d} [MISSING]" for d in missing_dirs)
+            broker.set_data(
+                {
+                    "manifests_exported": len(missing_dirs),
+                    "filter": filter_mode,
+                    "depth": depth,
+                    "content": content,
+                }
+            )
+            if output:
+                Path(output).write_text(content, encoding="utf-8")
+                n = len(missing_dirs)
+                click.echo(f"Exported {n} missing director{'y' if n == 1 else 'ies'} to {output}")
+            elif content:
+                click.echo(content, nl=False)
+            return
+
+        files = [
+            entry.path / "CONTEXT.md"
+            for entry in health_entries
+            if entry.status != "missing" and (filter_mode != "stale" or entry.status == "stale")
+        ]
+
+        parts = []
+        for f in files:
+            try:
+                rel = f.relative_to(root).as_posix()
+            except ValueError:
+                rel = f.as_posix()
+            parts.append(f"# {rel}\n\n{f.read_text(encoding='utf-8')}")
+
+        content = "\n\n".join(parts)
+        broker.set_data(
+            {
+                "manifests_exported": len(files),
+                "filter": filter_mode,
+                "depth": depth,
+                "content": content,
+            }
+        )
+
         if output:
             Path(output).write_text(content, encoding="utf-8")
-            n = len(missing_dirs)
-            click.echo(f"Exported {n} missing director{'y' if n == 1 else 'ies'} to {output}")
-        elif content:
+            click.echo(f"Exported {len(files)} manifest{'s' if len(files) != 1 else ''} to {output}")
+        else:
             click.echo(content, nl=False)
-        return
-
-    files = [
-        entry.path / "CONTEXT.md"
-        for entry in health_entries
-        if entry.status != "missing" and (filter_mode != "stale" or entry.status == "stale")
-    ]
-
-    parts = []
-    for f in files:
-        try:
-            rel = f.relative_to(root).as_posix()
-        except ValueError:
-            rel = f.as_posix()
-        parts.append(f"# {rel}\n\n{f.read_text(encoding='utf-8')}")
-
-    content = "\n\n".join(parts)
-
-    if output:
-        Path(output).write_text(content, encoding="utf-8")
-        click.echo(f"Exported {len(files)} manifest{'s' if len(files) != 1 else ''} to {output}")
-    else:
-        click.echo(content, nl=False)
+    _exit_for_broker(broker, json_mode=json_mode)
 
 
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--verbose", "-v", is_flag=True, help="Show per-directory breakdown table.")
 @click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format.")
-def stats(path: str, verbose: bool, output_format: str) -> None:
+@click.pass_context
+def stats(ctx: click.Context, path: str, verbose: bool, output_format: str) -> None:
     """Show coverage summary across all directories.
 
     Reports:
@@ -770,31 +1047,30 @@ def stats(path: str, verbose: bool, output_format: str) -> None:
       stale       — directories whose manifest hash no longer matches current contents
       tokens      — sum of tokens_total from all manifest frontmatters
     """
-    import json
-    root = Path(path).resolve()
-    spec = load_ignore_patterns(root)
-    health_entries = inspect_directory_health(root, spec, root)
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="check", json_mode=json_mode) as broker:
+        root = Path(path).resolve()
+        spec = load_ignore_patterns(root)
+        health_entries = inspect_directory_health(root, spec, root)
 
-    dirs_total = len(health_entries)
-    dirs_covered = sum(1 for entry in health_entries if entry.status != "missing")
-    dirs_missing = sum(1 for entry in health_entries if entry.status == "missing")
-    dirs_stale = sum(1 for entry in health_entries if entry.status == "stale")
-    tokens_total = sum(entry.tokens_total or 0 for entry in health_entries)
+        dirs_total = len(health_entries)
+        dirs_covered = sum(1 for entry in health_entries if entry.status != "missing")
+        dirs_missing = sum(1 for entry in health_entries if entry.status == "missing")
+        dirs_stale = sum(1 for entry in health_entries if entry.status == "stale")
+        tokens_total = sum(entry.tokens_total or 0 for entry in health_entries)
 
-    dir_rows: list[tuple[str, str, Optional[int]]] = []
-    if verbose:
-        dir_rows = [
-            (
-                entry.relative_path,
-                "covered" if entry.status == "fresh" else entry.status,
-                entry.tokens_total,
-            )
-            for entry in health_entries
-        ]
-
-    def _render_json() -> None:
-        """Render stats in JSON format."""
-        output: dict = {
+        dir_rows: list[tuple[str, str, Optional[int]]] = []
+        if verbose:
+            dir_rows = [
+                (
+                    entry.relative_path,
+                    "covered" if entry.status == "fresh" else entry.status,
+                    entry.tokens_total,
+                )
+                for entry in health_entries
+            ]
+        data: dict[str, object] = {
+            "mode": "stats",
             "aggregate": {
                 "dirs": dirs_total,
                 "covered": dirs_covered,
@@ -802,74 +1078,103 @@ def stats(path: str, verbose: bool, output_format: str) -> None:
                 "stale": dirs_stale,
                 "tokens": tokens_total,
             },
-        }
-        if verbose and dir_rows:
-            output["directories"] = [
+            "directories": [
                 {"path": rel, "status": status, "tokens": tok}
                 for rel, status, tok in dir_rows
-            ]
-        click.echo(json.dumps(output, indent=2))
+            ] if verbose and dir_rows else [],
+        }
+        broker.set_data(data)
 
-    def _render_text() -> None:
-        """Render stats in text format."""
-        click.echo(f"dirs:    {dirs_total}")
-        click.echo(f"covered: {dirs_covered}")
-        click.echo(f"missing: {dirs_missing}")
-        click.echo(f"stale:   {dirs_stale}")
-        click.echo(f"tokens:  {tokens_total}")
+        def _render_json() -> None:
+            """Render stats in JSON format."""
+            output: dict[str, object] = {
+                "aggregate": {
+                    "dirs": dirs_total,
+                    "covered": dirs_covered,
+                    "missing": dirs_missing,
+                    "stale": dirs_stale,
+                    "tokens": tokens_total,
+                },
+            }
+            if verbose and dir_rows:
+                output["directories"] = [
+                    {"path": rel, "status": status, "tokens": tok}
+                    for rel, status, tok in dir_rows
+                ]
+            click.echo(json.dumps(output, indent=2))
 
-        if verbose and dir_rows:
-            click.echo("")
-            click.echo(f"{'Directory':<32} {'status':<9} {'tokens'}")
-            click.echo(f"{'-'*32} {'-'*9} {'-'*6}")
-            for rel_path, status, tok in dir_rows:
-                tok_str = str(tok) if tok is not None else "-"
-                click.echo(f"{rel_path:<32} {status:<9} {tok_str}")
+        def _render_text() -> None:
+            """Render stats in text format."""
+            click.echo(f"dirs:    {dirs_total}")
+            click.echo(f"covered: {dirs_covered}")
+            click.echo(f"missing: {dirs_missing}")
+            click.echo(f"stale:   {dirs_stale}")
+            click.echo(f"tokens:  {tokens_total}")
 
-    if output_format == "json":
-        _render_json()
-    else:
-        _render_text()
+            if verbose and dir_rows:
+                click.echo("")
+                click.echo(f"{'Directory':<32} {'status':<9} {'tokens'}")
+                click.echo(f"{'-'*32} {'-'*9} {'-'*6}")
+                for rel_path, status, tok in dir_rows:
+                    tok_str = str(tok) if tok is not None else "-"
+                    click.echo(f"{rel_path:<32} {status:<9} {tok_str}")
+
+        if output_format == "json" and not json_mode:
+            _render_json()
+        else:
+            _render_text()
+    _exit_for_broker(broker, json_mode=json_mode)
 
 
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
 @click.option("--dry-run", is_flag=True, help="List CONTEXT.md files that would be deleted without removing them.")
-def clean(path: str, yes: bool, dry_run: bool) -> None:
+@click.pass_context
+def clean(ctx: click.Context, path: str, yes: bool, dry_run: bool) -> None:
     """Remove all CONTEXT.md files from the directory tree."""
-    root = Path(path).resolve()
-    manifests = sorted(root.rglob("CONTEXT.md"))
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="reset", json_mode=json_mode) as broker:
+        root = Path(path).resolve()
+        manifests = sorted(root.rglob("CONTEXT.md"))
 
-    if not manifests:
-        click.echo("No CONTEXT.md files found.")
-        return
-
-    if dry_run:
-        click.echo(f"{len(manifests)} CONTEXT.md file(s) would be deleted:")
-        for m in manifests:
-            rel = m.relative_to(root).as_posix()
-            click.echo(f"  {rel}")
-        return
-
-    if not yes:
-        confirmed = click.confirm(
-            f"Found {len(manifests)} CONTEXT.md file(s). Delete all?", default=False
-        )
-        if not confirmed:
-            click.echo("Aborted.")
+        if not manifests:
+            click.echo("No CONTEXT.md files found.")
+            broker.set_data({"manifests_removed": 0, "paths": []})
             return
 
-    for m in manifests:
-        m.unlink()
+        rel_paths = [m.relative_to(root).as_posix() for m in manifests]
+        if dry_run:
+            click.echo(f"{len(manifests)} CONTEXT.md file(s) would be deleted:")
+            for rel in rel_paths:
+                click.echo(f"  {rel}")
+            broker.set_data({"manifests_removed": 0, "paths": rel_paths})
+            return
 
-    click.echo(f"Removed {len(manifests)} CONTEXT.md file(s).")
+        should_delete = yes or json_mode
+        if not should_delete:
+            confirmed = click.confirm(
+                f"Found {len(manifests)} CONTEXT.md file(s). Delete all?", default=False
+            )
+            if not confirmed:
+                click.echo("Aborted.")
+                broker.set_data({"manifests_removed": 0, "paths": []})
+                return
+
+        with CtxLock(root, command="reset"):
+            for manifest_path in manifests:
+                manifest_path.unlink()
+
+        click.echo(f"Removed {len(manifests)} CONTEXT.md file(s).")
+        broker.set_data({"manifests_removed": len(manifests), "paths": rel_paths})
+    _exit_for_broker(broker, json_mode=json_mode)
 
 
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format.")
-def verify(path: str, output_format: str) -> None:
+@click.pass_context
+def verify(ctx: click.Context, path: str, output_format: str) -> None:
     """Check CONTEXT.md validity, freshness, and coverage.
 
     Required fields:
@@ -886,64 +1191,63 @@ def verify(path: str, output_format: str) -> None:
       - Stale and missing directories are reported as verification failures
       - Exit 0 if all manifests are valid, fresh, and present; exit 1 otherwise
     """
-    import json
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="check", json_mode=json_mode) as broker:
+        root = Path(path).resolve()
+        spec = load_ignore_patterns(root)
+        health_entries = inspect_directory_health(root, spec, root)
 
-    root = Path(path).resolve()
-    spec = load_ignore_patterns(root)
-    health_entries = inspect_directory_health(root, spec, root)
+        required_fields = [
+            "generated",
+            "generator",
+            "model",
+            "content_hash",
+            "files",
+            "dirs",
+            "tokens_total",
+        ]
 
-    required_fields = [
-        "generated",
-        "generator",
-        "model",
-        "content_hash",
-        "files",
-        "dirs",
-        "tokens_total",
-    ]
+        malformed_manifests = sorted(
+            entry.relative_path for entry in health_entries
+            if entry.error is not None
+        )
+        missing_manifests = sorted(
+            entry.relative_path for entry in health_entries
+            if entry.status == "missing"
+        )
+        invalid_manifests: list[tuple[str, list[str]]] = []
 
-    malformed_manifests = sorted(
-        entry.relative_path for entry in health_entries
-        if entry.error is not None
-    )
-    missing_manifests = sorted(
-        entry.relative_path for entry in health_entries
-        if entry.status == "missing"
-    )
-    invalid_manifests: list[tuple[str, list[str]]] = []
+        for entry in health_entries:
+            if entry.status == "missing" or entry.error is not None or entry.frontmatter is None:
+                continue
 
-    for entry in health_entries:
-        if entry.status == "missing" or entry.error is not None or entry.frontmatter is None:
-            continue
+            missing_fields = []
+            for field in required_fields:
+                value = getattr(entry.frontmatter, field, None)
+                if value is None or value == "":
+                    missing_fields.append(field)
 
-        missing_fields = []
-        for field in required_fields:
-            value = getattr(entry.frontmatter, field, None)
-            if value is None or value == "":
-                missing_fields.append(field)
+            if missing_fields:
+                invalid_manifests.append((entry.relative_path, missing_fields))
 
-        if missing_fields:
-            invalid_manifests.append((entry.relative_path, missing_fields))
+        invalid_field_paths = {rel for rel, _fields in invalid_manifests}
+        stale_manifests = sorted(
+            entry.relative_path for entry in health_entries
+            if entry.status == "stale"
+            and entry.error is None
+            and entry.relative_path not in invalid_field_paths
+        )
 
-    invalid_field_paths = {rel for rel, _fields in invalid_manifests}
-    stale_manifests = sorted(
-        entry.relative_path for entry in health_entries
-        if entry.status == "stale"
-        and entry.error is None
-        and entry.relative_path not in invalid_field_paths
-    )
-
-    invalid_paths = set(malformed_manifests) | invalid_field_paths | set(stale_manifests) | set(missing_manifests)
-    aggregate = {
-        "dirs": len(health_entries),
-        "fresh": sum(1 for entry in health_entries if entry.status == "fresh"),
-        "stale": sum(1 for entry in health_entries if entry.status == "stale"),
-        "missing": len(missing_manifests),
-        "invalid": len(invalid_paths),
-    }
-
-    if output_format == "json":
-        click.echo(json.dumps({
+        invalid_paths = set(malformed_manifests) | invalid_field_paths | set(stale_manifests) | set(missing_manifests)
+        aggregate = {
+            "dirs": len(health_entries),
+            "fresh": sum(1 for entry in health_entries if entry.status == "fresh"),
+            "stale": sum(1 for entry in health_entries if entry.status == "stale"),
+            "missing": len(missing_manifests),
+            "invalid": len(invalid_paths),
+        }
+        output_payload = {
+            "mode": "verify",
             "aggregate": aggregate,
             "malformed": malformed_manifests,
             "missing_fields": [
@@ -952,57 +1256,78 @@ def verify(path: str, output_format: str) -> None:
             ],
             "stale": stale_manifests,
             "missing": missing_manifests,
-        }, indent=2))
-        sys.exit(1 if invalid_paths else 0)
+        }
+        broker.set_data(output_payload)
 
-    if malformed_manifests:
-        click.echo("Malformed frontmatter:")
-        for rel in malformed_manifests:
-            click.echo(f"  {rel}")
+        if output_format == "json" and not json_mode:
+            click.echo(json.dumps({
+                "aggregate": aggregate,
+                "malformed": malformed_manifests,
+                "missing_fields": [
+                    {"path": rel, "fields": fields}
+                    for rel, fields in sorted(invalid_manifests)
+                ],
+                "stale": stale_manifests,
+                "missing": missing_manifests,
+            }, indent=2))
+            sys.exit(1 if invalid_paths else 0)
 
-    if invalid_manifests:
-        click.echo("Missing required fields:")
-        for rel, fields in sorted(invalid_manifests):
-            field_list = ", ".join(fields)
-            click.echo(f"  {rel}: {field_list}")
+        if malformed_manifests:
+            click.echo("Malformed frontmatter:")
+            for rel in malformed_manifests:
+                click.echo(f"  {rel}")
 
-    if stale_manifests:
-        click.echo("Stale manifests:")
-        for rel in stale_manifests:
-            click.echo(f"  {rel}")
+        if invalid_manifests:
+            click.echo("Missing required fields:")
+            for rel, fields in sorted(invalid_manifests):
+                field_list = ", ".join(fields)
+                click.echo(f"  {rel}: {field_list}")
 
-    if missing_manifests:
-        click.echo("Missing manifests:")
-        for rel in missing_manifests:
-            click.echo(f"  {rel}")
+        if stale_manifests:
+            click.echo("Stale manifests:")
+            for rel in stale_manifests:
+                click.echo(f"  {rel}")
 
-    if invalid_paths:
-        click.echo(
-            f"\nHealth summary: {aggregate['fresh']} fresh, {aggregate['stale']} stale, "
-            f"{aggregate['missing']} missing."
-        )
-        click.echo(f"Found {len(invalid_paths)} directory issue(s).")
-        sys.exit(1)
+        if missing_manifests:
+            click.echo("Missing manifests:")
+            for rel in missing_manifests:
+                click.echo(f"  {rel}")
 
-    click.echo("All manifests are valid, present, and fresh.")
-    sys.exit(0)
+        if invalid_paths:
+            click.echo(
+                f"\nHealth summary: {aggregate['fresh']} fresh, {aggregate['stale']} stale, "
+                f"{aggregate['missing']} missing."
+            )
+            click.echo(f"Found {len(invalid_paths)} directory issue(s).")
+            if json_mode:
+                broker.add_error("invalid_manifests", "Manifest verification found invalid entries.")
+            else:
+                sys.exit(1)
+        elif not json_mode:
+            click.echo("All manifests are valid, present, and fresh.")
+            sys.exit(0)
+    _exit_for_broker(broker, json_mode=json_mode)
 
 
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, resolve_path=True))
 @click.option("--host", default="127.0.0.1", help="Host address for the server.")
 @click.option("--port", type=int, default=8000, help="Port for the server.")
-def serve(path: str, host: str, port: int) -> None:
+@click.pass_context
+def serve(ctx: click.Context, path: str, host: str, port: int) -> None:
     """Start the MCP server to expose CONTEXT.md manifests.
     
     Serves manifests from the specified PATH (default: current directory).
     All manifest paths are resolved relative to this root.
     """
-    from pathlib import Path
     from ctx.server import start_server
-    
-    root = Path(path).resolve()
-    click.echo(f"Starting ctx MCP server on http://{host}:{port}")
-    click.echo(f"Serving manifests from: {root}")
-    start_server(host=host, port=port, root=root)
+
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="check", json_mode=json_mode) as broker:
+        root = Path(path).resolve()
+        click.echo(f"Starting ctx MCP server on http://{host}:{port}")
+        click.echo(f"Serving manifests from: {root}")
+        broker.set_data({"host": host, "port": port, "root": str(root)})
+        start_server(host=host, port=port, root=root)
+    _exit_for_broker(broker, json_mode=json_mode)
 
