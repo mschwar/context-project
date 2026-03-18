@@ -34,6 +34,7 @@ node_modules/
 .obsidian/
 
 # Workspace / agent noise
+.claude/
 .pytest_cache/
 .worktrees/
 .tmp/

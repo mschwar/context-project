@@ -1,11 +1,11 @@
 ---
-generated: '2026-03-18T18:37:16Z'
+generated: '2026-03-18T18:45:27Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:83949ffc2a3277040940353546da56aa0aacc36babce9907f0a58ecfdc5f9682
+content_hash: sha256:a056213daa7df4c1a469d42f9f554c7c739ccac048523504cdd730c09f9966da
 files: 17
 dirs: 1
-tokens_total: 17471
+tokens_total: 17475
 ---
 # C:/Users/Matty/Documents/context-project/src/ctx
 
@@ -40,6 +40,6 @@ Core implementation of ctx, a filesystem-native context layer for AI agents that
 - The architecture separates concerns into CLI (cli.py), unified API (api.py), core generation (generator.py), and LLM integration (llm.py).
 - Configuration and environment detection (config.py) feeds into cost estimation and provider selection for LLM operations.
 - File staleness is tracked via hashing (hasher.py) and git state (git.py) to enable incremental updates.
+- Concurrency safety is enforced through file-based locking (lock.py) to prevent manifest corruption during parallel operations.
 - Ignore patterns (ignore.py) and language detection (language_detector.py) inform which files are processed and how they are summarized.
-- Concurrency is managed through file-based locking (lock.py) to prevent manifest corruption during parallel operations.
 - The server (server.py) exposes manifests over HTTP with path traversal protections for integration with external tools.

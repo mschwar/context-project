@@ -32,7 +32,7 @@ def test_load_ignore_patterns_uses_repo_default_file(tmp_path) -> None:
 
 @pytest.mark.parametrize(
     "relative_path",
-    [".pytest_cache/", ".worktrees/", ".tmp/", "ctx_tool.egg-info", "ctx_tool.dist-info", "pip-wheel-metadata/"],
+    [".claude/", ".pytest_cache/", ".worktrees/", ".tmp/", "ctx_tool.egg-info", "ctx_tool.dist-info", "pip-wheel-metadata/"],
 )
 def test_load_ignore_patterns_ignores_workspace_noise_by_default(tmp_path, relative_path: str) -> None:
     spec = load_ignore_patterns(tmp_path)

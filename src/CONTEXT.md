@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-18T18:37:17Z'
+generated: '2026-03-18T18:45:29Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:c99cdb3e4f6c479ff25e656c5be5b060aaf53802b5894efcb5c18377006c6d07
+content_hash: sha256:07a0caecc324aa69736c1e518e8be41d5b512f90cd4d66f156c10837dabf8a9e
 files: 0
 dirs: 1
 tokens_total: 0
 ---
 # C:/Users/Matty/Documents/context-project/src
 
-This directory contains the source code for a filesystem-native context layer that enables AI agents to generate and maintain structured directory documentation.
+This directory contains the source code for a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agent documentation.
 
 ## Files
 
@@ -21,4 +21,4 @@ This directory contains the source code for a filesystem-native context layer th
 
 ## Notes
 
-- The project is organized around a single core module responsible for the primary functionality of automated context documentation generation.
+- The `ctx` subdirectory houses the primary implementation logic for the context generation system.

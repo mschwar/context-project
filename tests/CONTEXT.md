@@ -1,11 +1,11 @@
 ---
-generated: '2026-03-18T18:37:26Z'
+generated: '2026-03-18T18:45:37Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:e41c9b47404f376091f31342607b5c0df9a2aceadbabe5243bb65f89ff40904a
+content_hash: sha256:4400cd9867ad309cbb8f9f9596d20d0d4adaf35dedaed75676c30de1660c606d
 files: 34
 dirs: 1
-tokens_total: 33676
+tokens_total: 33680
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
@@ -54,7 +54,8 @@ Comprehensive test suite covering unit, integration, and end-to-end testing for 
 
 ## Notes
 
-- Language parser tests are organized by file extension and cover extraction of public APIs, type definitions, and structural elements specific to each language.
-- Configuration and CLI tests validate precedence rules and dependency injection patterns across the application.
-- Integration tests use fixtures and fake LLM clients to verify end-to-end workflows without external service dependencies.
-- Compatibility tests ensure backward compatibility with legacy command surfaces.
+- Test organization mirrors core module structure with dedicated test files for each language parser (Python, JavaScript/TypeScript, Go, Rust, Java, C#, PHP, Ruby, Kotlin, Swift, Elixir).
+- conftest.py provides shared pytest fixtures for filesystem isolation and temporary directory management across all tests.
+- Integration tests in test_integration.py and test_cli.py validate end-to-end workflows using sample project fixtures.
+- Parser tests validate language-specific extraction of public APIs, type definitions, and structural elements.
+- Configuration and CLI tests verify precedence rules, dependency injection, and output formatting.
