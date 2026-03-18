@@ -67,7 +67,8 @@ def test_workflow_patterns_use_canonical_check_commands() -> None:
     assert "ctx check . --check-exit" in pre_commit
     assert "status . --check-exit-code" not in pre_commit
 
-    assert "CTX_OUTPUT=json python -m ctx check . --check-exit" in workflow
+    assert "run: python -m ctx check . --check-exit" in workflow
+    assert "CTX_OUTPUT: json" in workflow
     assert "status . --check-exit-code" not in workflow
 
     assert "### Session-End Manifest Refresh" in agents
@@ -77,6 +78,26 @@ def test_workflow_patterns_use_canonical_check_commands() -> None:
     assert "`update ctx` / `update context` / `refresh manifests`" in agents
 
     assert "pre-commit hook and `CTX Manifest Check` CI job both use `ctx check . --check-exit`" in runbook
+
+
+def test_afo_closeout_artifact_and_phase24_scope_exist() -> None:
+    reflection = (REPO_ROOT / "archive" / "reflections" / "2026-03-18-afo-stage1-6-reflection.md")
+    state = (REPO_ROOT / "state.md").read_text(encoding="utf-8")
+    overhaul = (REPO_ROOT / "AGENT_FIRST_OVERHAUL.md").read_text(encoding="utf-8")
+
+    assert reflection.exists()
+    reflection_text = reflection.read_text(encoding="utf-8")
+    assert "Disposition Table" in reflection_text
+    assert "Carry into Phase 24" in reflection_text
+
+    assert "AFO Stage 1–6 Closeout ✓" in state
+    assert "## Phase 24 — Manifest Trust & External Validation" in state
+    assert "git-optional refresh" in state
+    assert "Body-level verification" in state
+
+    assert "## AFO Stage 1–6 Closeout" in overhaul
+    assert "## Phase 24 — Manifest Trust & External Validation" in overhaul
+    assert "local-provider adaptive batching" in overhaul
 
 
 def test_pyproject_agent_metadata_present() -> None:
