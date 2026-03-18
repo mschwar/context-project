@@ -566,18 +566,9 @@ def status(ctx: click.Context, path: str, check_exit_code: bool) -> None:
 @cli.command(name="check")
 @click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True), default=".", required=False)
 @click.option("--check-exit-code", is_flag=True, help="Exit with code 1 if any manifests are stale or missing.")
-@click.option(
-    "--output",
-    "output_mode",
-    type=click.Choice(["human", "json"]),
-    default=None,
-    help="Output format override.",
-)
 @click.pass_context
-def check(ctx: click.Context, path: str, check_exit_code: bool, output_mode: str | None) -> None:
-    """Alias of ctx status for the agent-first check surface."""
-    if output_mode is not None:
-        ctx.obj["json_mode"] = output_mode == "json"
+def check(ctx: click.Context, path: str, check_exit_code: bool) -> None:
+    """Check manifest health (alias for status). Use --output json at the group level."""
     ctx.invoke(status, path=path, check_exit_code=check_exit_code)
 
 
@@ -1151,8 +1142,12 @@ def clean(ctx: click.Context, path: str, yes: bool, dry_run: bool) -> None:
             broker.set_data({"manifests_removed": 0, "paths": rel_paths})
             return
 
-        should_delete = yes or json_mode
-        if not should_delete:
+        if json_mode and not yes:
+            broker.add_error("unknown_error", "--yes flag required in non-interactive mode",
+                             hint="Use: ctx reset . --yes --output json")
+            broker.set_data({"manifests_removed": 0, "paths": []})
+            return
+        if not yes:
             confirmed = click.confirm(
                 f"Found {len(manifests)} CONTEXT.md file(s). Delete all?", default=False
             )
@@ -1322,12 +1317,8 @@ def serve(ctx: click.Context, path: str, host: str, port: int) -> None:
     """
     from ctx.server import start_server
 
-    json_mode = _json_mode(ctx)
-    with OutputBroker(command="check", json_mode=json_mode) as broker:
-        root = Path(path).resolve()
-        click.echo(f"Starting ctx MCP server on http://{host}:{port}")
-        click.echo(f"Serving manifests from: {root}")
-        broker.set_data({"host": host, "port": port, "root": str(root)})
-        start_server(host=host, port=port, root=root)
-    _exit_for_broker(broker, json_mode=json_mode)
+    root = Path(path).resolve()
+    click.echo(f"Starting ctx MCP server on http://{host}:{port}")
+    click.echo(f"Serving manifests from: {root}")
+    start_server(host=host, port=port, root=root)
 

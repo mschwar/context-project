@@ -31,7 +31,7 @@ def _classify_exception(exc: BaseException) -> tuple[str, str, str | None]:
     if isinstance(exc, MissingApiKeyError):
         return ("provider_not_configured", str(exc), "Run ctx refresh --setup")
     if isinstance(exc, (ConnectionError, TimeoutError)):
-        return ("provider_unreachable", str(exc), "Check network or run ctx setup --check")
+        return ("provider_unreachable", str(exc), "Check network or run ctx refresh . --setup --dry-run")
     if isinstance(exc, RuntimeError) and TRANSIENT_ERROR_PREFIX in str(exc):
         return ("provider_unreachable", str(exc), "Retry the command")
     if isinstance(exc, click.UsageError):
