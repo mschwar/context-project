@@ -27,8 +27,10 @@ from ctx.generator import (
     generate_tree,
     inspect_directory_health,
     update_tree,
+    validate_manifest_body,
 )
 from ctx.ignore import load_ignore_patterns
+from ctx.manifest import read_manifest
 from ctx.llm import create_client
 from ctx.lock import CtxLock
 
@@ -41,7 +43,7 @@ class ConfirmationRequiredError(Exception):
 
 
 class BudgetExhaustedError(Exception):
-    """Raised when refresh exceeds a hard per-run token or USD guardrail."""
+    """Raised when refresh hits a hard per-run token or USD spending ceiling."""
 
 
 @dataclass
@@ -62,6 +64,7 @@ class RefreshResult:
     setup_provider: str | None = None
     setup_model: str | None = None
     setup_detected_via: str | None = None
+    local_batch_fallbacks: int = 0
 
 
 @dataclass
@@ -224,15 +227,17 @@ def refresh(
         model = model or setup_model
         base_url = base_url or DEFAULT_BASE_URLS.get(setup_provider)
 
-    changed_files = get_changed_files(root)
+    changed_files: list[Path] | None = None
     if force:
         strategy = "full"
     elif not _has_manifests(root):
         strategy = "full"
-    elif changed_files:
-        strategy = "smart"
     else:
-        strategy = "incremental"
+        try:
+            changed_files = get_changed_files(root)
+        except RuntimeError:
+            changed_files = None
+        strategy = "smart" if changed_files else "incremental"
 
     if dry_run:
         config = load_config(
@@ -337,6 +342,7 @@ def refresh(
         setup_provider=setup_provider,
         setup_model=setup_model,
         setup_detected_via=setup_detected_via,
+        local_batch_fallbacks=getattr(client, "local_batch_fallbacks", 0),
     )
 
 
@@ -462,6 +468,22 @@ def check(
                 missing_fields.append({"path": entry.relative_path, "fields": missing_field_names})
 
         invalid_field_paths = {item["path"] for item in missing_fields}
+        invalid_bodies: list[dict[str, object]] = []
+        for entry in health_entries:
+            if (
+                entry.status != "fresh"
+                or entry.error is not None
+                or entry.frontmatter is None
+                or entry.relative_path in invalid_field_paths
+            ):
+                continue
+            manifest = read_manifest(entry.path)
+            if manifest is None:
+                continue
+            issues = validate_manifest_body(entry.path, root, spec, manifest)
+            if issues:
+                invalid_bodies.append({"path": entry.relative_path, "status": "invalid_body", "issues": issues})
+
         stale = sorted(
             entry.relative_path
             for entry in health_entries
@@ -472,6 +494,7 @@ def check(
         directories: list[dict] = []
         directories.extend({"path": path, "status": "malformed"} for path in malformed)
         directories.extend({"path": item["path"], "status": "missing_fields", "fields": item["fields"]} for item in missing_fields)
+        directories.extend(invalid_bodies)
         directories.extend({"path": path, "status": "stale"} for path in stale)
         directories.extend({"path": path, "status": "missing"} for path in missing)
         summary = {
@@ -479,7 +502,8 @@ def check(
             "fresh": sum(1 for entry in health_entries if entry.status == "fresh"),
             "stale": sum(1 for entry in health_entries if entry.status == "stale"),
             "missing": len(missing),
-            "invalid": len({*malformed, *stale, *missing, *invalid_field_paths}),
+            "invalid": len({*malformed, *stale, *missing, *invalid_field_paths, *(item["path"] for item in invalid_bodies)}),
+            "invalid_body": len(invalid_bodies),
             "check_exit": check_exit,
         }
         return CheckResult(mode="verify", directories=directories, summary=summary)

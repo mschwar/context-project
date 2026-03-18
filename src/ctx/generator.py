@@ -13,7 +13,9 @@ the parent is generated, so parent summaries can reference child summaries.
 
 from __future__ import annotations
 
+import codecs
 import math
+import re
 import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -57,6 +59,7 @@ class GenerateStats:
     files_binary: int = 0
     tokens_used: int = 0
     budget_exhausted: bool = False
+    local_batch_fallbacks: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -74,6 +77,7 @@ class DirectoryHealth:
 
 # Type alias for progress callback: (current_dir, dirs_done, dirs_total, tokens_used)
 ProgressCallback = Callable[[Path, int, int, int], None]
+_NAMED_BULLET_RE = re.compile(r"^- \*\*(.+?)\*\* — .+$")
 
 
 def _relative_path_str(path: Path, root: Path) -> str:
@@ -116,6 +120,203 @@ def _extract_manifest_summary(manifest: Manifest, directory_name: str) -> str:
         if seen_heading:
             return line
     return f"{directory_name} directory"
+
+
+def _extract_directory_purpose_and_notes(text: str, dir_path: Path) -> tuple[str, list[str]]:
+    purpose: str | None = None
+    notes: list[str] = []
+    in_notes = False
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("# "):
+            continue
+        if purpose is None and not line.startswith("## "):
+            purpose = line
+            continue
+        if line == "## Notes":
+            in_notes = True
+            continue
+        if line.startswith("## "):
+            in_notes = False
+            continue
+        if in_notes and line.startswith("- "):
+            note = line[2:].strip()
+            if note and note != "None":
+                notes.append(note)
+
+    if purpose is None:
+        purpose = f"{dir_path.name or dir_path.as_posix()} directory."
+
+    return purpose, notes
+
+
+def _render_manifest_body(
+    path: Path,
+    file_summaries: list[FileSummary],
+    subdir_summaries: list[SubdirSummary],
+    purpose: str,
+    notes: list[str],
+) -> str:
+    lines = [
+        f"# {path.as_posix()}",
+        "",
+        purpose.strip(),
+        "",
+        "## Files",
+    ]
+    if file_summaries:
+        lines.extend(f"- **{summary.name}** — {summary.summary}" for summary in file_summaries)
+    else:
+        lines.append("- None")
+
+    lines.extend(["", "## Subdirectories"])
+    if subdir_summaries:
+        lines.extend(f"- **{summary.name}/** — {summary.summary}" for summary in subdir_summaries)
+    else:
+        lines.append("- None")
+
+    if notes:
+        lines.extend(["", "## Notes"])
+        lines.extend(f"- {note}" for note in notes)
+
+    return "\n".join(lines) + "\n"
+
+
+def _parse_manifest_sections(body: str) -> tuple[str | None, str | None, dict[str, list[str]]]:
+    heading: str | None = None
+    purpose: str | None = None
+    sections: dict[str, list[str]] = {}
+    current_section: str | None = None
+
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if heading is None:
+            if line.startswith("# "):
+                heading = line[2:].strip()
+                continue
+            break
+        if purpose is None and not line.startswith("## "):
+            purpose = line
+            continue
+        if line.startswith("## "):
+            current_section = line[3:].strip().lower()
+            sections.setdefault(current_section, [])
+            continue
+        if current_section is not None:
+            sections[current_section].append(line)
+
+    return heading, purpose, sections
+
+
+def _validate_named_section(
+    lines: list[str],
+    expected_names: list[str],
+    *,
+    section_label: str,
+    expect_directories: bool,
+) -> list[str]:
+    issues: list[str] = []
+    expected = set(expected_names)
+    none_rows = [line for line in lines if line == "- None"]
+    if none_rows:
+        if len(lines) != 1 or expected_names:
+            issues.append(f"{section_label} section contains an illegal None row.")
+        return issues
+
+    seen: list[str] = []
+    for line in lines:
+        match = _NAMED_BULLET_RE.match(line)
+        if match is None:
+            issues.append(f"{section_label} section contains a malformed bullet: {line}")
+            continue
+        name = match.group(1)
+        if expect_directories:
+            if not name.endswith("/"):
+                issues.append(f"{section_label} entry is missing a trailing slash: {name}")
+            name = name.rstrip("/")
+        elif name.endswith("/"):
+            issues.append(f"{section_label} entry should not end with '/': {name}")
+            name = name.rstrip("/")
+        seen.append(name)
+
+    duplicates = sorted({name for name in seen if seen.count(name) > 1})
+    if duplicates:
+        issues.append(f"{section_label} section contains duplicate entries: {', '.join(duplicates)}")
+
+    seen_set = set(seen)
+    missing = sorted(expected - seen_set)
+    extra = sorted(seen_set - expected)
+    if missing:
+        issues.append(f"{section_label} section is missing real entries: {', '.join(missing)}")
+    if extra:
+        issues.append(f"{section_label} section lists nonexistent entries: {', '.join(extra)}")
+    return issues
+
+
+def validate_manifest_body(
+    path: Path,
+    root: Path,
+    spec: pathspec.PathSpec,
+    manifest: Manifest,
+) -> list[str]:
+    """Validate that a manifest body structurally matches the real directory."""
+    files, directories = _list_directory_entries(path, spec, root)
+    expected_files = [file_path.name for file_path in files]
+    expected_directories = [directory.name for directory in directories]
+
+    issues: list[str] = []
+    if manifest.frontmatter.files != len(expected_files):
+        issues.append(
+            f"Frontmatter files={manifest.frontmatter.files} does not match filesystem files={len(expected_files)}."
+        )
+    if manifest.frontmatter.dirs != len(expected_directories):
+        issues.append(
+            f"Frontmatter dirs={manifest.frontmatter.dirs} does not match filesystem dirs={len(expected_directories)}."
+        )
+
+    heading, purpose, sections = _parse_manifest_sections(manifest.body)
+    expected_heading = path.as_posix()
+    if heading != expected_heading:
+        issues.append(f"Manifest heading should be '# {expected_heading}'.")
+    if purpose is None:
+        issues.append("Manifest body is missing the directory purpose sentence.")
+
+    files_section = sections.get("files")
+    if files_section is None:
+        issues.append("Manifest body is missing the '## Files' section.")
+    else:
+        issues.extend(
+            _validate_named_section(
+                files_section,
+                expected_files,
+                section_label="Files",
+                expect_directories=False,
+            )
+        )
+
+    subdirs_section = sections.get("subdirectories")
+    if subdirs_section is None:
+        issues.append("Manifest body is missing the '## Subdirectories' section.")
+    else:
+        issues.extend(
+            _validate_named_section(
+                subdirs_section,
+                expected_directories,
+                section_label="Subdirectories",
+                expect_directories=True,
+            )
+        )
+
+    notes_section = sections.get("notes")
+    if notes_section and notes_section.count("- None") > 0 and len(notes_section) > 1:
+        issues.append("Notes section contains an illegal None row.")
+
+    return issues
 
 
 def _collect_directories(
@@ -310,6 +511,7 @@ def _generate_directory_manifest(
         )
 
     directory_result = client.summarize_directory(path, file_summaries, subdir_summaries)
+    purpose, notes = _extract_directory_purpose_and_notes(directory_result.text, path)
     content_hash = hash_directory(path, spec, root)
     write_manifest(
         path,
@@ -318,7 +520,7 @@ def _generate_directory_manifest(
         files=len(files),
         dirs=len(directories),
         tokens_total=tokens_total,
-        body=directory_result.text,
+        body=_render_manifest_body(path, file_summaries, subdir_summaries, purpose, notes),
     )
 
     total_tokens_used = sum(result.input_tokens + result.output_tokens for result in text_results)
@@ -439,6 +641,7 @@ def _run_generation(
                     if progress is not None:
                         progress(directory, local_done, total_dirs, stats.tokens_used)
 
+    stats.local_batch_fallbacks = int(getattr(client, "local_batch_fallbacks", 0) or 0)
     return stats
 
 
@@ -672,7 +875,8 @@ def is_binary_file(path: Path) -> bool:
         return True
 
     try:
-        sample.decode("utf-8")
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        decoder.decode(sample, final=False)
     except UnicodeDecodeError:
         return True
 

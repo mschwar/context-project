@@ -1,7 +1,7 @@
 """Regression tests for DEFAULT_PROMPT_TEMPLATES.
 
 Smoke-tests that each template (a) exists, (b) is a non-empty string, and
-(c) contains the structural markers that downstream parsing relies on.
+(c) contains the core instructions that downstream parsing relies on.
 Tests use a FakeLLMClient so no real API calls are made.
 """
 
@@ -54,10 +54,17 @@ def test_file_summary_system_mentions_json_array() -> None:
     assert "JSON array" in template
 
 
-def test_directory_summary_system_contains_structural_markers() -> None:
+def test_directory_summary_system_describes_fragment_contract() -> None:
     template = DEFAULT_PROMPT_TEMPLATES["directory_summary_system"]
-    for marker in ("## Files", "## Subdirectories"):
-        assert marker in template, f"Missing marker: {marker}"
+    assert "ctx renders the ## Files and ## Subdirectories sections deterministically" in template
+    assert "do not write those sections yourself" in template
+    assert "## Notes" in template
+
+
+def test_prompt_templates_discourage_boilerplate_directory_language() -> None:
+    template = DEFAULT_PROMPT_TEMPLATES["directory_summary_system"]
+    assert "Avoid boilerplate phrases like" in template
+    assert "SKILL.md" in template
 
 
 def test_all_templates_contain_injection_defence() -> None:

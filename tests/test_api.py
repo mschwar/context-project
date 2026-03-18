@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,7 @@ import ctx.git as git_module
 from ctx.api import ConfirmationRequiredError
 from ctx.config import Config, MissingApiKeyError
 from ctx.generator import GenerateStats
+from ctx.manifest import Manifest, ManifestFrontmatter
 
 
 @dataclass
@@ -76,6 +78,22 @@ def test_refresh_smart_strategy_when_git_changed_files_exist(tmp_path, monkeypat
 
     assert result.strategy == "smart"
     assert result.dirs_processed == 3
+
+
+def test_refresh_falls_back_to_incremental_when_git_is_unavailable(tmp_path, monkeypatch) -> None:
+    _patch_runtime(monkeypatch)
+    monkeypatch.setattr(api_module, "_has_manifests", lambda _root: True)
+    monkeypatch.setattr(
+        git_module,
+        "get_changed_files",
+        lambda _root: (_ for _ in ()).throw(RuntimeError("not a git repository")),
+    )
+    monkeypatch.setattr(api_module, "update_tree", lambda *a, **kw: GenerateStats(dirs_processed=1, dirs_skipped=2))
+
+    result = api_module.refresh(tmp_path)
+
+    assert result.strategy == "incremental"
+    assert result.dirs_processed == 1
 
 
 def test_refresh_force_uses_full_strategy(tmp_path, monkeypatch) -> None:
@@ -185,6 +203,20 @@ def test_refresh_applies_max_usd_per_run_guardrail(tmp_path, monkeypatch) -> Non
     assert "USD budget guardrail reached" in result.budget_guardrail
 
 
+def test_refresh_surfaces_local_batch_fallback_count(tmp_path, monkeypatch) -> None:
+    config = Config(provider="ollama", model="llama3.2", api_key="not-needed", base_url="http://localhost:11434/v1")
+    client = SimpleNamespace(local_batch_fallbacks=3)
+    monkeypatch.setattr(api_module, "_build_generation_runtime", lambda *_a, **_kw: (config, object(), client))
+    monkeypatch.setattr(api_module, "CtxLock", _NoopLock)
+    monkeypatch.setattr(api_module, "_has_manifests", lambda _root: True)
+    monkeypatch.setattr(git_module, "get_changed_files", lambda _root: [])
+    monkeypatch.setattr(api_module, "update_tree", lambda *_a, **_kw: GenerateStats(dirs_processed=1))
+
+    result = api_module.refresh(tmp_path)
+
+    assert result.local_batch_fallbacks == 3
+
+
 def test_refresh_auto_detects_local_provider_when_unconfigured(tmp_path, monkeypatch) -> None:
     runtime_calls: list[tuple] = []
     writes: list[tuple[Path, str, str | None, str | None]] = []
@@ -245,6 +277,37 @@ def test_check_verify_mode(tmp_path, monkeypatch) -> None:
 
     assert result.mode == "verify"
     assert "invalid" in result.summary
+
+
+def test_check_verify_mode_reports_invalid_manifest_bodies(tmp_path, monkeypatch) -> None:
+    frontmatter = ManifestFrontmatter(
+        generated="2026-03-18T00:00:00Z",
+        generator="ctx/0.8.0",
+        model="test-model",
+        content_hash="sha256:test",
+        files=0,
+        dirs=0,
+        tokens_total=10,
+    )
+    entries = [
+        _Entry(path=tmp_path, relative_path=".", status="fresh", frontmatter=frontmatter),
+    ]
+    monkeypatch.setattr(api_module, "load_ignore_patterns", lambda *_a, **_kw: object())
+    monkeypatch.setattr(api_module, "inspect_directory_health", lambda *_a, **_kw: entries)
+    monkeypatch.setattr(api_module, "read_manifest", lambda _path: Manifest(frontmatter=frontmatter, body="# bad\n"))
+    monkeypatch.setattr(api_module, "validate_manifest_body", lambda *_a, **_kw: ["Files section lists nonexistent entries: fake.py"])
+
+    result = api_module.check(tmp_path, verify=True)
+
+    assert result.summary["invalid_body"] == 1
+    assert result.summary["invalid"] == 1
+    assert result.directories == [
+        {
+            "path": ".",
+            "status": "invalid_body",
+            "issues": ["Files section lists nonexistent entries: fake.py"],
+        }
+    ]
 
 
 def test_check_stats_mode(tmp_path, monkeypatch) -> None:
