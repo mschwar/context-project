@@ -41,7 +41,7 @@ class ConfirmationRequiredError(Exception):
 
 
 class BudgetExhaustedError(Exception):
-    """Raised when a Stage 3 budget guardrail is exceeded."""
+    """Raised when refresh exceeds a hard per-run token or USD guardrail."""
 
 
 @dataclass
@@ -151,6 +151,8 @@ def _apply_token_guardrail(config: Config) -> None:
 
     if config.max_tokens_per_run is None:
         return
+    # A smaller explicit token_budget is already stricter, so only clamp when
+    # the generator budget is unset or looser than the hard per-run ceiling.
     if config.token_budget is None or config.token_budget > config.max_tokens_per_run:
         config.token_budget = config.max_tokens_per_run
 
@@ -271,11 +273,17 @@ def refresh(
             base_url=base_url,
             cache_path=cache_path,
         )
-    except MissingApiKeyError:
-        if provider is not None or _find_config_path(root) is not None:
-            raise
-        if os.getenv("CTX_PROVIDER", "").strip():
-            raise
+    except MissingApiKeyError as exc:
+        config_path = _find_config_path(root)
+        if provider is not None:
+            raise MissingApiKeyError(f"{exc} (while loading provider '{provider}')") from exc
+        if config_path is not None:
+            raise MissingApiKeyError(f"{exc} (while loading configuration from {config_path})") from exc
+        env_provider = os.getenv("CTX_PROVIDER", "").strip()
+        if env_provider:
+            raise MissingApiKeyError(
+                f"{exc} (while loading provider '{env_provider}' from CTX_PROVIDER)"
+            ) from exc
         detected = detect_provider()
         if detected is None:
             raise

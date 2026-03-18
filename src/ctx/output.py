@@ -30,6 +30,8 @@ def _classify_exception(exc: BaseException) -> tuple[str, str, str | None]:
     if isinstance(exc, ConfirmationRequiredError):
         return ("confirmation_required", str(exc), "Re-run with --yes.")
     if isinstance(exc, BudgetExhaustedError):
+        # refresh/check surfaces use this when a hard run budget stopped work
+        # and the next action is to shrink scope or raise the guardrail.
         return ("budget_exhausted", str(exc), "Raise the budget guardrail or reduce scope.")
     if isinstance(exc, LockHeldError):
         return ("lock_held", str(exc), "Wait and retry, or check for stuck processes.")

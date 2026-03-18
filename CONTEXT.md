@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-18T18:50:42Z'
+generated: '2026-03-18T18:58:25Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:281690ac721ad50c5e16fae9239bd34d157d3e0b949a26b603d1f88cbb5ad3f8
+content_hash: sha256:062cd8b215a01cc38a2daa94d0d60875472b9d74b92b1cf92a527629d6b11984
 files: 18
 dirs: 8
 tokens_total: 15290
 ---
 # C:/Users/Matty/Documents/context-project
 
-A Python CLI tool and filesystem-native context layer that generates hierarchical CONTEXT.md manifests to enable AI agents to navigate and understand directory structures.
+A Python CLI tool and infrastructure project that generates persistent CONTEXT.md manifests to enable AI agents to navigate and understand large codebases without reading raw files.
 
 ## Files
 
@@ -30,7 +30,7 @@ A Python CLI tool and filesystem-native context layer that generates hierarchica
 - **package.json** — Node.js package metadata and development dependencies for the ctx project.
 - **pyproject.toml** — Python project configuration specifying dependencies, entry points, and build system.
 - **rules.md** — Engineering standards and agentic rules for code quality, testing, and manifest protocol compliance.
-- **state.md** — Development status tracker documenting completed milestones, current health, and active phases for the ctx filesystem-native context layer project.
+- **state.md** — Development status tracker documenting completed milestones, current health, and active phases for the ctx project through March 2026.
 
 ## Subdirectories
 
@@ -40,13 +40,13 @@ A Python CLI tool and filesystem-native context layer that generates hierarchica
 - **archive/** — Design documents, AI analysis, and planning materials for the ctx project.
 - **docs/** — Documentation and architectural specifications for the context-project, including design decisions and implementation guidelines.
 - **documents/** — Strategic planning and architectural thesis documents for the context-project, focusing on agent-first design principles and system overhaul strategies.
-- **src/** — Source code for a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agent documentation.
+- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agents.
 - **tests/** — Comprehensive test suite covering unit, integration, and end-to-end testing for the context project's CLI, API, parsers, and core functionality.
 
 ## Notes
 
 - The project enforces agentic SDLC principles through AGENTS.md, CONTRIBUTING.md, and rules.md, establishing a contract for agent-driven development workflows.
-- Git hooks (.githooks, .husky) and pre-commit configuration ensure manifest freshness and code quality before commits.
-- Dual language support: Python (pyproject.toml, src/) for core CLI and Node.js (package.json) for development tooling (commitlint, Husky).
-- State tracking (state.md) and gate closeout procedures (GATE_CLOSEOUT.md) provide visibility into project phases and mandatory validation checkpoints.
-- Archive and documents directories preserve design evolution and strategic planning artifacts separate from active source code.
+- Git hooks are configured at multiple levels (.githooks, .husky) to validate manifest freshness and enforce conventional commits before code reaches the repository.
+- Development dependencies span both Node.js (commitlint, Husky) and Python (pyproject.toml), indicating a polyglot toolchain for linting and automation.
+- The Agent-First Overhaul represents a major architectural shift; state.md tracks progress through March 2026 with staged rollout phases.
+- GATE_CLOSEOUT.md defines mandatory phase closeout sequences, suggesting structured project governance with founder sign-off requirements.

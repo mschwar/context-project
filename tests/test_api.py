@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 import pytest
 
@@ -126,7 +127,7 @@ def test_refresh_setup_and_watch_are_mutually_exclusive(tmp_path) -> None:
 
 def test_refresh_applies_max_tokens_per_run_guardrail(tmp_path, monkeypatch) -> None:
     captured_config: Config | None = None
-    config = Config(provider="openai", model="test-model", api_key="test-key", max_tokens_per_run=5, token_budget=99)
+    config = Config(provider="openai", model="test-model", api_key="test-key", max_tokens_per_run=5)
 
     def fake_runtime(*_args, **_kwargs):
         return config, object(), object()
@@ -149,6 +150,24 @@ def test_refresh_applies_max_tokens_per_run_guardrail(tmp_path, monkeypatch) -> 
     assert result.budget_exhausted is True
     assert result.budget_guardrail is not None
     assert "Token budget guardrail reached" in result.budget_guardrail
+
+
+def test_refresh_reraises_missing_api_key_with_context(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        api_module,
+        "_build_generation_runtime",
+        lambda *_a, **_kw: (_ for _ in ()).throw(MissingApiKeyError("Missing required environment variable: OPENAI_API_KEY")),
+    )
+    monkeypatch.setattr(api_module, "_has_manifests", lambda _root: False)
+    monkeypatch.setattr(git_module, "get_changed_files", lambda _root: [])
+
+    with pytest.raises(MissingApiKeyError, match="while loading provider 'openai'"):
+        api_module.refresh(tmp_path, provider="openai")
+
+    config_path = tmp_path / ".ctxconfig"
+    monkeypatch.setattr(api_module, "_find_config_path", lambda _root: config_path)
+    with pytest.raises(MissingApiKeyError, match=re.escape(f"while loading configuration from {config_path}")):
+        api_module.refresh(tmp_path)
 
 
 def test_refresh_applies_max_usd_per_run_guardrail(tmp_path, monkeypatch) -> None:

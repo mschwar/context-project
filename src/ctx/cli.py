@@ -361,6 +361,8 @@ def refresh(
         broker.set_tokens(result.tokens_used, result.est_cost_usd)
         if result.errors:
             for error in result.errors:
+                # Preserve the dedicated machine-readable error code when the
+                # appended refresh error came from the hard Stage 3 guardrail.
                 if result.budget_guardrail and error == result.budget_guardrail:
                     broker.add_error("budget_exhausted", error)
                 else:

@@ -382,6 +382,8 @@ def load_config(
         config.cache_path = cache_path
 
     if not provider_explicit:
+        # Support env-only setups where the operator exported an API key but
+        # did not also set CTX_PROVIDER or write a .ctxconfig file yet.
         if os.getenv("ANTHROPIC_API_KEY", "").strip():
             config.provider = "anthropic"
         elif os.getenv("OPENAI_API_KEY", "").strip():
