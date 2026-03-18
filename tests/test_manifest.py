@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from ctx import __version__
-from ctx.manifest import read_manifest, write_manifest
+from ctx.manifest import MANIFEST_FOOTER, read_manifest, write_manifest
 
 
 BODY = """# /sample/project
@@ -71,6 +71,27 @@ def test_frontmatter_fields(tmp_path) -> None:
     assert manifest.frontmatter.dirs == 3
     assert manifest.frontmatter.tokens_total == 48000
     assert f"generator: ctx/{__version__}" in raw_text
+
+
+def test_write_manifest_appends_footer_but_read_manifest_strips_it(tmp_path) -> None:
+    body = "# /tmp\n\nPurpose line.\n"
+
+    write_manifest(
+        tmp_path,
+        model="gpt-5-mini",
+        content_hash="sha256:footer",
+        files=1,
+        dirs=0,
+        tokens_total=12,
+        body=body,
+    )
+
+    raw_text = (tmp_path / "CONTEXT.md").read_text(encoding="utf-8")
+    manifest = read_manifest(tmp_path)
+
+    assert raw_text.endswith(MANIFEST_FOOTER)
+    assert manifest is not None
+    assert manifest.body == body
 
 
 def test_body_preserved(tmp_path) -> None:

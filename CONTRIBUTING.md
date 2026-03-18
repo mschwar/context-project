@@ -14,10 +14,10 @@ If you are working on Phase 16, start with [PHASE16_HANDOFF.md](./PHASE16_HANDOF
 
 ### 1. Context Maintenance
 Every PR that adds or modifies a directory MUST update the corresponding `CONTEXT.md` files.
-- Use `ctx update .` before committing your changes.
+- Use `ctx refresh .` before committing your changes.
 - Ensure the `content_hash` in the frontmatter is updated to reflect the new state.
-- Verification: Running `ctx status` should return `fresh` for all directories in the project.
-- **CI enforcement:** The `CTX Manifest Check` workflow runs `ctx status . --check-exit-code` on every push and PR. It will fail if any manifests are stale or missing. Always run `ctx update .` locally and include the updated `CONTEXT.md` files in your commit before pushing.
+- Verification: Running `ctx check . --check-exit` should return exit code `0` for a fresh tree.
+- **CI enforcement:** The `CTX Manifest Check` workflow currently runs the legacy equivalent `ctx status . --check-exit-code` on every push and PR. The canonical command is `ctx check . --check-exit`. Always run `ctx refresh .` locally and include the updated `CONTEXT.md` files in your commit before pushing.
 
 ### 2. Implementation Blocks
 New functions and classes should include an `Implementation:` block in their docstrings. This provides clear, step-by-step instructions for subsequent agents to follow when filling in stubs or refactoring.
