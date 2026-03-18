@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-18T18:58:25Z'
+generated: '2026-03-18T19:37:40Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:062cd8b215a01cc38a2daa94d0d60875472b9d74b92b1cf92a527629d6b11984
+content_hash: sha256:678b5b5a059db278befa1365d21badae7e79ae8c2efda776a0622e044632f61e
 files: 18
 dirs: 8
-tokens_total: 15290
+tokens_total: 14906
 ---
 # C:/Users/Matty/Documents/context-project
 
-A Python CLI tool and infrastructure project that generates persistent CONTEXT.md manifests to enable AI agents to navigate and understand large codebases without reading raw files.
+A Python CLI tool and infrastructure project that generates hierarchical CONTEXT.md manifests to enable AI agents to navigate and understand directory structures without reading raw files.
 
 ## Files
 
@@ -18,19 +18,19 @@ A Python CLI tool and infrastructure project that generates persistent CONTEXT.m
 - **.gitignore** — Specifies files and directories to exclude from version control and context generation.
 - **.pre-commit-hooks.yaml** — Pre-commit hook configuration that checks if ctx manifests are fresh before commits.
 - **=4.0** — Empty or malformed file with no discernible purpose.
-- **AGENTS.md** — Canonical onboarding and workflow contract for agents contributing to ctx, defining mission, current state, rules, required behavior, and SDLC guardrails.
-- **AGENT_FIRST_OVERHAUL.md** — Comprehensive plan for Agent-First Overhaul reframing ctx as autonomous agent infrastructure with six staged rollout phases.
-- **CONTRIBUTING.md** — Guidelines for contributing to ctx with agentic SDLC principles and test-driven development.
+- **AGENTS.md** — Documentation of ctx tool features, configuration, commands, error codes, and manifest format for agent integration.
+- **AGENT_FIRST_OVERHAUL.md** — Comprehensive plan for reorienting ctx as agent-first infrastructure with staged rollout across six implementation stages.
+- **CONTRIBUTING.md** — Developer workflow guidelines for agentic SDLC including context maintenance, implementation blocks, and test-driven autonomy.
 - **GATE_CLOSEOUT.md** — Defines the mandatory closeout sequence for each project phase, including validation, reflection, suggestion disposition, and founder sign-off.
-- **README.md** — Quick-start guide and command reference for ctx, a tool that generates persistent CONTEXT.md manifests for AI navigation of large codebases.
-- **RUNBOOK.md** — Operational guide for running, validating, developing ctx including CLI usage, test execution, release publishing, and common failure modes.
+- **README.md** — Short human-facing pitch directing users to install ctx-tool and consult AGENTS.md for agent documentation.
+- **RUNBOOK.md** — Operational guide covering installation, CLI usage, validation, release publishing, and common failure mode troubleshooting.
 - **architecture.md** — System design overview covering bottom-up generation, content hashing, and component responsibilities.
 - **commitlint.config.mjs** — Configuration file specifying commitlint extends conventional commit rules.
 - **package-lock.json** — Dependency lock file for Node.js packages including commitlint and Husky.
 - **package.json** — Node.js package metadata and development dependencies for the ctx project.
-- **pyproject.toml** — Python project configuration specifying dependencies, entry points, and build system.
+- **pyproject.toml** — Python package configuration defining ctx-tool distribution metadata, dependencies, entry points, and build system.
 - **rules.md** — Engineering standards and agentic rules for code quality, testing, and manifest protocol compliance.
-- **state.md** — Development status tracker documenting completed milestones, current health, and active phases for the ctx project through March 2026.
+- **state.md** — Development status tracking completed phases 1-21 and AFO stages 1-4 with current health and upcoming milestones.
 
 ## Subdirectories
 
@@ -41,12 +41,13 @@ A Python CLI tool and infrastructure project that generates persistent CONTEXT.m
 - **docs/** — Documentation and architectural specifications for the context-project, including design decisions and implementation guidelines.
 - **documents/** — Strategic planning and architectural thesis documents for the context-project, focusing on agent-first design principles and system overhaul strategies.
 - **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agents.
-- **tests/** — Comprehensive test suite covering unit, integration, and end-to-end testing for the context project's CLI, API, parsers, and core functionality.
+- **tests/** — Comprehensive test suite covering unit, integration, and end-to-end testing for the context manifest generation system, including CLI, parsers, configuration, and LLM integration.
 
 ## Notes
 
-- The project enforces agentic SDLC principles through AGENTS.md, CONTRIBUTING.md, and rules.md, establishing a contract for agent-driven development workflows.
-- Git hooks are configured at multiple levels (.githooks, .husky) to validate manifest freshness and enforce conventional commits before code reaches the repository.
-- Development dependencies span both Node.js (commitlint, Husky) and Python (pyproject.toml), indicating a polyglot toolchain for linting and automation.
-- The Agent-First Overhaul represents a major architectural shift; state.md tracks progress through March 2026 with staged rollout phases.
-- GATE_CLOSEOUT.md defines mandatory phase closeout sequences, suggesting structured project governance with founder sign-off requirements.
+- The project uses a dual-hook system (.githooks and .husky) for Git automation; .husky is the primary enforcement mechanism while .githooks may serve legacy or supplementary purposes.
+- Development follows agentic SDLC principles documented in CONTRIBUTING.md, with mandatory phase closeout sequences defined in GATE_CLOSEOUT.md.
+- The Agent-First Overhaul (AGENT_FIRST_OVERHAUL.md) represents a major strategic initiative to reorient the entire system around agent-first infrastructure, currently in stages 1-4 of implementation.
+- Both Node.js (package.json) and Python (pyproject.toml) tooling are present; Python is the primary implementation language while Node.js supports development workflows (commitlint, Husky).
+- State tracking in state.md indicates the project has completed 21 phases and is actively progressing through AFO stages, suggesting a mature but evolving codebase.
+<!-- Generated by ctx (https://pypi.org/project/ctx-tool/) -->

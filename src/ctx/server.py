@@ -1,10 +1,9 @@
-from fastapi import FastAPI, HTTPException, Request
-import uvicorn
 from pathlib import Path
-from dataclasses import asdict
-import yaml
 
-from ctx.manifest import read_manifest, Manifest, ManifestFrontmatter
+import uvicorn
+from fastapi import FastAPI, HTTPException, Request
+
+from ctx.manifest import read_manifest
 
 app = FastAPI()
 
@@ -32,12 +31,7 @@ async def get_mcp_context(file_path: str, request: Request):
 
     manifest = read_manifest(full_path)
     if manifest:
-        # Reconstruct the original markdown content from the Manifest object
-        yaml_frontmatter = yaml.safe_dump(asdict(manifest.frontmatter), sort_keys=False, default_flow_style=False)
-        full_content = f"""---
-{yaml_frontmatter}---
-{manifest.body}"""
-        return {"content": full_content}
+        return {"content": (full_path / "CONTEXT.md").read_text(encoding="utf-8")}
     else:
         raise HTTPException(status_code=404, detail=f"CONTEXT.md not found in '{file_path}'")
 

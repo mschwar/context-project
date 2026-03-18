@@ -32,44 +32,45 @@ mypy src/ctx
 ### Initialize a project
 Create initial manifests for a directory tree.
 ```bash
-ctx init /path/to/project
+ctx refresh /path/to/project --force
 ```
 
 ### Update a project
 Update stale manifests based on content changes.
 ```bash
-ctx update /path/to/project
+ctx refresh /path/to/project
 ```
 
-> **Before pushing:** always run `ctx update .` and commit the resulting `CONTEXT.md` changes alongside your code. The `CTX Manifest Check` CI job runs `ctx status . --check-exit-code` and will fail the PR if any manifests are stale.
+> **Before pushing:** always run `ctx refresh .` and commit the resulting `CONTEXT.md` changes alongside your code. The `CTX Manifest Check` CI job currently runs the legacy equivalent `ctx status . --check-exit-code`; the canonical health command is `ctx check . --check-exit`.
 
 ### Check status
 See how many manifests are stale or missing.
 ```bash
-ctx status /path/to/project
+ctx check /path/to/project
+ctx check /path/to/project --check-exit
 ```
 
 ### Show diff
 Show which CONTEXT.md files changed since last commit.
 ```bash
-ctx diff /path/to/project
-ctx diff /path/to/project --stat         # summary count only
-ctx diff /path/to/project --since main   # compare against a specific ref
+ctx check /path/to/project --diff
+ctx check /path/to/project --diff --stat       # summary count only
+ctx check /path/to/project --diff --since main # compare against a specific ref
 ```
 
 ### Verify manifests
 Check CONTEXT.md frontmatter for required fields (generated, generator, model, content_hash, files, dirs, tokens_total).
 ```bash
-ctx verify /path/to/project
+ctx check /path/to/project --verify
 ```
 Exit code 0 if all valid, exit code 1 if any invalid.
 
 ### Show stats
 Show coverage summary across all directories.
 ```bash
-ctx stats /path/to/project
-ctx stats /path/to/project --verbose       # per-directory breakdown
-ctx stats /path/to/project --format json   # machine-readable output
+ctx check /path/to/project --stats
+ctx check /path/to/project --stats --verbose
+ctx check /path/to/project --stats --output json
 ```
 
 ### Serve manifests
@@ -83,7 +84,7 @@ Serves manifests from the specified PATH (default: current directory). All manif
 ### Watch for changes
 Watch for file changes and auto-regenerate manifests.
 ```bash
-ctx watch /path/to/project
+ctx refresh /path/to/project --watch
 ```
 
 After each regeneration, prints a coverage summary line showing covered/stale directory counts and total tokens.
