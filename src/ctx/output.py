@@ -12,6 +12,7 @@ from typing import TextIO
 import click
 
 from ctx import __version__
+from ctx.api import ConfirmationRequiredError
 from ctx.config import MissingApiKeyError
 from ctx.llm import TRANSIENT_ERROR_PREFIX
 from ctx.lock import LockHeldError
@@ -26,6 +27,8 @@ def _determine_status(data: dict, errors: list[dict[str, str | None]]) -> str:
 
 
 def _classify_exception(exc: BaseException) -> tuple[str, str, str | None]:
+    if isinstance(exc, ConfirmationRequiredError):
+        return ("confirmation_required", str(exc), "Re-run with --yes.")
     if isinstance(exc, LockHeldError):
         return ("lock_held", str(exc), "Wait and retry, or check for stuck processes.")
     if isinstance(exc, MissingApiKeyError):

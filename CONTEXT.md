@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-18T03:42:03Z'
+generated: '2026-03-18T08:20:03Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:926556f89f98ef81f93218d4fb4abef1ac00bdbf9ef821f0101e37df144fcd87
-files: 19
+content_hash: sha256:12778c2ff714e656ec1c85737e612a7268306eb393d41212b92bc96b6effd2dc
+files: 18
 dirs: 9
-tokens_total: 17140
+tokens_total: 15172
 ---
 # C:/Users/Matty/Documents/context-project
 
-A filesystem-native context generation tool (ctx) that creates and maintains CONTEXT.md manifests to help AI agents navigate large codebases.
+A filesystem-native manifest system that generates persistent CONTEXT.md files to help AI agents navigate and understand large codebases.
 
 ## Files
 
@@ -19,10 +19,9 @@ A filesystem-native context generation tool (ctx) that creates and maintains CON
 - **.pre-commit-hooks.yaml** — Pre-commit hook configuration that checks if ctx manifests are fresh before commits.
 - **=4.0** — Empty or malformed file with no discernible purpose.
 - **AGENTS.md** — Canonical onboarding and workflow contract for agents contributing to ctx, defining mission, rules, required behavior, and SDLC guardrails.
-- **AGENT_FIRST_OVERHAUL.md** — Comprehensive plan for reorienting ctx as agent-first infrastructure with staged rollout across structured output, unified API, non-interactive configuration, and discovery mechanisms.
+- **AGENT_FIRST_OVERHAUL.md** — Comprehensive plan for reorienting ctx as agent-first infrastructure with staged rollout across structured output, unified API, non-interactive configuration, and documentation.
 - **CONTRIBUTING.md** — Guidelines for contributing to ctx with agentic SDLC principles and test-driven development.
 - **GATE_CLOSEOUT.md** — Defines the mandatory closeout sequence for each project phase, including validation, reflection, suggestion disposition, and founder sign-off.
-- **PHASE16_HANDOFF.md** — Execution contract for Phase 16 work split into small gates for narrower models with recommended order and detailed task specifications.
 - **README.md** — Project documentation describing ctx tool for generating persistent CONTEXT.md manifests to help AI agents navigate large codebases.
 - **RUNBOOK.md** — Operational guide for running, validating, developing ctx including CLI usage, test execution, release publishing, and common failure modes.
 - **architecture.md** — System design overview covering bottom-up generation, content hashing, and component responsibilities.
@@ -40,14 +39,14 @@ A filesystem-native context generation tool (ctx) that creates and maintains CON
 - **.github/** — GitHub configuration and automation for the context-project repository.
 - **.husky/** — Husky configuration directory containing Git hooks for commit message validation and branch protection.
 - **archive/** — Design documents, AI analysis, and planning materials for the ctx project.
-- **docs/** — Documentation and architectural specifications for the context-project.
-- **documents/** — Strategic documentation outlining the vision and implementation roadmap for evolving ctx into an agent-first infrastructure platform.
-- **src/** — Source code for the context-project, containing the core implementation of a filesystem-native context layer that generates and maintains CONTEXT.md documentation for AI agents.
-- **tests/** — Comprehensive test suite covering CLI commands, language parsers, core generation logic, Git integration, and end-to-end workflows for the context project.
+- **docs/** — Architectural documentation and design specifications for the context-project.
+- **documents/** — Strategic planning and architectural thesis documents focusing on agent-first design philosophy and system overhaul strategies.
+- **src/** — Source code for the core implementation of a filesystem-native context layer that generates and maintains CONTEXT.md manifests.
+- **tests/** — Comprehensive test suite covering unit, integration, and compatibility testing for CLI, API, parsers, and core generation engine.
 
 ## Notes
 
-- The project uses a hybrid Node.js and Python stack (package.json and pyproject.toml), with Python as the primary implementation language.
-- Git hooks (Husky, pre-commit) enforce manifest freshness and conventional commits as part of the development workflow.
-- Agent-first design is central to the project vision, with AGENTS.md and AGENT_FIRST_OVERHAUL.md defining the strategic direction and operational contracts.
-- Phase-based delivery model with gate closeout procedures ensures structured progress tracking and validation at each milestone.
+- The project uses a hybrid Node.js/Python stack with commitlint and Husky for enforcing conventional commits and pre-commit validation.
+- Agent-first design is a core architectural principle, with AGENTS.md serving as the canonical contract for agentic contributions.
+- Documentation is stratified across multiple layers: operational (RUNBOOK.md), engineering standards (rules.md), contribution guidelines (CONTRIBUTING.md), and strategic vision (AGENT_FIRST_OVERHAUL.md).
+- Phase-gated development with mandatory closeout sequences ensures structured progression and founder sign-off at each milestone.

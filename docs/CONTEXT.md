@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-18T03:41:45Z'
+generated: '2026-03-18T08:19:39Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:6234dc1857a053b73f9758e2ebdf14ee85f5382bee31efe796e9bb11e58fb0a6
+content_hash: sha256:32c5593316195016ac8bae1f2417b647842f912988dd1baece30c1f70f67bec9
 files: 0
 dirs: 1
 tokens_total: 0
 ---
 # C:/Users/Matty/Documents/context-project/docs
 
-This directory contains documentation and architectural specifications for the context-project.
+This directory contains architectural documentation and design specifications for the context-project.
 
 ## Files
 
@@ -17,8 +17,8 @@ This directory contains documentation and architectural specifications for the c
 
 ## Subdirectories
 
-- **afo/** — Architectural specification documents defining the unified API, conventions, and integration patterns for the ctx command-line tool.
+- **afo/** — Architecture and design specifications for the ctx command-line tool, covering JSON envelope conventions, API unification, concurrency safety, MCP server integration, and agent workflows.
 
 ## Notes
 
-- The `afo` subdirectory appears to serve as the primary reference for system design and API contracts.
+- The documentation is organized by architectural concern, with the `afo` subdirectory serving as the primary reference for system design decisions and technical specifications.
