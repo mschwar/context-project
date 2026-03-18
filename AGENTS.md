@@ -17,6 +17,7 @@ pip install ctx-tool
 - Current CLI command: `ctx`
 - Current release line: `0.8.0`
 - Machine-readable mode: set `CTX_OUTPUT=json` or pass `--output json`
+- HTTP server mode: install `ctx-tool[serve]`
 
 ## Configure
 ### Zero-config
@@ -224,6 +225,21 @@ Common flags:
 | `unknown_error` | Unclassified failure | Inspect the error message and retry or report a bug |
 
 ## Integration Patterns
+### MCP Server (recommended for IDE-hosted agents)
+
+Project-local `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "ctx": {
+      "command": "ctx",
+      "args": ["serve", "--mcp"]
+    }
+  }
+}
+```
+
 ### Session Bootstrap
 
 ```bash
@@ -250,9 +266,10 @@ repos:
       - id: ctx-check
 ```
 
-### HTTP Manifest Server
+### HTTP Manifest Server (optional)
 
 ```bash
+pip install ctx-tool[serve]
 ctx serve .
 ```
 

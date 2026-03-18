@@ -38,7 +38,7 @@ def test_serve_command_calls_start_server(cli_runner, monkeypatch):
     assert call_kwargs["host"] == "127.0.0.2"
     assert call_kwargs["port"] == 8001
     assert "root" in call_kwargs  # root should be passed
-    assert "Starting ctx MCP server on http://127.0.0.2:8001" in result.output
+    assert "Starting ctx HTTP server on http://127.0.0.2:8001" in result.output
 
 
 def test_serve_command_with_explicit_path(cli_runner, monkeypatch, tmp_path):
@@ -58,6 +58,27 @@ def test_serve_command_with_explicit_path(cli_runner, monkeypatch, tmp_path):
     assert call_kwargs["port"] == 9000
     assert call_kwargs["root"] == serve_root.resolve()
     assert f"Serving manifests from: {serve_root.resolve()}" in result.output
+
+
+def test_serve_command_with_mcp_calls_stdio_server(cli_runner, monkeypatch, tmp_path):
+    cli_module = import_module("ctx.cli")
+    calls: dict[str, object] = {}
+
+    class _DummyServer:
+        def __init__(self, root: Path) -> None:
+            calls["root"] = root
+
+        def run(self) -> None:
+            calls["ran"] = True
+
+    monkeypatch.setattr("ctx.mcp_server.CtxMCPServer", _DummyServer)
+
+    result = cli_runner.invoke(cli_module.cli, ["serve", str(tmp_path), "--mcp"])
+
+    assert result.exit_code == 0
+    assert calls["root"] == tmp_path.resolve()
+    assert calls["ran"] is True
+    assert result.output == ""
 
 
 def test_get_mcp_context_success(test_client, tmp_path):
@@ -107,3 +128,10 @@ def test_get_mcp_context_not_a_directory(test_client, tmp_path):
     response = test_client.get(f"/mcp/context/test_file.txt")
     assert response.status_code == 404
     assert "is not a directory" in response.json()["detail"]
+
+
+def test_http_root_reports_http_server(test_client):
+    response = test_client.get("/")
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "ctx HTTP server is running"

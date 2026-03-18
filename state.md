@@ -3,13 +3,14 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–21 complete; AFO Stages 1–4 implemented.
+- **Status:** Stable. Phases 1–21 complete; AFO Stages 1–5 implemented.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 388 tests passing across all modules.
+- **Test Coverage:** 405 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
 - **Agent Surface:** canonical `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands backed by `src/ctx/api.py`, with hidden legacy aliases preserved for compatibility.
 - **Configuration:** full `CTX_*` env-var parity for scalar config fields, shared cost estimation, zero-config refresh bootstrap for env/local providers, and hard `max_tokens_per_run` / `max_usd_per_run` guardrails.
 - **Documentation:** `AGENTS.md` is now the machine-readable onboarding contract, `README.md` is demoted to a short human-facing pitch, and generated manifests append a source footer.
+- **MCP Integration:** `ctx serve --mcp` now exposes a stdio JSON-RPC server backed by `api.py`; HTTP serving remains available via the optional `[serve]` extra.
 
 ## Completed Milestones
 
@@ -296,8 +297,8 @@ Theme: pivot ctx from a human-operated CLI to agent-first infrastructure. Core e
 
 ### AFO Stage 5 — MCP Server (parallel with Stage 4)
 
-- [ ] **5.1 `mcp_server.py`** — hand-rolled JSON-RPC 2.0 stdio server, 4 tools mapping to `api.py`.
-- [ ] **5.2 `ctx serve --mcp`** — launches stdio server. FastAPI moves to `[serve]` optional dep.
+- [x] **5.1 `mcp_server.py`** — hand-rolled JSON-RPC 2.0 stdio server, 4 tools mapping to `api.py`.
+- [x] **5.2 `ctx serve --mcp`** — launches the stdio MCP server; HTTP serving stays on the default path and FastAPI/uvicorn move to the optional `[serve]` extra.
 
 **Branch:** `feat/afo-stage5`
 

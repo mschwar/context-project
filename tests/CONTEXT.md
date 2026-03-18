@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-18T19:37:28Z'
+generated: '2026-03-18T20:38:39Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:75d2fa4a0332bbf34a671a5151a11a178ad02aea6a469dc915f928c41afffe37
-files: 35
+content_hash: sha256:550a6f9e1ac981a46dc827365ad01fc73a478aea321c71a31ce30a33df149450
+files: 36
 dirs: 1
-tokens_total: 34330
+tokens_total: 36589
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Comprehensive test suite covering unit, integration, and end-to-end testing for the context manifest generation system, including CLI, parsers, configuration, and LLM integration.
+Comprehensive test suite covering unit, integration, and end-to-end testing for the context manifest generation system, including CLI, parsers, API, and server components.
 
 ## Files
 
@@ -21,7 +21,7 @@ Comprehensive test suite covering unit, integration, and end-to-end testing for 
 - **test_cli_compat.py** — Compatibility tests ensuring legacy command surfaces remain functional and match canonical commands.
 - **test_config.py** — Unit tests for configuration loading from files, environment variables, and CLI arguments with precedence rules.
 - **test_csharp_parser.py** — Tests C# parser extraction of public classes, interfaces, enums, structs, records, methods, and properties.
-- **test_docs.py** — Unit tests for documentation and package metadata validation including AGENTS.md structure, README content, and pyproject.toml keywords.
+- **test_docs.py** — Unit tests for documentation structure, README length, and pyproject.toml metadata compliance.
 - **test_elixir_parser.py** — Tests for Elixir file parser extracting modules, functions, structs, type annotations, specs, and callbacks.
 - **test_generator.py** — Unit tests for the generation engine covering manifest creation, tree traversal, staleness detection, and token budget enforcement.
 - **test_git.py** — Unit tests for Git integration covering changed file detection, staged/unstaged deduplication, and unborn HEAD handling.
@@ -37,13 +37,14 @@ Comprehensive test suite covering unit, integration, and end-to-end testing for 
 - **test_lock.py** — Unit tests for CtxLock covering acquisition, release, staleness detection, and concurrent lock scenarios.
 - **test_main.py** — Tests for module invocation via python -m ctx command.
 - **test_manifest.py** — Unit tests for CONTEXT.md manifest read/write operations covering roundtrip serialization, frontmatter parsing, and footer handling.
+- **test_mcp_server.py** — Unit tests for the stdio MCP server covering initialization, tool calls, error handling, and path validation.
 - **test_output.py** — Unit tests for OutputBroker covering JSON envelope generation, error handling, and metadata population.
 - **test_php_parser.py** — Tests PHP parser extraction of public functions, classes, interfaces, traits, and enums from PHP files.
 - **test_prompts.py** — Regression tests verifying prompt templates exist, contain required placeholders, and include injection-defence language.
 - **test_python_parser.py** — Tests for Python language parser extracting classes and functions.
 - **test_ruby_parser.py** — Tests Ruby parser extraction of methods, classes, and modules from source files.
 - **test_rust_parser.py** — Tests for Rust language parser extracting public items and modules.
-- **test_server.py** — Tests for MCP server functionality including serve command invocation and manifest context retrieval via HTTP endpoints.
+- **test_server.py** — Tests for the HTTP server and CLI serve command including manifest retrieval and MCP integration.
 - **test_setup.py** — Tests for provider detection, config file generation, and setup command with graceful error handling.
 - **test_swift_parser.py** — Tests Swift parser extraction of public functions, classes, structs, protocols, and enums from Swift files.
 - **test_trust.py** — Tests for token estimation accuracy, cache eviction policy, and transient error messaging with retry exhaustion handling.
@@ -55,8 +56,8 @@ Comprehensive test suite covering unit, integration, and end-to-end testing for 
 
 ## Notes
 
-- Language parser tests are organized by language (Python, Go, Rust, Java, C#, etc.) and validate extraction of public APIs and structural elements.
-- CLI and integration tests verify end-to-end workflows including dependency injection, output formatting, and manifest generation.
-- Configuration and lock tests cover precedence rules, concurrent access, and staleness detection.
-- Pytest fixtures in conftest.py provide isolated filesystem environments for safe test execution.
+- Language parser tests are organized by file extension and cover extraction of public APIs, type definitions, and structural elements across 12+ supported languages.
+- CLI and integration tests validate end-to-end workflows including dependency injection, output formatting, and compatibility with legacy command surfaces.
+- Core infrastructure tests (hasher, git, lock, manifest, generator) verify file tracking, staleness detection, concurrent access, and token budget enforcement.
+- conftest.py provides shared pytest fixtures for isolated filesystem operations and temporary directory management across all test modules.
 <!-- Generated by ctx (https://pypi.org/project/ctx-tool/) -->

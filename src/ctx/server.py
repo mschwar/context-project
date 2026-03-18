@@ -1,7 +1,12 @@
 from pathlib import Path
 
-import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+try:
+    import uvicorn
+    from fastapi import FastAPI, HTTPException, Request
+except ImportError as exc:
+    raise ImportError(
+        "HTTP server requires FastAPI. Install with: pip install ctx-tool[serve]"
+    ) from exc
 
 from ctx.manifest import read_manifest
 
@@ -9,7 +14,7 @@ app = FastAPI()
 
 @app.get("/")
 async def read_root():
-    return {"message": "ctx MCP Server is running"}
+    return {"message": "ctx HTTP server is running"}
 
 @app.get("/mcp/context/{file_path:path}")
 async def get_mcp_context(file_path: str, request: Request):
@@ -36,7 +41,7 @@ async def get_mcp_context(file_path: str, request: Request):
         raise HTTPException(status_code=404, detail=f"CONTEXT.md not found in '{file_path}'")
 
 def start_server(host: str = "127.0.0.1", port: int = 8000, root: Path | None = None):
-    """Start the MCP server.
+    """Start the HTTP manifest server.
     
     Args:
         host: Host address to bind to.

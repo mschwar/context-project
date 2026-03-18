@@ -14,6 +14,8 @@ ctx refresh .
 
 Tell your agent: install `ctx-tool`, run `ctx refresh .`, then use [AGENTS.md](./AGENTS.md) as the command contract.
 
+For MCP clients, add [`mcp.json`](./mcp.json) or run `ctx serve --mcp`.
+
 ## Agent Docs
 
 - [AGENTS.md](./AGENTS.md) — canonical onboarding, config, commands, error codes, and manifest schema
