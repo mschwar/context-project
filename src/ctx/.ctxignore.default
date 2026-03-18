@@ -12,7 +12,11 @@ __pycache__/
 venv/
 env/
 .eggs/
+*.egg-info
 *.egg-info/
+*.dist-info
+*.dist-info/
+pip-wheel-metadata/
 dist/
 build/
 

@@ -1,11 +1,11 @@
 ---
-generated: '2026-03-18T18:25:42Z'
+generated: '2026-03-18T18:37:26Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:c36d10905a7a4c740c48799d874f0be877bd95261f74f382aa284b28555dc16a
+content_hash: sha256:e41c9b47404f376091f31342607b5c0df9a2aceadbabe5243bb65f89ff40904a
 files: 34
 dirs: 1
-tokens_total: 33626
+tokens_total: 33676
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
@@ -26,7 +26,7 @@ Comprehensive test suite covering unit, integration, and end-to-end testing for 
 - **test_git.py** — Unit tests for Git integration covering changed file detection, staged/unstaged deduplication, and unborn HEAD handling.
 - **test_go_parser.py** — Tests for Go language parser extracting functions, types, constants, and variables.
 - **test_hasher.py** — Unit tests for file and directory hashing functionality covering basic hashing, line ending normalization, ignore patterns, symlink loops, and staleness detection.
-- **test_ignore.py** — Tests for ignore pattern loading, merging, and path matching against default and user-defined ignore files.
+- **test_ignore.py** — Unit tests for ignore pattern loading and path matching functionality in the ctx module.
 - **test_integration.py** — End-to-end integration tests verifying manifest generation workflow using a fake LLM client on sample project fixture.
 - **test_java_parser.py** — Tests Java parser extraction of public classes, interfaces, enums, records, and methods with modifiers.
 - **test_js_ts_parser.py** — Tests for JavaScript/TypeScript parser extracting exports and language constructs.
@@ -54,7 +54,7 @@ Comprehensive test suite covering unit, integration, and end-to-end testing for 
 
 ## Notes
 
-- Test organization mirrors core module structure with dedicated test files for each language parser, CLI command, and major subsystem.
-- conftest.py provides shared pytest fixtures for filesystem isolation and temporary directory management across all tests.
-- Integration tests in test_integration.py and test_cli.py validate end-to-end workflows using sample fixtures.
-- Language parser tests (test_*_parser.py) follow consistent patterns for extraction validation across 10+ supported languages.
+- Language parser tests are organized by file extension and cover extraction of public APIs, type definitions, and structural elements specific to each language.
+- Configuration and CLI tests validate precedence rules and dependency injection patterns across the application.
+- Integration tests use fixtures and fake LLM clients to verify end-to-end workflows without external service dependencies.
+- Compatibility tests ensure backward compatibility with legacy command surfaces.

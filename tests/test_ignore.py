@@ -19,6 +19,9 @@ def test_packaged_default_ignore_file_contains_expected_patterns() -> None:
     assert "*.tmp" in contents
     assert "*.tmp.*" in contents
     assert "*.pyc.*" in contents
+    assert "*.egg-info" in contents
+    assert "*.dist-info" in contents
+    assert "pip-wheel-metadata/" in contents
 
 
 def test_load_ignore_patterns_uses_repo_default_file(tmp_path) -> None:
@@ -27,7 +30,10 @@ def test_load_ignore_patterns_uses_repo_default_file(tmp_path) -> None:
     assert spec.match_file("CONTEXT.md")
 
 
-@pytest.mark.parametrize("relative_path", [".pytest_cache/", ".worktrees/", ".tmp/"])
+@pytest.mark.parametrize(
+    "relative_path",
+    [".pytest_cache/", ".worktrees/", ".tmp/", "ctx_tool.egg-info", "ctx_tool.dist-info", "pip-wheel-metadata/"],
+)
 def test_load_ignore_patterns_ignores_workspace_noise_by_default(tmp_path, relative_path: str) -> None:
     spec = load_ignore_patterns(tmp_path)
 
