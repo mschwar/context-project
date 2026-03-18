@@ -66,6 +66,31 @@ PROVIDER_DETECTED_VIA: dict[str, str] = {
     "lmstudio": "LM Studio running on localhost:1234",
 }
 
+# Pricing per 1M tokens in USD.
+PRICING_DATA: dict[str, dict] = {
+    "anthropic": {
+        "models": [
+            ("claude-3-opus", 15.0),
+            ("claude-3-sonnet", 3.0),
+            ("claude-3-haiku", 0.25),
+        ],
+        "default": 3.0,
+    },
+    "openai": {
+        "models": [
+            ("gpt-4o", 5.0),
+            ("gpt-4-o", 5.0),
+            ("gpt-4", 30.0),
+            ("gpt-3.5-turbo", 0.5),
+            ("gpt-3.5", 0.5),
+        ],
+        "default": 5.0,
+    },
+    "ollama": {"default": 0.0},
+    "lmstudio": {"default": 0.0},
+}
+DEFAULT_UNKNOWN_PROVIDER_PRICE = 3.0
+
 
 @dataclass
 class Config:
@@ -306,3 +331,22 @@ def load_config(
         config.api_key = api_key
 
     return config
+
+
+def estimate_cost(tokens: int, provider: str, model: str) -> float:
+    """Estimate cost in USD based on tokens used and provider pricing."""
+    provider_lower = provider.lower()
+    model_lower = model.lower()
+
+    provider_pricing = PRICING_DATA.get(provider_lower)
+    if not provider_pricing:
+        return tokens * DEFAULT_UNKNOWN_PROVIDER_PRICE / 1_000_000
+
+    if "models" not in provider_pricing:
+        return tokens * provider_pricing["default"] / 1_000_000
+
+    for model_key, price_per_million in provider_pricing["models"]:
+        if model_key in model_lower:
+            return tokens * price_per_million / 1_000_000
+
+    return tokens * provider_pricing["default"] / 1_000_000

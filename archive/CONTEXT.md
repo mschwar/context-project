@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-17T07:55:50Z'
+generated: '2026-03-18T08:19:41Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:e3096a9379dae5952fd86f702514f6cc2f0fbcacf3bab2c4b43ab670fc3845f4
+content_hash: sha256:ff81727f87c6f8b860126e0dcdf7b13b94ca90e90422dae54f66d863ff197645
 files: 6
 dirs: 1
 tokens_total: 6967
 ---
 # C:/Users/Matty/Documents/context-project/archive
 
-This directory contains design documents, AI analysis, and planning materials for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases through CONTEXT.md files.
+This directory contains design documents, AI analysis, and planning materials for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
 
 ## Files
 
@@ -22,9 +22,10 @@ This directory contains design documents, AI analysis, and planning materials fo
 
 ## Subdirectories
 
-- **reflections/** — This directory contains phase-by-phase reflections documenting the evolution, achievements, and recommendations of the context-project across multiple development cycles.
+- **reflections/** — This directory contains phase-by-phase reflection documents tracking the evolution, achievements, and recommendations across the context-project development lifecycle.
 
 ## Notes
 
-- The archive documents the iterative design process of ctx through multiple AI model analyses (GPT, Grok, Opus), converging on a markdown+YAML format with per-directory CONTEXT.md files.
-- Core architectural decision: hierarchical manifests enable coarse-to-fine navigation without requiring raw file reads, optimizing token usage for AI agents.
+- This archive represents the ideation and design phase of the ctx project, with multiple AI model analyses (GPT, Grok, Opus) converging on a markdown+YAML manifest format.
+- The progression from "Core Idea" through various model evaluations to "Opus4.6" shows iterative refinement toward a single CONTEXT.md-per-directory standard.
+- Cross-reference the reflections/ subdirectory for phase-level summaries and lessons learned during development.

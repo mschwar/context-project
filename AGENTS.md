@@ -348,5 +348,6 @@ Theme: prove ctx on real repositories outside its own codebase and feed the resu
 - Build a repeatable validation matrix against at least three external repo archetypes (Python package, mixed-language application, docs/tooling-heavy repo).
 - Capture manifest/export snapshots and a lightweight rubric so regressions in structure, stale counts, and Notes usefulness are measurable.
 - Use external-repo findings to refine prompt templates, default ignores, and boilerplate-file handling for real-world repositories.
+- Carry-forward backlog: refactor legacy CLI commands to delegate to canonical `refresh/check/reset` handlers, and update compatibility tests to lock delegation behavior without regressions.
 
 **Branch:** `feat/phase23-external-validation`
