@@ -887,6 +887,8 @@ def is_binary_file(path: Path) -> bool:
         return True
 
     try:
+        # Use an incremental decoder so a valid multibyte UTF-8 sequence split
+        # at the sample boundary does not get misclassified as binary.
         decoder = codecs.getincrementaldecoder("utf-8")()
         decoder.decode(sample, final=False)
     except UnicodeDecodeError:

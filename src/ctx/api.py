@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from collections import Counter
@@ -36,6 +37,7 @@ from ctx.lock import CtxLock
 
 
 ProgressCallback = Callable[[Path, int, int, int], None]
+logger = logging.getLogger(__name__)
 
 
 class ConfirmationRequiredError(Exception):
@@ -235,7 +237,12 @@ def refresh(
     else:
         try:
             changed_files = get_changed_files(root)
-        except RuntimeError:
+        except RuntimeError as exc:
+            logger.info(
+                "Git-aware refresh unavailable for %s: %s. Falling back to incremental refresh.",
+                root,
+                exc,
+            )
             changed_files = None
         strategy = "smart" if changed_files else "incremental"
 

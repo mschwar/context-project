@@ -583,6 +583,8 @@ class OpenAIClient:
             reason,
         )
         self.local_batch_fallbacks += 1
+        # Once a local provider returns malformed batch output, keep the rest of
+        # the run on the stable one-file path instead of retrying larger batches.
         self._local_batching_disabled = True
         return [self._summarize_single_file(dir_path, f["name"], f["content"]) for f in files]
 

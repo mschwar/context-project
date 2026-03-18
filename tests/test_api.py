@@ -96,6 +96,24 @@ def test_refresh_falls_back_to_incremental_when_git_is_unavailable(tmp_path, mon
     assert result.dirs_processed == 1
 
 
+def test_refresh_logs_when_git_is_unavailable(tmp_path, monkeypatch, caplog) -> None:
+    _patch_runtime(monkeypatch)
+    monkeypatch.setattr(api_module, "_has_manifests", lambda _root: True)
+    monkeypatch.setattr(
+        git_module,
+        "get_changed_files",
+        lambda _root: (_ for _ in ()).throw(RuntimeError("not a git repository")),
+    )
+    monkeypatch.setattr(api_module, "update_tree", lambda *a, **kw: GenerateStats(dirs_processed=1))
+
+    with caplog.at_level("INFO", logger="ctx.api"):
+        result = api_module.refresh(tmp_path)
+
+    assert result.strategy == "incremental"
+    assert "Git-aware refresh unavailable" in caplog.text
+    assert "Falling back to incremental refresh" in caplog.text
+
+
 def test_refresh_force_uses_full_strategy(tmp_path, monkeypatch) -> None:
     _patch_runtime(monkeypatch)
     monkeypatch.setattr(api_module, "_has_manifests", lambda _root: True)
