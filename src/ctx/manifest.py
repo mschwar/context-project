@@ -27,6 +27,8 @@ File format:
 
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -149,4 +151,19 @@ def write_manifest(
     )
     yaml_body = yaml.safe_dump(asdict(frontmatter), sort_keys=False, default_flow_style=False)
     content = f"---\n{yaml_body}---\n{body}"
-    (path / "CONTEXT.md").write_text(content, encoding="utf-8")
+    target = path / "CONTEXT.md"
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".CONTEXT.md.",
+        suffix=".tmp",
+        dir=str(path),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        os.replace(tmp_path, str(target))
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise

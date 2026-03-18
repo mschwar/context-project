@@ -1,15 +1,15 @@
 ---
-generated: '2026-03-17T07:49:57Z'
+generated: '2026-03-18T03:41:54Z'
 generator: ctx/0.8.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:0748b043da30f7e0dbceabe21a51edfa7ff7984e6b7a84b658f4731969fcd4c9
-files: 30
+content_hash: sha256:bc257730c0e88e3bc107a3834423f380234bb2328b08d2c1c11ca8da5e4cf064
+files: 32
 dirs: 1
-tokens_total: 27817
+tokens_total: 29759
 ---
 # C:/Users/Matty/Documents/context-project/tests
 
-Comprehensive test suite covering CLI commands, language parsers, configuration, Git integration, manifest generation, and LLM functionality for the context project.
+Comprehensive test suite covering CLI commands, language parsers, core generation logic, Git integration, and end-to-end workflows for the context project.
 
 ## Files
 
@@ -31,8 +31,10 @@ Comprehensive test suite covering CLI commands, language parsers, configuration,
 - **test_kotlin_parser.py** — Tests Kotlin parser extraction of functions, classes, interfaces, objects, and enums from source files.
 - **test_language_detector.py** — Tests for language detection from file extensions and project markers.
 - **test_llm.py** — Tests for LLM client creation and file/directory summarization with retries.
+- **test_lock.py** — Unit tests for CtxLock covering acquisition, release, staleness detection, and concurrent lock scenarios.
 - **test_main.py** — Tests for module invocation via python -m ctx command.
 - **test_manifest.py** — Tests for CONTEXT.md manifest file reading, writing, and parsing.
+- **test_output.py** — Unit tests for OutputBroker covering JSON envelope generation, error handling, and metadata population.
 - **test_php_parser.py** — Tests PHP parser extraction of public functions, classes, interfaces, traits, and enums from PHP files.
 - **test_prompts.py** — Regression tests verifying prompt templates exist, contain required placeholders, and include injection-defence language.
 - **test_python_parser.py** — Tests for Python language parser extracting classes and functions.
@@ -50,7 +52,7 @@ Comprehensive test suite covering CLI commands, language parsers, configuration,
 
 ## Notes
 
-- Test organization mirrors core module structure with dedicated test files for each language parser, CLI command, and major subsystem.
-- Pytest fixtures in conftest.py provide isolated temporary directories and environment setup for all tests.
-- Integration tests validate end-to-end workflows using fake LLM clients and sample project fixtures.
-- Language parser tests follow a consistent pattern across multiple supported languages (Python, JavaScript/TypeScript, Go, Rust, Java, C#, Kotlin, PHP, Ruby, Swift, Elixir).
+- Test organization mirrors core module structure with one test file per major feature (parsers, CLI, generation, Git, LLM integration).
+- Language parser tests follow a consistent pattern validating extraction of public symbols and language-specific constructs.
+- conftest.py provides shared fixtures for isolated test environments; integration tests use sample projects from fixtures/.
+- Tests cover both happy-path functionality and edge cases (concurrent locks, transient errors, token budget enforcement, unborn HEAD).

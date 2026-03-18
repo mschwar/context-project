@@ -1,5 +1,9 @@
 # Comprehensive Plan: The Agent-First Overhaul
 
+> **Historical Document** — This is an earlier draft of the AFO strategy, preserved for reference.
+> The canonical implementation plan is `AGENT_FIRST_OVERHAUL.md` at the repo root.
+> The canonical spec suite is in `docs/afo/` (8 documents, spec numbers 00–07).
+
 This document outlines the tactical and strategic roadmap for overhauling `ctx` from a human-centric CLI tool to an autonomous, agent-first infrastructure layer.
 
 ---

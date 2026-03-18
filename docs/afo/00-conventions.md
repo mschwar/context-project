@@ -25,7 +25,7 @@ Every command, in `--output json` mode, emits **exactly one** JSON object to std
     {
       "code": "provider_unreachable",
       "message": "Connection error: timeout after 10s",
-      "hint": "Check your network or run `ctx setup --check`.",
+      "hint": "Check your network or run `ctx refresh . --setup --dry-run`.",
       "path": null
     }
   ],

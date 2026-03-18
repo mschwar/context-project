@@ -55,6 +55,7 @@ Exposes ctx's API functions as MCP tools over JSON-RPC 2.0 on stdin/stdout.
 
 import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -267,13 +268,7 @@ def _handle_tools_call(self, request_id: Any, params: dict) -> None:
             "content": [{"type": "text", "text": json.dumps(result, indent=2)}],
         })
     except Exception as exc:
-        self._write_result(request_id, {
-            "content": [{"type": "text", "text": json.dumps({
-                "error": str(exc),
-                "type": type(exc).__name__,
-            })}],
-            "isError": True,
-        })
+        self._write_error(request_id, -32603, str(exc))
 ```
 
 ### 3.6 Tool Implementations

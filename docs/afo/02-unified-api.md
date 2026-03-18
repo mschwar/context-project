@@ -172,7 +172,7 @@ def reset(
 ) -> ResetResult:
 ```
 
-**JSON mode interaction**: When called programmatically (from MCP or with `--output json`), `yes` defaults to `True` — agents never confirm interactively. The CLI layer sets `yes=True` when JSON mode is active. See 03-config-and-bootstrap.md for prompt elimination details.
+**JSON mode interaction**: `reset` is a destructive operation. Even in JSON mode, `--yes` must be passed explicitly — agents cannot silently delete manifests. If `--yes` is absent in JSON mode, return an error envelope with code `unknown_error` and message `"--yes flag required in non-interactive mode"`. See 03-config-and-bootstrap.md Section 5.3 for the authoritative prompt elimination rules.
 
 ---
 

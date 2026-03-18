@@ -53,40 +53,40 @@ if env_base_url:
     config.base_url = env_base_url.strip()
 
 env_max_file_tokens = os.getenv("CTX_MAX_FILE_TOKENS")
-if env_max_file_tokens:
-    config.max_file_tokens = int(env_max_file_tokens)
+if env_max_file_tokens and env_max_file_tokens.strip():
+    config.max_file_tokens = int(env_max_file_tokens.strip())
 
 env_max_depth = os.getenv("CTX_MAX_DEPTH")
-if env_max_depth:
-    config.max_depth = None if env_max_depth.strip().lower() == "none" else int(env_max_depth)
+if env_max_depth and env_max_depth.strip():
+    config.max_depth = None if env_max_depth.strip().lower() == "none" else int(env_max_depth.strip())
 
 env_token_budget = os.getenv("CTX_TOKEN_BUDGET")
-if env_token_budget:
-    config.token_budget = None if env_token_budget.strip().lower() == "none" else int(env_token_budget)
+if env_token_budget and env_token_budget.strip():
+    config.token_budget = None if env_token_budget.strip().lower() == "none" else int(env_token_budget.strip())
 
 env_batch_size = os.getenv("CTX_BATCH_SIZE")
-if env_batch_size:
-    config.batch_size = None if env_batch_size.strip().lower() == "none" else int(env_batch_size)
+if env_batch_size and env_batch_size.strip():
+    config.batch_size = None if env_batch_size.strip().lower() == "none" else int(env_batch_size.strip())
 
 env_cache_path = os.getenv("CTX_CACHE_PATH")
 if env_cache_path is not None:  # Note: empty string = disable cache
     config.cache_path = env_cache_path
 
 env_max_cache = os.getenv("CTX_MAX_CACHE_ENTRIES")
-if env_max_cache:
-    config.max_cache_entries = int(env_max_cache)
+if env_max_cache and env_max_cache.strip():
+    config.max_cache_entries = int(env_max_cache.strip())
 
 env_debounce = os.getenv("CTX_WATCH_DEBOUNCE")
-if env_debounce:
-    config.watch_debounce_seconds = float(env_debounce)
+if env_debounce and env_debounce.strip():
+    config.watch_debounce_seconds = float(env_debounce.strip())
 
 env_max_tokens_run = os.getenv("CTX_MAX_TOKENS_PER_RUN")
-if env_max_tokens_run:
-    config.max_tokens_per_run = int(env_max_tokens_run)
+if env_max_tokens_run and env_max_tokens_run.strip():
+    config.max_tokens_per_run = int(env_max_tokens_run.strip())
 
 env_max_usd_run = os.getenv("CTX_MAX_USD_PER_RUN")
-if env_max_usd_run:
-    config.max_usd_per_run = float(env_max_usd_run)
+if env_max_usd_run and env_max_usd_run.strip():
+    config.max_usd_per_run = float(env_max_usd_run.strip())
 
 env_extensions = os.getenv("CTX_EXTENSIONS")
 if env_extensions:
