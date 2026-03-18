@@ -1,6 +1,6 @@
 - id: ctx-check
   name: Check ctx manifests are fresh
-  entry: ctx status . --check-exit-code
+  entry: ctx check . --check-exit
   language: python
   pass_filenames: false
   always_run: true
