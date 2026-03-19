@@ -18,7 +18,8 @@ Built-in defaults:
     token_budget: None  (generator-level budget)
     max_tokens_per_run: None  (hard token guardrail)
     max_usd_per_run: None  (hard USD guardrail)
-    batch_size: None  (send all files in a single LLM call — set to limit files per call for small-context providers)
+    files_per_call: None  (send all files in a single LLM call — smaller values increase API call count)
+    max_concurrent_dirs: None  (auto: 1 for cloud providers, 4 for local)
     extensions: None  (all text files)
     base_url: None  (provider default — override for custom endpoints)
 """
@@ -68,25 +69,29 @@ PROVIDER_DETECTED_VIA: dict[str, str] = {
     "lmstudio": "LM Studio running on localhost:1234",
 }
 
-# Pricing per 1M tokens in USD.
+# Pricing per 1M input tokens in USD.
 PRICING_DATA: dict[str, dict] = {
     "anthropic": {
         "models": [
+            ("claude-opus-4", 15.0),
+            ("claude-sonnet-4", 3.0),
+            ("claude-haiku-4-5", 0.80),
             ("claude-3-opus", 15.0),
             ("claude-3-sonnet", 3.0),
             ("claude-3-haiku", 0.25),
         ],
-        "default": 3.0,
+        "default": 0.80,
     },
     "openai": {
         "models": [
-            ("gpt-4o", 5.0),
-            ("gpt-4-o", 5.0),
+            ("gpt-4.1", 2.0),
+            ("gpt-4o", 2.50),
+            ("gpt-4-o", 2.50),
             ("gpt-4", 30.0),
             ("gpt-3.5-turbo", 0.5),
             ("gpt-3.5", 0.5),
         ],
-        "default": 5.0,
+        "default": 2.50,
     },
     "ollama": {"default": 0.0},
     "lmstudio": {"default": 0.0},
@@ -107,11 +112,13 @@ class Config:
     token_budget: Optional[int] = None  # None = unlimited
     max_tokens_per_run: Optional[int] = None  # None = unlimited hard token guardrail
     max_usd_per_run: Optional[float] = None  # None = unlimited hard USD guardrail
-    batch_size: Optional[int] = None  # None = send all files in one call
+    files_per_call: Optional[int] = None  # None = send all files in one call
+    max_concurrent_dirs: Optional[int] = None  # None = auto (1 for cloud, 4 for local)
     extensions: Optional[list[str]] = None  # None = all text files
     cache_path: Optional[str] = None  # None = default .ctx-cache/llm_cache.json; "" = disable
     max_cache_entries: int = 10_000  # trim disk cache when it exceeds this many entries
     watch_debounce_seconds: float = 0.5  # per-file debounce window for ctx watch
+    resume_cooldown_seconds: float = 60.0  # delay between auto-resume cycles
     prompts: dict[str, str] = field(default_factory=dict)
 
 
@@ -297,8 +304,14 @@ def load_config(
             config.max_usd_per_run = (
                 None if data["max_usd_per_run"] is None else float(data["max_usd_per_run"])
             )
-        if "batch_size" in data:
-            config.batch_size = None if data["batch_size"] is None else int(data["batch_size"])
+        if "files_per_call" in data:
+            config.files_per_call = None if data["files_per_call"] is None else int(data["files_per_call"])
+        elif "batch_size" in data:
+            config.files_per_call = None if data["batch_size"] is None else int(data["batch_size"])
+        if "max_concurrent_dirs" in data:
+            config.max_concurrent_dirs = None if data["max_concurrent_dirs"] is None else int(data["max_concurrent_dirs"])
+        if "resume_cooldown_seconds" in data and data["resume_cooldown_seconds"] is not None:
+            config.resume_cooldown_seconds = float(data["resume_cooldown_seconds"])
         if "max_cache_entries" in data and data["max_cache_entries"] is not None:
             config.max_cache_entries = int(data["max_cache_entries"])
         if "watch_debounce_seconds" in data and data["watch_debounce_seconds"] is not None:
@@ -350,9 +363,12 @@ def load_config(
     env_max_usd_per_run = _env_text("CTX_MAX_USD_PER_RUN")
     if env_max_usd_per_run is not None:
         config.max_usd_per_run = _parse_optional_float(env_max_usd_per_run)
-    env_batch_size = _env_text("CTX_BATCH_SIZE")
-    if env_batch_size is not None:
-        config.batch_size = _parse_optional_int(env_batch_size)
+    env_files_per_call = _env_text("CTX_FILES_PER_CALL") or _env_text("CTX_BATCH_SIZE")
+    if env_files_per_call is not None:
+        config.files_per_call = _parse_optional_int(env_files_per_call)
+    env_max_concurrent_dirs = _env_text("CTX_MAX_CONCURRENT_DIRS")
+    if env_max_concurrent_dirs is not None:
+        config.max_concurrent_dirs = _parse_optional_int(env_max_concurrent_dirs)
     env_cache_path = os.getenv("CTX_CACHE_PATH")
     if env_cache_path is not None:
         config.cache_path = env_cache_path

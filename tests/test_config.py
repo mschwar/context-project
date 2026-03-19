@@ -227,7 +227,7 @@ def test_load_config_env_parity_for_scalar_fields(monkeypatch, tmp_path) -> None
     monkeypatch.setenv("CTX_TOKEN_BUDGET", "20000")
     monkeypatch.setenv("CTX_MAX_TOKENS_PER_RUN", "15000")
     monkeypatch.setenv("CTX_MAX_USD_PER_RUN", "0.75")
-    monkeypatch.setenv("CTX_BATCH_SIZE", "4")
+    monkeypatch.setenv("CTX_FILES_PER_CALL", "4")
     monkeypatch.setenv("CTX_CACHE_PATH", "")
     monkeypatch.setenv("CTX_MAX_CACHE_ENTRIES", "5000")
     monkeypatch.setenv("CTX_WATCH_DEBOUNCE", "1.5")
@@ -243,7 +243,7 @@ def test_load_config_env_parity_for_scalar_fields(monkeypatch, tmp_path) -> None
     assert config.token_budget == 20000
     assert config.max_tokens_per_run == 15000
     assert config.max_usd_per_run == pytest.approx(0.75)
-    assert config.batch_size == 4
+    assert config.files_per_call == 4
     assert config.cache_path == ""
     assert config.max_cache_entries == 5000
     assert config.watch_debounce_seconds == pytest.approx(1.5)
@@ -257,7 +257,7 @@ def test_load_config_env_supports_none_sentinels(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CTX_TOKEN_BUDGET", "none")
     monkeypatch.setenv("CTX_MAX_TOKENS_PER_RUN", "none")
     monkeypatch.setenv("CTX_MAX_USD_PER_RUN", "none")
-    monkeypatch.setenv("CTX_BATCH_SIZE", "none")
+    monkeypatch.setenv("CTX_FILES_PER_CALL", "none")
 
     config = load_config(tmp_path)
 
@@ -265,7 +265,7 @@ def test_load_config_env_supports_none_sentinels(monkeypatch, tmp_path) -> None:
     assert config.token_budget is None
     assert config.max_tokens_per_run is None
     assert config.max_usd_per_run is None
-    assert config.batch_size is None
+    assert config.files_per_call is None
 
 
 def test_load_config_infers_openai_provider_from_api_key(monkeypatch, tmp_path) -> None:

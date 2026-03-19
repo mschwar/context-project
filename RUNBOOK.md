@@ -154,7 +154,7 @@ python -m ctx update .
 
 ### Local Provider Still Hits Context Limits
 **Symptom**: A local OpenAI-compatible provider still returns HTTP 400 on a large directory.
-**Fix**: `ctx` already retries local providers with smaller fallbacks, auto-disables batching after the first malformed batch response, and reports `Local batch fallbacks: N` in refresh output. If it still fails, lower `batch_size` or `max_file_tokens` in `.ctxconfig`.
+**Fix**: `ctx` already retries local providers with smaller fallbacks, auto-disables batching after the first malformed batch response, and reports `Local batch fallbacks: N` in refresh output. If it still fails, lower `files_per_call` or `max_file_tokens` in `.ctxconfig`.
 
 ### `pytest` Command Not Found
 **Symptom**: `pytest` is missing from the shell.

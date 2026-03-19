@@ -2134,22 +2134,26 @@ def test_progress_callback_shows_tokens_and_elapsed() -> None:
 def test_estimate_cost_anthropic_models() -> None:
     """Cost estimation for Anthropic models."""
     cli_module = import_module("ctx.cli")
-    
-    # Claude 3 Opus pricing (~$15/MTok)
-    opus_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-3-opus-20240229")
+
+    # Claude Opus 4 pricing (~$15/MTok)
+    opus_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-opus-4-20260301")
     assert 14.0 < opus_cost < 16.0
-    
-    # Claude 3 Sonnet pricing (~$3/MTok)
-    sonnet_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-3-sonnet-20240229")
+
+    # Claude Sonnet 4 pricing (~$3/MTok)
+    sonnet_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-sonnet-4-20260301")
     assert 2.5 < sonnet_cost < 3.5
-    
-    # Claude 3 Haiku pricing (~$0.25/MTok)
-    haiku_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-3-haiku-20240307")
-    assert 0.2 < haiku_cost < 0.3
-    
-    # Default pricing for unknown anthropic model
+
+    # Claude Haiku 4.5 pricing (~$0.80/MTok)
+    haiku_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-haiku-4-5-20251001")
+    assert 0.7 < haiku_cost < 0.9
+
+    # Claude 3 Haiku (legacy) pricing (~$0.25/MTok)
+    haiku3_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-3-haiku-20240307")
+    assert 0.2 < haiku3_cost < 0.3
+
+    # Default pricing for unknown anthropic model (~$0.80/MTok)
     default_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-unknown")
-    assert 2.5 < default_cost < 3.5
+    assert 0.7 < default_cost < 0.9
 
 
 def test_estimate_cost_openai_models() -> None:
@@ -2160,9 +2164,9 @@ def test_estimate_cost_openai_models() -> None:
     gpt4_cost = cli_module._estimate_cost(1_000_000, "openai", "gpt-4")
     assert 25.0 < gpt4_cost < 35.0
     
-    # GPT-4o pricing (~$5/MTok)
+    # GPT-4o pricing (~$2.50/MTok)
     gpt4o_cost = cli_module._estimate_cost(1_000_000, "openai", "gpt-4o")
-    assert 4.0 < gpt4o_cost < 6.0
+    assert 2.0 < gpt4o_cost < 3.0
     
     # GPT-3.5 pricing (~$0.50/MTok)
     gpt35_cost = cli_module._estimate_cost(1_000_000, "openai", "gpt-3.5-turbo")

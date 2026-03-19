@@ -389,3 +389,42 @@ def test_validate_manifest_body_reports_hallucinations_and_illegal_none(tmp_path
     assert any("Files section lists nonexistent entries: fake.py" in issue for issue in issues)
     assert any("Subdirectories entry is missing a trailing slash: pkg" in issue for issue in issues)
     assert any("Notes section contains an illegal None row." in issue for issue in issues)
+
+
+def test_mid_level_budget_enforcement(tmp_path) -> None:
+    """Budget should be enforced within a depth level, not just between levels."""
+    root = _copy_sample_project(tmp_path)
+    spec = load_ignore_patterns(root)
+    # Budget of 1 — first directory at the deepest level will use tokens,
+    # then remaining directories at the same level should be skipped.
+    config = Config(api_key="test-key", token_budget=1)
+    client = FakeLLMClient()
+
+    stats = generate_tree(root, config, client, spec)
+
+    assert stats.budget_exhausted
+    # At least one dir should be processed (the first one at the deepest level)
+    assert stats.dirs_processed >= 1
+    # But not all dirs should complete
+    assert stats.dirs_processed < 3
+
+
+def test_configurable_max_concurrent_dirs(tmp_path) -> None:
+    """max_concurrent_dirs config should be respected."""
+    from ctx.config import LOCAL_PROVIDERS
+    from ctx.generator import _DEFAULT_CLOUD_PARALLEL_DIRS, _DEFAULT_LOCAL_PARALLEL_DIRS
+
+    # Verify defaults exist
+    assert _DEFAULT_CLOUD_PARALLEL_DIRS == 1
+    assert _DEFAULT_LOCAL_PARALLEL_DIRS == 4
+
+    root = _copy_sample_project(tmp_path)
+    spec = load_ignore_patterns(root)
+    config = Config(api_key="test-key", max_concurrent_dirs=2)
+    client = FakeLLMClient()
+
+    stats = generate_tree(root, config, client, spec)
+
+    # Should still complete all dirs, just with limited parallelism
+    assert stats.dirs_processed == 3
+    assert stats.errors == []

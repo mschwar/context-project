@@ -32,10 +32,11 @@ from ctx.config import LOCAL_PROVIDERS, Config
 
 logger = logging.getLogger(__name__)
 
-RETRY_ATTEMPTS = 3
+RETRY_ATTEMPTS = 5
+MAX_RETRY_DELAY_SECONDS = 60.0
 # Max chars to keep per summary when truncating to fit a local provider's context window.
 _SUMMARY_TRUNCATE_CHARS = 120
-DEFAULT_LOCAL_BATCH_SIZE = 4
+DEFAULT_LOCAL_FILES_PER_CALL = 4
 BASE_RETRY_DELAY_SECONDS = 1.0
 TRANSIENT_ERROR_PREFIX = "[transient, retries exhausted]"
 
@@ -366,18 +367,18 @@ def _build_batch_results(
 
 def _apply_batch_size(
     chunk_fn: Callable[[Path, list[dict]], list[LLMResult]],
-    batch_size: int | None,
+    files_per_call: int | None,
     dir_path: Path,
     files: list[dict],
 ) -> list[LLMResult]:
-    """Call chunk_fn in slices of batch_size, or once when batch_size is unset."""
+    """Call chunk_fn in slices of files_per_call, or once when unset."""
     if not files:
         return []
-    if batch_size is None or batch_size >= len(files):
+    if files_per_call is None or files_per_call >= len(files):
         return chunk_fn(dir_path, files)
     results: list[LLMResult] = []
-    for i in range(0, len(files), batch_size):
-        results.extend(chunk_fn(dir_path, files[i : i + batch_size]))
+    for i in range(0, len(files), files_per_call):
+        results.extend(chunk_fn(dir_path, files[i : i + files_per_call]))
     return results
 
 
@@ -403,6 +404,23 @@ def _retryable_errors(provider: str) -> tuple[type[Exception], ...]:
     return retryable_map.get(provider.lower(), ())
 
 
+def _extract_retry_after(exc: Exception) -> float | None:
+    """Extract Retry-After header value from a rate limit error response."""
+    response = getattr(exc, "response", None)
+    if response is None:
+        return None
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    retry_after = headers.get("retry-after")
+    if retry_after is None:
+        return None
+    try:
+        return float(retry_after)
+    except (ValueError, TypeError):
+        return None
+
+
 def _call_with_retries(provider: str, request: Callable[[], object]) -> object:
     last_error: Exception | None = None
     retryable_errors = _retryable_errors(provider)
@@ -417,7 +435,14 @@ def _call_with_retries(provider: str, request: Callable[[], object]) -> object:
             if attempt == RETRY_ATTEMPTS:
                 raise RuntimeError(f"{TRANSIENT_ERROR_PREFIX} {exc}") from exc
 
-            delay = BASE_RETRY_DELAY_SECONDS * (2 ** (attempt - 1))
+            retry_after = _extract_retry_after(exc)
+            if retry_after is not None:
+                delay = min(retry_after, MAX_RETRY_DELAY_SECONDS)
+            else:
+                delay = min(
+                    BASE_RETRY_DELAY_SECONDS * (2 ** (attempt - 1)),
+                    MAX_RETRY_DELAY_SECONDS,
+                )
             logger.warning(
                 "%s API call failed on attempt %s/%s: %s. Retrying in %.1fs.",
                 provider,
@@ -482,7 +507,7 @@ class AnthropicClient:
         return _build_batch_results(summaries, input_tokens, output_tokens)
 
     def summarize_files(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
-        return _apply_batch_size(self._summarize_files_chunk, self.config.batch_size, dir_path, files)
+        return _apply_batch_size(self._summarize_files_chunk, self.config.files_per_call, dir_path, files)
 
     def summarize_directory(
         self,
@@ -588,14 +613,14 @@ class OpenAIClient:
         self._local_batching_disabled = True
         return [self._summarize_single_file(dir_path, f["name"], f["content"]) for f in files]
 
-    def _effective_batch_size(self, file_count: int) -> int | None:
+    def _effective_files_per_call(self, file_count: int) -> int | None:
         if self.config.provider not in LOCAL_PROVIDERS:
-            return self.config.batch_size
+            return self.config.files_per_call
         if self._local_batching_disabled:
             return 1
-        if self.config.batch_size is not None:
-            return self.config.batch_size
-        return min(DEFAULT_LOCAL_BATCH_SIZE, file_count)
+        if self.config.files_per_call is not None:
+            return self.config.files_per_call
+        return min(DEFAULT_LOCAL_FILES_PER_CALL, file_count)
 
     def _summarize_files_chunk(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
         payload_content = _format_files_json_payload(dir_path, files)
@@ -638,7 +663,7 @@ class OpenAIClient:
     def summarize_files(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
         return _apply_batch_size(
             self._summarize_files_chunk,
-            self._effective_batch_size(len(files)),
+            self._effective_files_per_call(len(files)),
             dir_path,
             files,
         )

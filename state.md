@@ -3,15 +3,17 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–21 and Phase 24 are complete; AFO Stages 1–6 are complete and closeout is documented.
-- **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache.
-- **Test Coverage:** 419 tests passing across all modules.
+- **Status:** Stable. Phases 1–21, Phase 24, and Phase 25 are complete; AFO Stages 1–6 are complete and closeout is documented.
+- **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache. Rate limit handling uses Retry-After headers with 60s backoff ceiling and 5 retry attempts. Mid-level budget enforcement via `threading.Event`. Configurable concurrency defaults to 1 worker for cloud providers, 4 for local.
+- **Test Coverage:** 426 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
-- **Agent Surface:** canonical `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands backed by `src/ctx/api.py`, with hidden legacy aliases preserved for compatibility.
-- **Configuration:** full `CTX_*` env-var parity for scalar config fields, shared cost estimation, zero-config refresh bootstrap for env/local providers, and hard `max_tokens_per_run` / `max_usd_per_run` guardrails.
+- **Agent Surface:** canonical `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands backed by `src/ctx/api.py`, with hidden legacy aliases preserved for compatibility. `--until-complete` flag enables auto-resume for large trees.
+- **Configuration:** full `CTX_*` env-var parity for scalar config fields, shared cost estimation, zero-config refresh bootstrap for env/local providers, and hard `max_tokens_per_run` / `max_usd_per_run` guardrails. `files_per_call` (formerly `batch_size`) and `max_concurrent_dirs` are configurable.
+- **Exit Codes:** 0 = success, 1 = error, 2 = partial success (budget exhausted, no real errors).
 - **Manifest Trust:** refresh is git-optional on extracted trees, `## Files` / `## Subdirectories` are rendered deterministically from the real filesystem, `ctx check --verify` validates manifest bodies, UTF-8 boundary reads no longer misclassify valid text as binary, and local-provider fallback counts are surfaced in CLI/API results.
 - **Documentation:** `AGENTS.md` is now the machine-readable onboarding contract, `README.md` is demoted to a short human-facing pitch, and generated manifests append a source footer.
 - **MCP Integration:** `ctx serve --mcp` now exposes a stdio JSON-RPC server backed by `api.py`; HTTP serving remains available via the optional `[serve]` extra.
+- **Pricing:** Updated for Claude 4.x (Opus/Sonnet/Haiku) and GPT-4.1 models. Default fallback is 0.80 (Haiku 4.5 pricing).
 
 ## Completed Milestones
 
@@ -333,6 +335,30 @@ Carry-forward items from the AFO Stage 1–6 closeout reflection and live-repo v
 - [x] **24.5 Repo-specific summary calibration** — prompt templates now push repo-specific nouns, ban generic phrases like `main entry point` / `central hub`, and describe `SKILL.md` / prompt files accurately.
 - [x] **24.6 Local-provider adaptive batching** — OpenAI-compatible local providers now default to safer small batches, auto-disable batching after the first malformed batch response, and surface `local_batch_fallbacks` in refresh/init/update results.
 - [x] **24.7 External validation fixtures** — regression coverage now includes non-git extracted-tree refresh fallback, UTF-8 boundary text files, malformed-but-fresh manifest bodies, deterministic manifest rendering, and local-provider fallback behavior derived from the `gstack-main` findings.
+
+## Phase 25 — Production Hardening (Pre-1.0.0 Assessment) ✓
+
+Stress-tested ctx against two real-world academic trees: a 171-directory PhD dissertation (mixed R/LaTeX/Access/CSV) and a 390-directory grant portfolio (2,410 files, predominantly binary). Findings drove architectural fixes across rate limiting, budget enforcement, exit codes, and auto-resume.
+
+- [x] **25.1 Rate limit resilience** — `_call_with_retries` now reads `Retry-After` headers, caps backoff at 60s, and retries 5 times (up from 3). Cloud providers default to 1 concurrent worker.
+- [x] **25.2 Mid-level budget enforcement** — `threading.Event` stops workers within a depth level once budget is exhausted, preventing 6-9x budget overshoot on large directories.
+- [x] **25.3 Exit code semantics** — exit code 2 for budget exhaustion (partial success), exit code 1 reserved for real errors. Budget guardrail messages no longer conflated with errors.
+- [x] **25.4 Auto-resume (`--until-complete`)** — `ctx refresh --until-complete` loops internally, waiting between cycles for rate limits to clear. Incremental skip ensures no duplicate work.
+- [x] **25.5 `batch_size` → `files_per_call` rename** — config field renamed for clarity. `CTX_FILES_PER_CALL` env var. Backward-compatible: `.ctxconfig` files using `batch_size` still work.
+- [x] **25.6 Configurable concurrency** — `max_concurrent_dirs` config and `CTX_MAX_CONCURRENT_DIRS` env var. Defaults: 1 for cloud, 4 for local providers.
+- [x] **25.7 Pricing table update** — added Claude 4.x (Opus 15.0, Sonnet 3.0, Haiku 4.5 0.80) and GPT-4.1 models. Default fallback updated from 3.0 to 0.80.
+- [x] **25.8 Stress test validation** — 390-directory grant tree: 100% coverage in single run via Ollama, 0 rate limit errors, 0 budget issues, exit code 0. 171-directory dissertation tree: required 5 manual runs pre-fix (documented in plan), single-run completion post-fix.
+- [x] **25.Z Gate closeout** — 426 tests passing; reflection filed; carry-forward scoped as Phase 26.
+
+**Branch:** `feat/phase24-manifest-trust`
+
+## Phase 26 — Local Model Quality Assurance (Backlog)
+
+Carry-forward from Phase 25 stress test on the 390-directory grant portfolio. All local inference produced structurally correct but semantically empty summaries.
+
+- [ ] **26.1 Pre-flight model quality check** — before processing, send one sample file to the local model and verify the response contains substantive text. Warn if the model returns empty/placeholder summaries.
+- [ ] **26.2 Minimum summary length threshold** — if an LLM returns an empty or whitespace-only file summary, retry once or log a warning. Currently empty summaries pass silently and cause `--verify` failures downstream.
+- [ ] **26.3 Local model compatibility matrix** — document which local models are tested and known to produce useful summaries. Include model size, quantization, and quality notes.
 
 ## Post-AFO Backlog
 

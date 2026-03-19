@@ -51,7 +51,8 @@ cache_path: .ctx-cache/llm_cache.json
 | `CTX_TOKEN_BUDGET` | unlimited | Generator token budget |
 | `CTX_MAX_TOKENS_PER_RUN` | unlimited | Hard token guardrail |
 | `CTX_MAX_USD_PER_RUN` | unlimited | Hard spend guardrail |
-| `CTX_BATCH_SIZE` | unlimited | Files per LLM call |
+| `CTX_FILES_PER_CALL` | unlimited | Files per LLM call |
+| `CTX_MAX_CONCURRENT_DIRS` | `1` (cloud) / `4` (local) | Max parallel directory workers |
 | `CTX_CACHE_PATH` | `.ctx-cache/llm_cache.json` | Disk cache location |
 | `CTX_MAX_CACHE_ENTRIES` | `10000` | Cache entry cap |
 | `CTX_WATCH_DEBOUNCE` | `0.5` | Watch debounce seconds |
@@ -67,6 +68,7 @@ Common flags:
 - `--force` — regenerate every directory
 - `--setup` — detect provider and write `.ctxconfig` before refreshing
 - `--watch` — refresh once, then watch for changes
+- `--until-complete` — loop automatically until all directories are covered (useful for large trees that exceed rate limits or token budgets)
 - `--dry-run` — report stale directories without writing
 - `--output json` — emit the JSON envelope only
 
@@ -210,6 +212,13 @@ Common flags:
   "recommended_next": null
 }
 ```
+
+## Exit Codes
+| Code | Meaning |
+|------|---------|
+| `0` | Success — all directories processed |
+| `1` | Error — one or more directories failed |
+| `2` | Partial success — budget exhausted but no real errors; re-run to continue |
 
 ## Error Codes
 | Code | Meaning | Recommended Action |

@@ -24,7 +24,7 @@ from typing import Callable, Literal, Optional
 
 import pathspec
 
-from ctx.config import Config
+from ctx.config import LOCAL_PROVIDERS, Config
 from ctx.hasher import hash_directory, is_stale
 from ctx.ignore import should_ignore
 from ctx.llm import CachingLLMClient, LLMClient, FileSummary, SubdirSummary
@@ -43,9 +43,8 @@ from ctx.lang_parsers.swift_parser import parse_swift_file
 from ctx.lang_parsers.elixir_parser import parse_elixir_file
 
 
-# Cap on threads per depth level. LLM calls are I/O-bound so threads are effective,
-# but we stay conservative to avoid hammering provider rate limits.
-MAX_PARALLEL_DIRS = 4
+_DEFAULT_LOCAL_PARALLEL_DIRS = 4
+_DEFAULT_CLOUD_PARALLEL_DIRS = 1
 
 
 @dataclass
@@ -547,15 +546,18 @@ def _process_one_directory(
     client: LLMClient,
     spec: pathspec.PathSpec,
     incremental: bool,
+    budget_stop: threading.Event | None = None,
 ) -> tuple[int, int, int, str | None]:
     """Worker function for parallel execution within a depth level.
 
     Returns (file_count, binary_count, tokens_used, error):
       - error is None on success
-      - error is "skip" when the directory is fresh and was skipped
+      - error is "skip" when the directory is fresh, was skipped, or budget stopped
       - error is an error string when an exception occurred
     """
     try:
+        if budget_stop is not None and budget_stop.is_set():
+            return 0, 0, 0, "skip"
         if not _should_regenerate_directory(directory, root, spec, incremental=incremental):
             return 0, 0, 0, "skip"
         file_count, binary_count, tokens_used = _generate_directory_manifest(
@@ -613,25 +615,34 @@ def _run_generation(
         depth = len(path.relative_to(root).parts)
         levels[depth].append(path)
 
+    if config.max_concurrent_dirs is not None:
+        max_parallel = config.max_concurrent_dirs
+    elif config.provider in LOCAL_PROVIDERS:
+        max_parallel = _DEFAULT_LOCAL_PARALLEL_DIRS
+    else:
+        max_parallel = _DEFAULT_CLOUD_PARALLEL_DIRS
+
     stats_lock = threading.Lock()
+    budget_stop = threading.Event()
     dirs_done = 0
 
     for depth in sorted(levels.keys(), reverse=True):  # deepest first
         level_dirs = levels[depth]
 
-        # Token budget check at level granularity — before submitting the level.
+        # Token budget check before submitting the level.
         if config.token_budget is not None and stats.tokens_used >= config.token_budget:
             remaining = sum(len(levels[d]) for d in levels if d <= depth)
             stats.dirs_skipped += remaining
             stats.budget_exhausted = True
             break
 
-        workers = min(MAX_PARALLEL_DIRS, len(level_dirs))
+        workers = min(max_parallel, len(level_dirs))
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
                 executor.submit(
                     _process_one_directory,
                     directory, root, config, client, spec, incremental,
+                    budget_stop,
                 ): directory
                 for directory in level_dirs
             }
@@ -652,6 +663,14 @@ def _run_generation(
                         stats.tokens_used += tokens_used
                     if progress is not None:
                         progress(directory, local_done, total_dirs, stats.tokens_used)
+                    # Mid-level budget check — signal remaining workers to skip.
+                    if (
+                        config.token_budget is not None
+                        and stats.tokens_used >= config.token_budget
+                        and not budget_stop.is_set()
+                    ):
+                        budget_stop.set()
+                        stats.budget_exhausted = True
 
     stats.local_batch_fallbacks = int(getattr(client, "local_batch_fallbacks", 0) or 0)
     return stats

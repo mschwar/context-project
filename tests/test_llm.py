@@ -13,7 +13,7 @@ import pytest
 
 from ctx.config import Config
 from ctx.llm import (
-    DEFAULT_LOCAL_BATCH_SIZE,
+    DEFAULT_LOCAL_FILES_PER_CALL,
     DEFAULT_PROMPT_TEMPLATES,
     AnthropicClient,
     CachingLLMClient,
@@ -439,7 +439,7 @@ Documentation.
 def test_openai_local_provider_defaults_to_small_batches(monkeypatch) -> None:
     factory = _FakeOpenAIFactory(
         [
-            _openai_file_response([f"Summary {index}" for index in range(DEFAULT_LOCAL_BATCH_SIZE)]),
+            _openai_file_response([f"Summary {index}" for index in range(DEFAULT_LOCAL_FILES_PER_CALL)]),
             _openai_file_response(["Summary 4"]),
         ]
     )
@@ -449,10 +449,10 @@ def test_openai_local_provider_defaults_to_small_batches(monkeypatch) -> None:
         DEFAULT_PROMPT_TEMPLATES,
     )
 
-    files = [{"name": f"file_{index}.py", "content": "x"} for index in range(DEFAULT_LOCAL_BATCH_SIZE + 1)]
+    files = [{"name": f"file_{index}.py", "content": "x"} for index in range(DEFAULT_LOCAL_FILES_PER_CALL + 1)]
     results = client.summarize_files(Path("src"), files)
 
-    assert len(results) == DEFAULT_LOCAL_BATCH_SIZE + 1
+    assert len(results) == DEFAULT_LOCAL_FILES_PER_CALL + 1
     assert len(factory.instances[0].calls) == 2
 
 
@@ -848,7 +848,7 @@ def test_anthropic_batch_size_splits_into_multiple_calls(monkeypatch) -> None:
         _anthropic_file_response(["Summary C"]),
     ])
     monkeypatch.setattr("ctx.llm.Anthropic", factory)
-    config = Config(provider="anthropic", api_key="key", model="claude-test", batch_size=1)
+    config = Config(provider="anthropic", api_key="key", model="claude-test", files_per_call=1)
     client = AnthropicClient(config, DEFAULT_PROMPT_TEMPLATES)
 
     files = [
@@ -867,7 +867,7 @@ def test_anthropic_batch_size_none_uses_single_call(monkeypatch) -> None:
         _anthropic_file_response(["Summary A", "Summary B"]),
     ])
     monkeypatch.setattr("ctx.llm.Anthropic", factory)
-    config = Config(provider="anthropic", api_key="key", model="claude-test", batch_size=None)
+    config = Config(provider="anthropic", api_key="key", model="claude-test", files_per_call=None)
     client = AnthropicClient(config, DEFAULT_PROMPT_TEMPLATES)
 
     files = [
@@ -886,7 +886,7 @@ def test_openai_batch_size_splits_into_multiple_calls(monkeypatch) -> None:
         _openai_file_response(["Summary C"]),
     ])
     monkeypatch.setattr("ctx.llm.OpenAI", factory)
-    config = Config(provider="openai", api_key="key", model="gpt-test", batch_size=2)
+    config = Config(provider="openai", api_key="key", model="gpt-test", files_per_call=2)
     client = OpenAIClient(config, DEFAULT_PROMPT_TEMPLATES)
 
     files = [
@@ -905,7 +905,7 @@ def test_batch_size_larger_than_file_count_uses_single_call(monkeypatch) -> None
         _anthropic_file_response(["Summary A"]),
     ])
     monkeypatch.setattr("ctx.llm.Anthropic", factory)
-    config = Config(provider="anthropic", api_key="key", model="claude-test", batch_size=100)
+    config = Config(provider="anthropic", api_key="key", model="claude-test", files_per_call=100)
     client = AnthropicClient(config, DEFAULT_PROMPT_TEMPLATES)
 
     results = client.summarize_files(Path("src"), [{"name": "a.py", "content": "a"}])
@@ -1021,3 +1021,80 @@ def test_caching_client_exposes_local_batch_fallbacks() -> None:
     cache = CachingLLMClient(inner)
 
     assert cache.local_batch_fallbacks == 2
+
+
+# ---------------------------------------------------------------------------
+# Rate limit retry with Retry-After header
+# ---------------------------------------------------------------------------
+
+
+def test_extract_retry_after_from_rate_limit_error() -> None:
+    from ctx.llm import _extract_retry_after
+
+    fake_response = SimpleNamespace(headers={"retry-after": "30"})
+    exc = SimpleNamespace(response=fake_response)
+    assert _extract_retry_after(exc) == 30.0
+
+
+def test_extract_retry_after_returns_none_when_missing() -> None:
+    from ctx.llm import _extract_retry_after
+
+    assert _extract_retry_after(ValueError("no response attr")) is None
+    exc_no_header = SimpleNamespace(response=SimpleNamespace(headers={}))
+    assert _extract_retry_after(exc_no_header) is None
+
+
+def test_retry_uses_retry_after_header_when_available(monkeypatch) -> None:
+    """When a RateLimitError includes a Retry-After header, use that delay."""
+    fake_response = SimpleNamespace(headers={"retry-after": "5"})
+    rate_limit_err = anthropic.RateLimitError(
+        message="rate limited",
+        response=httpx.Response(429, request=_request(), headers={"retry-after": "5"}),
+        body={},
+    )
+    success_response = SimpleNamespace(
+        content=[SimpleNamespace(text='["Summary"]')],
+        usage=SimpleNamespace(input_tokens=10, output_tokens=2),
+    )
+    factory = _FakeAnthropicFactory([rate_limit_err, success_response])
+    sleeps: list[float] = []
+    monkeypatch.setattr("ctx.llm.Anthropic", factory)
+    monkeypatch.setattr("ctx.llm.time.sleep", lambda delay: sleeps.append(delay))
+    client = AnthropicClient(
+        Config(provider="anthropic", api_key=_placeholder("anthropic")),
+        DEFAULT_PROMPT_TEMPLATES,
+    )
+
+    results = client.summarize_files(Path("src"), [{"name": "a.py", "content": "x"}])
+
+    assert [r.text for r in results] == ["Summary"]
+    assert sleeps == [5.0]
+
+
+def test_retry_caps_backoff_at_60_seconds(monkeypatch) -> None:
+    """Exponential backoff should never exceed MAX_RETRY_DELAY_SECONDS (60s)."""
+    from ctx.llm import _call_with_retries, RETRY_ATTEMPTS
+
+    sleeps: list[float] = []
+    monkeypatch.setattr("ctx.llm.time.sleep", lambda delay: sleeps.append(delay))
+
+    call_count = 0
+
+    def failing_request():
+        nonlocal call_count
+        call_count += 1
+        if call_count < RETRY_ATTEMPTS:
+            raise anthropic.APIConnectionError(request=_request())
+        return "success"
+
+    result = _call_with_retries("Anthropic", failing_request)
+
+    assert result == "success"
+    assert all(delay <= 60.0 for delay in sleeps)
+
+
+def test_retry_attempts_increased_to_five(monkeypatch) -> None:
+    """RETRY_ATTEMPTS should be 5 to outlast 60s rate limit windows."""
+    from ctx.llm import RETRY_ATTEMPTS
+
+    assert RETRY_ATTEMPTS == 5
