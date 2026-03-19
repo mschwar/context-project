@@ -253,7 +253,7 @@ def _exit_for_broker(broker: OutputBroker, *, json_mode: bool) -> None:
     if broker.errors and broker.data:
         # Budget-only exhaustion → exit 2; real errors → exit 1
         all_budget = all(e.get("code") == "budget_exhausted" for e in broker.errors)
-        sys.exit(2 if all_budget else 1 if not broker.data else 2)
+        sys.exit(2 if all_budget else 1)
     if broker.errors:
         sys.exit(1)
 
