@@ -395,6 +395,19 @@ Carry-forward scope from the AFO Stage 1–6 closeout reflection and live-repo v
 - [x] **24.6 local-provider adaptive batching** — OpenAI-compatible local providers now default to safer small batches, auto-disable batching after the first malformed batch response, and surface `local_batch_fallbacks` in refresh/init/update results.
 - [x] **24.7 external validation fixtures** — regression coverage now includes non-git extracted-tree refresh fallback, UTF-8 boundary text files, malformed-but-fresh manifest bodies, deterministic manifest rendering, and local-provider fallback behavior derived from the `gstack-main` findings.
 
+## Phase 25 — Production Hardening (Pre-1.0.0 Assessment) ✓
+
+Stress-tested against real-world academic trees (171-dir dissertation, 390-dir grant portfolio). Fixed rate limit handling, budget enforcement, exit codes, and auto-resume.
+
+- [x] **25.1 Rate limit resilience** — Retry-After header support, 60s backoff ceiling, 5 attempts, configurable concurrency (1 cloud / 4 local default).
+- [x] **25.2 Mid-level budget enforcement** — `threading.Event` stops workers within a depth level.
+- [x] **25.3 Exit code 2** — partial success (budget exhausted) distinguished from errors (exit 1).
+- [x] **25.4 `--until-complete` auto-resume** — loops until all directories are covered.
+- [x] **25.5 `batch_size` → `files_per_call`** — renamed config field, env var, and all references.
+- [x] **25.6 Configurable concurrency** — `max_concurrent_dirs` config and `CTX_MAX_CONCURRENT_DIRS` env var.
+- [x] **25.7 Pricing update** — Claude 4.x and GPT-4.1 models added.
+- [x] **25.8 Stress test validation** — 390 dirs, 2410 files, 100% coverage, single run, 0 errors.
+
 ---
 
 ## Second-Order Changes (Post-Overhaul)

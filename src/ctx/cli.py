@@ -251,7 +251,9 @@ def _exit_for_broker(broker: OutputBroker, *, json_mode: bool) -> None:
     if broker.handled_exception:
         sys.exit(1)
     if broker.errors and broker.data:
-        sys.exit(2)
+        # Budget-only exhaustion → exit 2; real errors → exit 1
+        all_budget = all(e.get("code") == "budget_exhausted" for e in broker.errors)
+        sys.exit(2 if all_budget else 1)
     if broker.errors:
         sys.exit(1)
 
@@ -320,6 +322,7 @@ def cli(ctx: click.Context, output_mode: str | None) -> None:
 @click.option("--setup", "do_setup", is_flag=True, help="Auto-detect provider and write .ctxconfig first.")
 @click.option("--watch", "do_watch", is_flag=True, help="After refresh, watch for changes and re-refresh.")
 @click.option("--dry-run", is_flag=True, help="Preview what would be regenerated.")
+@click.option("--until-complete", is_flag=True, help="Loop until all directories are covered, pausing between cycles.")
 @click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "lmstudio"]), default=None)
 @click.option("--model", default=None)
 @click.option("--max-depth", type=int, default=None)
@@ -334,6 +337,7 @@ def refresh(
     do_setup: bool,
     do_watch: bool,
     dry_run: bool,
+    until_complete: bool,
     provider: Optional[str],
     model: Optional[str],
     max_depth: Optional[int],
@@ -351,6 +355,7 @@ def refresh(
             setup=do_setup,
             watch=do_watch,
             dry_run=dry_run,
+            until_complete=until_complete,
             provider=provider,
             model=model,
             max_depth=max_depth,
@@ -398,7 +403,13 @@ def refresh(
                 click.echo("Error details:")
                 for error in result.errors:
                     click.echo(f"  - {error}")
-                sys.exit(1)
+                # Exit 2 for budget-only exhaustion (partial success),
+                # exit 1 for real errors.
+                real_errors = [
+                    e for e in result.errors
+                    if not (result.budget_guardrail and e == result.budget_guardrail)
+                ]
+                sys.exit(1 if real_errors else 2)
     _exit_for_broker(broker, json_mode=json_mode)
 
 
@@ -468,7 +479,9 @@ def init(ctx: click.Context, path: str, provider: Optional[str], model: Optional
             for error in stats.errors:
                 broker.add_error("partial_failure", error)
             if not json_mode:
-                sys.exit(1)
+                sys.exit(2 if stats.budget_exhausted and not any(
+                    TRANSIENT_ERROR_PREFIX in e for e in stats.errors
+                ) else 1)
     _exit_for_broker(broker, json_mode=json_mode)
 
 
@@ -565,7 +578,9 @@ def update(ctx: click.Context, path: str, provider: Optional[str], model: Option
             for error in stats.errors:
                 broker.add_error("partial_failure", error)
             if not json_mode:
-                sys.exit(1)
+                sys.exit(2 if stats.budget_exhausted and not any(
+                    TRANSIENT_ERROR_PREFIX in e for e in stats.errors
+                ) else 1)
     _exit_for_broker(broker, json_mode=json_mode)
 
 
@@ -889,7 +904,9 @@ def smart_update(ctx: click.Context, path: str, provider: Optional[str], model: 
             for error in stats.errors:
                 broker.add_error("partial_failure", error)
             if not json_mode:
-                sys.exit(1)
+                sys.exit(2 if stats.budget_exhausted and not any(
+                    TRANSIENT_ERROR_PREFIX in e for e in stats.errors
+                ) else 1)
     _exit_for_broker(broker, json_mode=json_mode)
 
 

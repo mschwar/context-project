@@ -187,6 +187,7 @@ def refresh(
     setup: bool = False,
     watch: bool = False,
     dry_run: bool = False,
+    until_complete: bool = False,
     provider: str | None = None,
     model: str | None = None,
     max_depth: int | None = None,
@@ -317,17 +318,50 @@ def refresh(
 
     _apply_token_guardrail(config)
 
-    with CtxLock(root, command="refresh"):
-        stats: GenerateStats
-        if strategy == "full":
-            stats = generate_tree(root, config, client, spec, progress=progress)
-        elif strategy == "smart":
-            stats = update_tree(root, config, client, spec, progress=progress, changed_files=changed_files)
-        else:
-            stats = update_tree(root, config, client, spec, progress=progress)
+    cumulative_stats = GenerateStats()
 
-    budget_guardrail = _budget_guardrail_message(config, stats)
-    errors = list(stats.errors)
+    while True:
+        with CtxLock(root, command="refresh"):
+            stats: GenerateStats
+            if strategy == "full" and cumulative_stats.dirs_processed == 0:
+                stats = generate_tree(root, config, client, spec, progress=progress)
+            elif strategy == "smart":
+                stats = update_tree(root, config, client, spec, progress=progress, changed_files=changed_files)
+            else:
+                stats = update_tree(root, config, client, spec, progress=progress)
+
+        cumulative_stats.dirs_processed += stats.dirs_processed
+        cumulative_stats.dirs_skipped += stats.dirs_skipped
+        cumulative_stats.files_processed += stats.files_processed
+        cumulative_stats.files_binary += stats.files_binary
+        cumulative_stats.tokens_used += stats.tokens_used
+        cumulative_stats.errors.extend(stats.errors)
+        cumulative_stats.budget_exhausted = stats.budget_exhausted
+        cumulative_stats.local_batch_fallbacks = max(
+            cumulative_stats.local_batch_fallbacks,
+            stats.local_batch_fallbacks,
+        )
+
+        if not until_complete:
+            break
+        if not stats.budget_exhausted:
+            break
+        if stats.errors:
+            break
+        if stats.dirs_processed == 0:
+            break
+
+        import time as _time
+        logger.info(
+            "Budget cycle complete (%d dirs). Cooling down %.0fs before next cycle.",
+            cumulative_stats.dirs_processed,
+            config.resume_cooldown_seconds,
+        )
+        _time.sleep(config.resume_cooldown_seconds)
+        strategy = "incremental"
+
+    budget_guardrail = _budget_guardrail_message(config, cumulative_stats)
+    errors = list(cumulative_stats.errors)
     if budget_guardrail is not None:
         errors.append(budget_guardrail)
 
@@ -335,21 +369,21 @@ def refresh(
         run_watch(root, config, client, spec)
 
     return RefreshResult(
-        dirs_processed=stats.dirs_processed,
-        dirs_skipped=stats.dirs_skipped,
-        files_processed=stats.files_processed,
-        tokens_used=stats.tokens_used,
+        dirs_processed=cumulative_stats.dirs_processed,
+        dirs_skipped=cumulative_stats.dirs_skipped,
+        files_processed=cumulative_stats.files_processed,
+        tokens_used=cumulative_stats.tokens_used,
         errors=errors,
-        budget_exhausted=stats.budget_exhausted or budget_guardrail is not None,
+        budget_exhausted=cumulative_stats.budget_exhausted or budget_guardrail is not None,
         strategy=strategy,
-        est_cost_usd=estimate_cost(stats.tokens_used, config.provider, config.resolved_model()),
+        est_cost_usd=estimate_cost(cumulative_stats.tokens_used, config.provider, config.resolved_model()),
         stale_directories=[],
         budget_guardrail=budget_guardrail,
         config_written=config_written,
         setup_provider=setup_provider,
         setup_model=setup_model,
         setup_detected_via=setup_detected_via,
-        local_batch_fallbacks=getattr(client, "local_batch_fallbacks", 0),
+        local_batch_fallbacks=int(getattr(client, "local_batch_fallbacks", 0) or 0),
     )
 
 

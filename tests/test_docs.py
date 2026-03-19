@@ -21,6 +21,7 @@ def test_agents_contract_sections_and_examples() -> None:
         "Install",
         "Configure",
         "Commands",
+        "Exit Codes",
         "Error Codes",
         "Integration Patterns",
         "Manifest Format",
