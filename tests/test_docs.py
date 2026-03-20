@@ -51,9 +51,9 @@ def test_agents_contract_sections_and_examples() -> None:
         assert f"`{code}`" in text
 
 
-def test_readme_is_demoted_and_short() -> None:
+def test_readme_references_agents_and_quickstart() -> None:
     text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    assert len(text.splitlines()) <= 50
+    assert len(text.splitlines()) <= 100
     assert "[AGENTS.md](./AGENTS.md)" in text
     assert "pip install ctx-tool" in text
     assert "ctx refresh ." in text

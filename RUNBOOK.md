@@ -106,7 +106,7 @@ The publish workflow (`.github/workflows/publish.yml`) triggers on any `v*` tag 
 
 Once configured, publishing is as simple as:
 ```bash
-git tag v0.8.0
+git tag v1.0.0
 git push --tags
 ```
 
