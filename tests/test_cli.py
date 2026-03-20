@@ -1813,55 +1813,90 @@ def test_update_exits_zero_when_no_errors(tmp_path, monkeypatch) -> None:
 
 
 def test_setup_check_reports_ok_when_connectivity_succeeds(tmp_path, monkeypatch) -> None:
-    """ctx setup --check should print 'Connectivity: OK' and exit 0 for cloud providers."""
+    """ctx setup --check should print preflight results and exit 0 when all checks pass."""
+    from unittest.mock import patch
+    from ctx.preflight import PreflightCheck, PreflightResult
+
     cli_module = import_module("ctx.cli")
     runner = CliRunner()
 
-    monkeypatch.setattr(cli_module, "detect_provider", lambda **kw: ("anthropic", None))
-    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda provider, api_key, **kw: (True, None))
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-abc")
+    fake_result = PreflightResult(
+        checks=[
+            PreflightCheck(name="provider", status="ok", detail="anthropic (via ANTHROPIC_API_KEY)"),
+            PreflightCheck(name="connectivity", status="ok", detail="anthropic API reachable"),
+        ],
+        ready=True,
+        provider="anthropic",
+        model="claude-haiku-4-5-20251001",
+    )
 
-    result = runner.invoke(cli_module.cli, ["setup", "--check", str(tmp_path)])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-abc")
+    with patch("ctx.preflight.run_preflight", return_value=fake_result):
+        result = runner.invoke(cli_module.cli, ["setup", "--check", str(tmp_path)])
 
     assert result.exit_code == 0
-    assert "Detected: anthropic" in result.output
-    assert "Connectivity: OK" in result.output
+    assert "[ OK ]" in result.output
+    assert "Ready to run" in result.output
 
 
 def test_setup_check_exits_nonzero_on_connectivity_failure(tmp_path, monkeypatch) -> None:
-    """ctx setup --check should exit 1 when provider connectivity fails."""
+    """ctx setup --check should exit 1 when a preflight check fails."""
+    from unittest.mock import patch
+    from ctx.preflight import PreflightCheck, PreflightResult
+
     cli_module = import_module("ctx.cli")
     runner = CliRunner()
 
-    monkeypatch.setattr(cli_module, "detect_provider", lambda **kw: ("anthropic", None))
-    monkeypatch.setattr(
-        cli_module,
-        "probe_provider_connectivity",
-        lambda provider, api_key, **kw: (False, "Connection error: [Errno 111] Connection refused"),
+    fake_result = PreflightResult(
+        checks=[
+            PreflightCheck(name="provider", status="ok", detail="anthropic (via ANTHROPIC_API_KEY)"),
+            PreflightCheck(
+                name="connectivity",
+                status="fail",
+                detail="cannot reach anthropic API — Connection error.",
+                fix="check your internet connection.",
+            ),
+        ],
+        ready=False,
+        provider="anthropic",
+        model="claude-haiku-4-5-20251001",
     )
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-abc")
 
-    result = runner.invoke(cli_module.cli, ["setup", "--check", str(tmp_path)])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-abc")
+    with patch("ctx.preflight.run_preflight", return_value=fake_result):
+        result = runner.invoke(cli_module.cli, ["setup", "--check", str(tmp_path)])
 
     assert result.exit_code == 1
-    assert "Connectivity: FAILED" in result.output
+    assert "[FAIL]" in result.output
 
 
 def test_setup_check_shows_proxy_guidance_when_proxy_vars_set(tmp_path, monkeypatch) -> None:
-    """ctx setup --check should mention proxy env vars when connectivity fails and proxy vars are set."""
+    """ctx setup --check should include proxy info in the fix when connectivity fails with proxy vars."""
+    from unittest.mock import patch
+    from ctx.preflight import PreflightCheck, PreflightResult
+
     cli_module = import_module("ctx.cli")
     runner = CliRunner()
 
-    monkeypatch.setattr(cli_module, "detect_provider", lambda **kw: ("anthropic", None))
-    monkeypatch.setattr(
-        cli_module,
-        "probe_provider_connectivity",
-        lambda provider, api_key, **kw: (False, "Connection error: timed out"),
+    fake_result = PreflightResult(
+        checks=[
+            PreflightCheck(name="provider", status="ok", detail="anthropic (via ANTHROPIC_API_KEY)"),
+            PreflightCheck(
+                name="connectivity",
+                status="fail",
+                detail="cannot reach anthropic API — Connection error: timed out.",
+                fix="proxy env vars detected (HTTPS_PROXY). A broken proxy may be blocking requests.\n       Try unsetting: unset HTTPS_PROXY",
+            ),
+        ],
+        ready=False,
+        provider="anthropic",
+        model="claude-haiku-4-5-20251001",
     )
+
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-abc")
     monkeypatch.setenv("HTTPS_PROXY", "http://broken-proxy:8080")
-
-    result = runner.invoke(cli_module.cli, ["setup", "--check", str(tmp_path)])
+    with patch("ctx.preflight.run_preflight", return_value=fake_result):
+        result = runner.invoke(cli_module.cli, ["setup", "--check", str(tmp_path)])
 
     assert result.exit_code == 1
     assert "HTTPS_PROXY" in result.output
@@ -1888,23 +1923,28 @@ def test_proxy_unset_hint_uses_unset_on_posix() -> None:
 
 
 def test_setup_check_skips_probe_for_local_providers(tmp_path, monkeypatch) -> None:
-    """ctx setup --check should exit 0 without connectivity probe for local providers."""
+    """ctx setup --check should use _probe_local_models (not probe_provider_connectivity) for local providers."""
+    from unittest.mock import patch
+    from ctx.preflight import PreflightCheck, PreflightResult
+
     cli_module = import_module("ctx.cli")
     runner = CliRunner()
 
-    probe_calls: list[str] = []
-    monkeypatch.setattr(cli_module, "detect_provider", lambda **kw: ("ollama", "llama3.2"))
-    monkeypatch.setattr(
-        cli_module,
-        "probe_provider_connectivity",
-        lambda provider, api_key, **kw: probe_calls.append(provider) or (True, None),
+    fake_result = PreflightResult(
+        checks=[
+            PreflightCheck(name="provider", status="ok", detail="ollama (Ollama running on localhost:11434)"),
+            PreflightCheck(name="connectivity", status="ok", detail="ollama is running and has models loaded"),
+        ],
+        ready=True,
+        provider="ollama",
+        model="llama3.2",
     )
 
-    result = runner.invoke(cli_module.cli, ["setup", "--check", str(tmp_path)])
+    with patch("ctx.preflight.run_preflight", return_value=fake_result):
+        result = runner.invoke(cli_module.cli, ["setup", "--check", str(tmp_path)])
 
     assert result.exit_code == 0
-    assert not probe_calls  # probe should not be called for local providers
-    assert "Detected: ollama" in result.output
+    assert "[ OK ]" in result.output
 
 
 # --- Phase 18.1: pre-flight connectivity check ---
