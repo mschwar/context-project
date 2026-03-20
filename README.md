@@ -29,7 +29,7 @@ Runs are incremental — unchanged directories are skipped, so subsequent refres
 
 Tell your agent: install `ctx-tool`, run `ctx refresh .`, then read [AGENTS.md](./AGENTS.md) for the full command contract, JSON output schemas, error codes, and integration patterns.
 
-For MCP clients (Claude Code, Cursor, etc.), add [`mcp.json`](./mcp.json) or run `ctx serve --mcp`.
+For MCP clients, copy the config from [`mcp.json`](./mcp.json) into your client's MCP config (`.mcp.json` for Claude Code, `.cursor/mcp.json` for Cursor) or run `ctx serve --mcp`.
 
 ## Commands
 

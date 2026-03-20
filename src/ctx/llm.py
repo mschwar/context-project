@@ -557,7 +557,7 @@ class OpenAIClient:
         if config.base_url:
             kwargs["base_url"] = config.base_url
         if config.provider in LOCAL_PROVIDERS:
-            kwargs["timeout"] = 60.0
+            kwargs["timeout"] = 300.0
         self.client = OpenAI(**kwargs)
         self.prompt_templates = prompt_templates
         self.local_batch_fallbacks = 0
