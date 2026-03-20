@@ -553,9 +553,11 @@ class OpenAIClient:
     def __init__(self, config: Config, prompt_templates: dict[str, str]) -> None:
         self.config = config
         self.model = config.resolved_model()
-        kwargs: dict[str, str] = {"api_key": config.api_key}
+        kwargs: dict = {"api_key": config.api_key}
         if config.base_url:
             kwargs["base_url"] = config.base_url
+        if config.provider in LOCAL_PROVIDERS:
+            kwargs["timeout"] = 60.0
         self.client = OpenAI(**kwargs)
         self.prompt_templates = prompt_templates
         self.local_batch_fallbacks = 0
