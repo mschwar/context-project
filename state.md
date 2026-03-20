@@ -387,23 +387,64 @@ Carry-forward from Phase 25 stress test on the 390-directory grant portfolio. Al
 - [ ] **26.2 Minimum summary length threshold** — if an LLM returns an empty or whitespace-only file summary, retry once or log a warning. Currently empty summaries pass silently and cause `--verify` failures downstream.
 - [ ] **26.3 Local model compatibility matrix** — document which local models are tested and known to produce useful summaries. Include model size, quantization, and quality notes.
 
-## Post-1.0.0 Roadmap
+## Sprint 2 — Dogfooding, Analytics, and Adoption
 
-### Quick wins
+Execution order: Phase 29 → Quick wins → Phase 27 → Phase 28 → Adoption.
+
+### Phase 29 — Preflight Onboarding
+
+Extend `ctx setup --check` into a comprehensive preflight gate. Before the first real run on a repo, verify everything needed to succeed.
+
+- [ ] **29.1 Provider connectivity validation** — go beyond env-var presence: actually call the provider with a minimal request and confirm a substantive response. Fail with an actionable message ("API key set but returned 401 — check key validity").
+- [ ] **29.2 Model response quality check** — send one sample file to the configured model and verify the response contains substantive text, not empty/placeholder output. Warn if the model appears non-functional.
+- [ ] **29.3 Environment readiness** — verify `.ctxignore` exists or defaults are sane, git repo is detected (or explicit non-git acknowledgment), and disk write permissions on the target tree.
+- [ ] **29.4 Actionable failure messages** — every preflight check that fails must print exactly what to do to fix it. No stack traces, no ambiguous errors.
+
+### Quick Wins
+
 - [ ] **Complete products_GRANTS API evaluation** — rerun the 390-dir stress test once Anthropic credits are topped up. Establishes the cost benchmark for the largest real-world tree.
 - [ ] **Google Drive ignore rules** — add `.gdoc`, `.gsheet`, `.gslides`, `.gdraw`, `.gform` to `.ctxignore.default`. These are virtual shortcut files on Google Drive-synced trees that can't be hashed locally and produce noisy warnings.
 
-### Phase 26 — Local Model Quality Assurance
-See above.
-
 ### Phase 27 — Agent Integration Dogfooding
+
+Use ctx as daily driver on real repos. This is the main event of Sprint 2.
+
 - [ ] **27.1 Agent navigation benchmark** — use ctx in a real multi-agent workflow. Measure how an agent performs using `ctx export --depth 1` to orient itself in an unfamiliar repo vs. raw file listing.
 - [ ] **27.2 Handoff protocol** — define a standard pattern where one agent runs `ctx refresh .` at session end and the next agent reads `ctx export` at session start, creating a durable handoff chain.
 - [ ] **27.3 Cost-per-session tracking** — instrument a real coding session to measure the incremental cost of keeping manifests fresh during active development (expected: near-zero after initial generation).
 
+### Phase 28 — Running Board
+
+Persistent, append-only stats ledger that accumulates across every `ctx refresh` run. Serves as personal analytics and proof-of-value for potential users.
+
+**Storage:** dual-layer — per-repo (`.ctx-cache/stats.json`) and global (`~/.ctx/stats.json`). Per-repo tracks repo-specific history; global aggregates across all repos.
+
+**Tracked metrics:**
+- Runs to date (total, per-repo)
+- Total directories processed
+- Total tokens consumed
+- Total estimated cost (USD)
+- Repos touched (global only)
+- Average cost per directory, per run
+- Cache hit rate (tokens saved / tokens that would have been used)
+- API money saved via caching
+
+**Surface:** `ctx stats --board` (per-repo) and `ctx stats --board --global` (cross-repo aggregate). Machine-readable via `--format json`.
+
+- [ ] **28.1 Per-repo stats ledger** — append run metadata (timestamp, dirs processed, tokens, cost, cache hits) to `.ctx-cache/stats.json` after every `ctx refresh`. Read-only from `ctx stats --board`.
+- [ ] **28.2 Global stats aggregation** — aggregate per-repo stats into `~/.ctx/stats.json`. Updated on each run. Surface via `ctx stats --board --global`.
+- [ ] **28.3 Cache savings tracking** — track cache hit count and estimated tokens/cost saved per run. Requires instrumenting `CachingLLMClient` to report hits vs misses.
+- [ ] **28.4 Board export** — `ctx stats --board --format json` for machine-readable export. Foundation for future public-facing leaderboard webpage (dirs, files, model, cost, tokens saved, money saved).
+
 ### Adoption
+
 - [ ] **External user onboarding** — the PyPI package is live, README has cost benchmarks, AGENTS.md is a complete contract. Identify 2–3 external repos or agent frameworks to test ctx integration.
-- [ ] **Blog post / announcement** — write up the journey from 0.8.0 to 1.0.0: the AFO pivot, stress test findings, cost model, and what makes ctx different from other context tools.
+- [ ] **Blog post / announcement** — write up the journey from 0.8.0 to 1.0.0: the AFO pivot, stress test findings, cost model, and what makes ctx different from other context tools. Use running board data as proof-of-value.
+
+### Deferred
+
+- **Phase 26 — Local Model Quality Assurance** — deferred until the cloud/agent path is bulletproof. Pre-flight quality check (29.2) covers the critical failure mode; the full local model compatibility matrix and minimum-length thresholds wait.
+- **Public leaderboard webpage** — future export from running board data to a public-facing page. Scoped after Phase 28 lands and generates real data.
 
 ### Backlog
 - [ ] **Legacy command docs cleanup in ancillary specs** — sweep remaining AFO reference docs/examples that still show legacy command names where the canonical `refresh` / `check` surface should be primary.
