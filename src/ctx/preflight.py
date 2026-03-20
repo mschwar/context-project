@@ -13,6 +13,7 @@ from typing import Optional
 from ctx.config import (
     DEFAULT_BASE_URLS,
     LOCAL_PROVIDERS,
+    PROXY_ENV_VARS,
     MissingApiKeyError,
     detect_provider,
     load_config,
@@ -123,7 +124,7 @@ def run_preflight(path: str = ".") -> PreflightResult:
     config = None
     config_failed_fatal = False
     try:
-        config = load_config(target, require_api_key=True)
+        config = load_config(target, provider=provider_name, require_api_key=True)
         config_detail = f"loaded from {target.resolve()}"
         # Check for .ctxconfig file specifically
         for d in (target.resolve(), *target.resolve().parents):
@@ -155,10 +156,11 @@ def run_preflight(path: str = ".") -> PreflightResult:
     if config_failed_fatal:
         return PreflightResult(checks=checks, ready=False, provider=provider_name)
 
-    # 3.3 Provider connectivity
+    # 3.3 Provider connectivity — use config as the resolved source of truth
+    resolved_provider = config.provider if config else provider_name
     conn_ok = False
-    if provider_name in LOCAL_PROVIDERS:
-        base_url = (config.base_url if config else None) or DEFAULT_BASE_URLS.get(provider_name, "")
+    if resolved_provider in LOCAL_PROVIDERS:
+        base_url = (config.base_url if config else None) or DEFAULT_BASE_URLS.get(resolved_provider, "")
         # Strip trailing /v1 to get the host:port base
         host_base = base_url.rstrip("/")
         if host_base.endswith("/v1"):
@@ -169,42 +171,39 @@ def run_preflight(path: str = ".") -> PreflightResult:
             checks.append(PreflightCheck(
                 name="connectivity",
                 status="ok",
-                detail=f"{provider_name} is running and has models loaded",
+                detail=f"{resolved_provider} is running and has models loaded",
             ))
         else:
             if err == "no models loaded":
                 checks.append(PreflightCheck(
                     name="connectivity",
                     status="fail",
-                    detail=f"{provider_name} is running but has no models loaded.",
+                    detail=f"{resolved_provider} is running but has no models loaded.",
                     fix=f"pull a model first — e.g., `ollama pull llama3.2`",
                 ))
             else:
-                url_display = host_base
                 checks.append(PreflightCheck(
                     name="connectivity",
                     status="fail",
-                    detail=f"{provider_name} is not responding on {url_display}.",
-                    fix=f"start {provider_name} before running ctx.",
+                    detail=f"{resolved_provider} is not responding on {host_base}.",
+                    fix=f"start {resolved_provider} before running ctx.",
                 ))
     else:
         api_key = config.api_key if config else ""
         base_url = config.base_url if config else None
-        ok, err = probe_provider_connectivity(provider_name, api_key, base_url)
+        ok, err = probe_provider_connectivity(resolved_provider, api_key, base_url)
         if ok:
             conn_ok = True
             checks.append(PreflightCheck(
                 name="connectivity",
                 status="ok",
-                detail=f"{provider_name} API reachable",
+                detail=f"{resolved_provider} API reachable",
             ))
         else:
             err_str = err or "unknown error"
-            proxy_vars = [v for v in (
-                "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"
-            ) if os.getenv(v)]
+            proxy_vars = [v for v in PROXY_ENV_VARS if os.getenv(v)]
             if "401" in err_str or "403" in err_str or "Authentication" in err_str or "authentication" in err_str:
-                api_key_env = "ANTHROPIC_API_KEY" if provider_name == "anthropic" else "OPENAI_API_KEY"
+                api_key_env = "ANTHROPIC_API_KEY" if resolved_provider == "anthropic" else "OPENAI_API_KEY"
                 checks.append(PreflightCheck(
                     name="connectivity",
                     status="fail",
@@ -216,7 +215,7 @@ def run_preflight(path: str = ".") -> PreflightResult:
                 checks.append(PreflightCheck(
                     name="connectivity",
                     status="fail",
-                    detail=f"cannot reach {provider_name} API — {err_str}.",
+                    detail=f"cannot reach {resolved_provider} API — {err_str}.",
                     fix=(
                         f"proxy env vars detected ({var_list}). A broken proxy may be blocking requests.\n"
                         f"       Try unsetting: unset {' '.join(proxy_vars)}"
@@ -226,7 +225,7 @@ def run_preflight(path: str = ".") -> PreflightResult:
                 checks.append(PreflightCheck(
                     name="connectivity",
                     status="fail",
-                    detail=f"cannot reach {provider_name} API — {err_str}.",
+                    detail=f"cannot reach {resolved_provider} API — {err_str}.",
                     fix="check your internet connection.",
                 ))
 
@@ -236,7 +235,7 @@ def run_preflight(path: str = ".") -> PreflightResult:
         return PreflightResult(
             checks=checks,
             ready=False,
-            provider=provider_name,
+            provider=resolved_provider,
             model=config.resolved_model() if config else detected_model,
         )
 
@@ -285,7 +284,7 @@ def run_preflight(path: str = ".") -> PreflightResult:
     return PreflightResult(
         checks=checks,
         ready=ready,
-        provider=provider_name,
+        provider=resolved_provider,
         model=model_name,
     )
 
