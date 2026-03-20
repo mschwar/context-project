@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import time as _time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -335,7 +336,9 @@ def refresh(
         cumulative_stats.files_processed += stats.files_processed
         cumulative_stats.files_binary += stats.files_binary
         cumulative_stats.tokens_used += stats.tokens_used
-        cumulative_stats.errors.extend(stats.errors)
+        # Replace (not extend) errors each pass so that directories which
+        # were retried and succeeded no longer appear as errors.
+        cumulative_stats.errors = list(stats.errors)
         cumulative_stats.budget_exhausted = stats.budget_exhausted
         cumulative_stats.local_batch_fallbacks = max(
             cumulative_stats.local_batch_fallbacks,
@@ -344,17 +347,25 @@ def refresh(
 
         if not until_complete:
             break
-        if not stats.budget_exhausted:
-            break
-        if stats.errors:
-            break
+        # No forward progress this pass — stop to avoid infinite loops.
         if stats.dirs_processed == 0:
             break
+        # Clean completion: no budget limit hit and no errors.
+        if not stats.budget_exhausted and not stats.errors:
+            break
+        # Honor hard USD ceiling across cycles.  (The token budget is
+        # per-pass by design — _apply_token_guardrail folds it into the
+        # generator budget so each pass stops independently.)
+        if config.max_usd_per_run is not None:
+            est_cost = estimate_cost(cumulative_stats.tokens_used, config.provider, config.resolved_model())
+            if est_cost >= config.max_usd_per_run:
+                break
 
-        import time as _time
+        reason = "budget" if stats.budget_exhausted else "errors"
         logger.info(
-            "Budget cycle complete (%d dirs). Cooling down %.0fs before next cycle.",
+            "Cycle complete (%d dirs, %s). Cooling down %.0fs before next cycle.",
             cumulative_stats.dirs_processed,
+            reason,
             config.resume_cooldown_seconds,
         )
         _time.sleep(config.resume_cooldown_seconds)

@@ -446,3 +446,140 @@ def test_reset_dry_run(tmp_path) -> None:
 def test_reset_requires_confirmation(tmp_path) -> None:
     with pytest.raises(ConfirmationRequiredError):
         api_module.reset(tmp_path, yes=False)
+
+
+# -- until-complete loop resilience tests --
+
+
+def _patch_for_loop(monkeypatch, pass_results: list[GenerateStats]) -> dict:
+    """Set up monkeypatches for testing the until-complete loop.
+
+    Returns a dict with 'call_count' tracking how many passes ran.
+    """
+    config = Config(
+        provider="openai", model="test-model", api_key="test-key",
+        resume_cooldown_seconds=0,
+    )
+    state = {"call_count": 0}
+
+    def fake_tree(_root, _config, *_a, **_kw):
+        idx = state["call_count"]
+        state["call_count"] += 1
+        return pass_results[idx]
+
+    monkeypatch.setattr(api_module, "_build_generation_runtime", lambda *_a, **_kw: (config, object(), object()))
+    monkeypatch.setattr(api_module, "CtxLock", _NoopLock)
+    monkeypatch.setattr(api_module, "_has_manifests", lambda _root: False)
+    monkeypatch.setattr(git_module, "get_changed_files", lambda _root: [])
+    monkeypatch.setattr(api_module, "generate_tree", fake_tree)
+    monkeypatch.setattr(api_module, "update_tree", fake_tree)
+    return state
+
+
+def test_until_complete_continues_when_errors_with_progress(tmp_path, monkeypatch) -> None:
+    """Loop should continue when a pass has errors but also made progress."""
+    passes = [
+        # Pass 1: 5 dirs succeed, 2 fail, budget exhausted
+        GenerateStats(dirs_processed=5, tokens_used=100, budget_exhausted=True, errors=["dir_a: fail", "dir_b: fail"]),
+        # Pass 2: retry succeeds, clean completion
+        GenerateStats(dirs_processed=2, tokens_used=20, budget_exhausted=False, errors=[]),
+    ]
+    state = _patch_for_loop(monkeypatch, passes)
+
+    result = api_module.refresh(tmp_path, until_complete=True)
+
+    assert state["call_count"] == 2
+    assert result.dirs_processed == 7
+    assert result.errors == []  # retried errors cleared
+
+
+def test_until_complete_stops_when_no_progress(tmp_path, monkeypatch) -> None:
+    """Loop should stop when a pass makes no progress (all errors, 0 dirs processed)."""
+    passes = [
+        # Pass 1: nothing processed, everything errored
+        GenerateStats(dirs_processed=0, tokens_used=0, errors=["dir_a: credit balance too low"]),
+    ]
+    state = _patch_for_loop(monkeypatch, passes)
+
+    result = api_module.refresh(tmp_path, until_complete=True)
+
+    assert state["call_count"] == 1
+    assert result.dirs_processed == 0
+    assert len(result.errors) == 1
+
+
+def test_until_complete_retries_clear_old_errors(tmp_path, monkeypatch) -> None:
+    """Errors from pass N should not appear in results if pass N+1 succeeds."""
+    passes = [
+        # Pass 1: partial success with errors, budget exhausted
+        GenerateStats(dirs_processed=3, tokens_used=50, budget_exhausted=True, errors=["dir_x: timeout"]),
+        # Pass 2: retry succeeds
+        GenerateStats(dirs_processed=1, tokens_used=10, budget_exhausted=False, errors=[]),
+    ]
+    state = _patch_for_loop(monkeypatch, passes)
+
+    result = api_module.refresh(tmp_path, until_complete=True)
+
+    assert state["call_count"] == 2
+    assert result.dirs_processed == 4
+    # The retry succeeded, so the final error list should be empty
+    assert result.errors == []
+
+
+def test_until_complete_stops_on_clean_completion(tmp_path, monkeypatch) -> None:
+    """Loop should stop after a clean pass (no budget exhaustion, no errors)."""
+    passes = [
+        GenerateStats(dirs_processed=10, tokens_used=200, budget_exhausted=False, errors=[]),
+    ]
+    state = _patch_for_loop(monkeypatch, passes)
+
+    result = api_module.refresh(tmp_path, until_complete=True)
+
+    assert state["call_count"] == 1
+    assert result.dirs_processed == 10
+
+
+def test_until_complete_continues_on_errors_without_budget(tmp_path, monkeypatch) -> None:
+    """Loop should continue when errors occur without budget exhaustion, if progress was made."""
+    passes = [
+        # Pass 1: some succeed, some fail, no budget limit
+        GenerateStats(dirs_processed=8, tokens_used=100, budget_exhausted=False, errors=["dir_z: 500 server error"]),
+        # Pass 2: retry succeeds
+        GenerateStats(dirs_processed=1, tokens_used=15, budget_exhausted=False, errors=[]),
+    ]
+    state = _patch_for_loop(monkeypatch, passes)
+
+    result = api_module.refresh(tmp_path, until_complete=True)
+
+    assert state["call_count"] == 2
+    assert result.dirs_processed == 9
+    assert result.errors == []
+
+
+def test_until_complete_honors_cumulative_usd_ceiling(tmp_path, monkeypatch) -> None:
+    """Loop should stop when cumulative spend exceeds max_usd_per_run."""
+    config = Config(
+        provider="anthropic", model="claude-haiku-4-5-20251001", api_key="test-key",
+        resume_cooldown_seconds=0, max_usd_per_run=0.001,
+    )
+
+    call_count = 0
+
+    def fake_tree(_root, _config, *_a, **_kw):
+        nonlocal call_count
+        call_count += 1
+        # Each pass uses enough tokens to exceed the tiny USD ceiling
+        return GenerateStats(dirs_processed=5, tokens_used=50_000, budget_exhausted=True, errors=["dir_a: fail"])
+
+    monkeypatch.setattr(api_module, "_build_generation_runtime", lambda *_a, **_kw: (config, object(), object()))
+    monkeypatch.setattr(api_module, "CtxLock", _NoopLock)
+    monkeypatch.setattr(api_module, "_has_manifests", lambda _root: False)
+    monkeypatch.setattr(git_module, "get_changed_files", lambda _root: [])
+    monkeypatch.setattr(api_module, "generate_tree", fake_tree)
+    monkeypatch.setattr(api_module, "update_tree", fake_tree)
+
+    result = api_module.refresh(tmp_path, until_complete=True)
+
+    # Should stop after 1 pass because cumulative USD exceeds ceiling
+    assert call_count == 1
+    assert result.dirs_processed == 5
