@@ -5,9 +5,9 @@ Current development status and upcoming milestones.
 ## Current Health (March 2026)
 - **Status:** Stable. Phases 1–21, Phase 24, and Phase 25 are complete; AFO Stages 1–6 are complete and closeout is documented.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache. Rate limit handling uses Retry-After headers with 60s backoff ceiling and 5 retry attempts. Mid-level budget enforcement via `threading.Event`. Configurable concurrency defaults to 1 worker for cloud providers, 4 for local.
-- **Test Coverage:** 426 tests passing across all modules.
+- **Test Coverage:** 432 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
-- **Agent Surface:** canonical `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands backed by `src/ctx/api.py`, with hidden legacy aliases preserved for compatibility. `--until-complete` flag enables auto-resume for large trees.
+- **Agent Surface:** canonical `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands backed by `src/ctx/api.py`, with hidden legacy aliases preserved for compatibility. `--until-complete` flag enables auto-resume for large trees with resilient error handling (continues on transient errors + progress, stops on stall or clean completion).
 - **Configuration:** full `CTX_*` env-var parity for scalar config fields, shared cost estimation, zero-config refresh bootstrap for env/local providers, and hard `max_tokens_per_run` / `max_usd_per_run` guardrails. `files_per_call` (formerly `batch_size`) and `max_concurrent_dirs` are configurable.
 - **Exit Codes:** 0 = success, 1 = error, 2 = partial success (budget exhausted, no real errors).
 - **Manifest Trust:** refresh is git-optional on extracted trees, `## Files` / `## Subdirectories` are rendered deterministically from the real filesystem, `ctx check --verify` validates manifest bodies, UTF-8 boundary reads no longer misclassify valid text as binary, and local-provider fallback counts are surfaced in CLI/API results.
@@ -351,6 +351,22 @@ Stress-tested ctx against two real-world academic trees: a 171-directory PhD dis
 - [x] **25.Z Gate closeout** — 426 tests passing; reflection filed; carry-forward scoped as Phase 26.
 
 **Branch:** `feat/phase24-manifest-trust`
+
+## API Evaluation & Loop Resilience Gate ✓
+
+Post-Phase-25 stress test of `--until-complete` against real-world directory trees using Anthropic API (Claude Haiku 4.5). Exposed and fixed a critical loop resilience bug; established first real-world API cost benchmarks.
+
+- [x] **Loop resilience fix** — `--until-complete` now continues when transient errors occur alongside forward progress. Previously, any single directory error broke the entire loop. Stops on stall (zero progress) or clean completion.
+- [x] **Error accumulation fix** — errors are replaced (not extended) each pass, so directories retried and succeeded no longer appear as errors in the final result.
+- [x] **Cumulative USD guardrail** — new between-cycle check prevents multi-pass runs from exceeding `max_usd_per_run` across cycles. Token budget remains per-pass by design.
+- [x] **DISSERTATION evaluation (171 dirs)** — 100% coverage via API, 1,577,032 tokens, ~$1.26.
+- [x] **Baha'i evaluation (31 dirs, 566 files)** — 100% coverage in 2 passes, 138,931 tokens, $0.11, ~7.5 min. 5/5 spot-checks passed (exact file counts and names match reality).
+- [x] **products_GRANTS evaluation (390 dirs)** — blocked by API credit exhaustion. Validated zero-progress detection and clean loop termination.
+- [x] **6 new tests** — loop continues on errors+progress, stops on stall, retries clear old errors, stops on clean completion, continues without budget flag, honors cumulative USD ceiling.
+
+**Cost model (Haiku 4.5):** $0.004–$0.007 per directory, $0.0002–$0.001 per file.
+
+**Branch:** `feat/resilient-until-complete` | **PR:** #64
 
 ## Phase 26 — Local Model Quality Assurance (Backlog)
 
