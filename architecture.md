@@ -26,16 +26,19 @@ BitNet is deprecated in this repo. Attempting to use it raises an informative er
 
 | Component | Responsibility |
 |-----------|----------------|
-| `cli.py` | Entry point using `Click`. Handles generation, inspection, export, cleanup, watch, setup, and serving commands. |
-| `generator.py` | The "Brain". Orchestrates tree walking, hashing, and LLM orchestration. |
-| `llm.py` | Provider implementations. Handles structured prompting and token tracking. |
+| `api.py` | Unified programmatic API — `refresh`, `check`, `export_context`, `reset`. Zero Click dependency. |
+| `cli.py` | Entry point using `Click`. Thin wrapper over `api.py` with human/JSON output modes. |
+| `generator.py` | The "Brain". Orchestrates tree walking, hashing, and LLM calls with depth-level parallelism. |
+| `llm.py` | Provider implementations. Handles structured prompting, retries, and token tracking. |
+| `config.py` | Hierarchical configuration resolution (Defaults -> `.ctxconfig` -> Env -> CLI). Budget guardrails and cost estimation. |
 | `hasher.py` | Robust SHA-256 hashing logic with symlink loop detection. |
-| `manifest.py` | Parsing and serializing `CONTEXT.md` (YAML + Markdown). |
-| `config.py` | Hierarchical configuration resolution (Defaults -> `.ctxconfig` -> Env -> CLI). |
+| `manifest.py` | Parsing and serializing `CONTEXT.md` (YAML + Markdown). Atomic writes via temp file + `os.replace`. |
+| `output.py` | `OutputBroker` context manager for JSON envelope output mode. |
+| `mcp_server.py` | Stdio JSON-RPC 2.0 MCP server exposing `api.py` functions as tools. |
 | `ignore.py` | `.gitignore`-style filtering using the `pathspec` library. |
 | `git.py` | Git-aware changed-file detection for selective refresh. |
 | `watcher.py` | File watching and debounced incremental refresh. |
-| `server.py` | HTTP server for reading generated manifests remotely. |
+| `server.py` | HTTP server for reading generated manifests remotely (optional `[serve]` extra). |
 
 ## Data Flow
 

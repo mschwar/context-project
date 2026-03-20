@@ -15,7 +15,7 @@ pip install ctx-tool
 
 - Requires Python 3.10+
 - Current CLI command: `ctx`
-- Current release line: `0.8.0`
+- Current release line: `1.0.0`
 - Machine-readable mode: set `CTX_OUTPUT=json` or pass `--output json`
 - HTTP server mode: install `ctx-tool[serve]`
 
@@ -77,7 +77,7 @@ Common flags:
   "status": "success",
   "command": "refresh",
   "metadata": {
-    "version": "0.8.0",
+    "version": "1.0.0",
     "elapsed_ms": 4523,
     "tokens_used": 12400,
     "est_cost_usd": 0.037
@@ -122,7 +122,7 @@ Common flags:
   "status": "success",
   "command": "check",
   "metadata": {
-    "version": "0.8.0",
+    "version": "1.0.0",
     "elapsed_ms": 93,
     "tokens_used": 0,
     "est_cost_usd": 0.0
@@ -165,7 +165,7 @@ Common flags:
   "status": "success",
   "command": "export",
   "metadata": {
-    "version": "0.8.0",
+    "version": "1.0.0",
     "elapsed_ms": 41,
     "tokens_used": 0,
     "est_cost_usd": 0.0
@@ -195,7 +195,7 @@ Common flags:
   "status": "success",
   "command": "reset",
   "metadata": {
-    "version": "0.8.0",
+    "version": "1.0.0",
     "elapsed_ms": 18,
     "tokens_used": 0,
     "est_cost_usd": 0.0
@@ -293,7 +293,7 @@ CTX_OUTPUT=json python -m ctx check . --check-exit
 ```yaml
 repos:
   - repo: https://github.com/mschwar/context-project
-    rev: v0.8.0
+    rev: v1.0.0
     hooks:
       - id: ctx-check
         entry: ctx check . --check-exit
@@ -322,7 +322,7 @@ Each generated `CONTEXT.md` contains YAML frontmatter followed by a Markdown bod
 ```yaml
 ---
 generated: "2026-03-18T19:00:00Z"
-generator: ctx/0.8.0
+generator: ctx/1.0.0
 model: claude-haiku-4-5-20251001
 content_hash: "sha256:abc123..."
 files: 12

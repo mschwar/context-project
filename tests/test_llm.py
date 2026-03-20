@@ -67,7 +67,7 @@ class _FakeOpenAIFactory:
         self.instances: list[SimpleNamespace] = []
         self._responses = list(responses)
 
-    def __call__(self, *, api_key: str, base_url: str | None = None) -> SimpleNamespace:
+    def __call__(self, *, api_key: str, base_url: str | None = None, **kwargs) -> SimpleNamespace:
         instance = SimpleNamespace(api_key=api_key, base_url=base_url, calls=[])
 
         def create(**kwargs):
