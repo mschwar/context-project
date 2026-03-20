@@ -945,9 +945,47 @@ def setup(ctx: click.Context, path: str, check_only: bool) -> None:
     """Auto-detect LLM provider and write .ctxconfig."""
     json_mode = _json_mode(ctx)
     _echo_legacy_warning("setup", "refresh --setup", json_mode=json_mode)
-    with OutputBroker(command="refresh", json_mode=json_mode) as broker:
+    with OutputBroker(command="setup", json_mode=json_mode) as broker:
         target_path = Path(path)
         config_file = target_path / ".ctxconfig"
+
+        if check_only:
+            from ctx.preflight import run_preflight
+            result = run_preflight(path)
+
+            if not json_mode:
+                click.echo("ctx preflight — checking readiness for ctx refresh\n")
+                for check in result.checks:
+                    prefix = {"ok": "[ OK ]", "fail": "[FAIL]", "info": "[INFO]"}[check.status]
+                    label = check.name.replace("_", " ").title()
+                    click.echo(f"{prefix} {label}: {check.detail}")
+                    if check.fix:
+                        click.echo(f"  Fix: {check.fix}")
+                click.echo()
+                if result.ready:
+                    click.echo("Ready to run: ctx refresh .")
+                else:
+                    click.echo("Preflight failed. Fix the issues above and re-run: ctx setup --check")
+
+            broker.set_data({
+                "check_only": True,
+                "checks": {
+                    c.name: {"status": c.status, "detail": c.detail, **({"fix": c.fix} if c.fix else {})}
+                    for c in result.checks
+                },
+                "ready": result.ready,
+                "provider": result.provider,
+                "model": result.model,
+            })
+            if not result.ready and not json_mode:
+                sys.exit(1)
+            elif not result.ready:
+                broker.add_error(
+                    "preflight_failed",
+                    f"{sum(1 for c in result.checks if c.status == 'fail')} check(s) failed",
+                    hint="ctx setup --check",
+                )
+            return
 
         def _probe_msg(provider: str) -> None:
             label = {"ollama": "Ollama", "lmstudio": "LM Studio"}.get(provider, provider)
@@ -960,34 +998,16 @@ def setup(ctx: click.Context, path: str, check_only: bool) -> None:
                 broker.set_data({"configured": False, "provider": None, "model": None})
                 return
 
-        result = detect_provider(_probe_callback=_probe_msg)
-        if result is None:
+        det = detect_provider(_probe_callback=_probe_msg)
+        if det is None:
             raise click.UsageError(
                 "No LLM provider detected.\n"
                 "  Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or start Ollama / LM Studio first."
             )
 
-        provider_name, model_name = result
+        provider_name, model_name = det
         detected_via = PROVIDER_DETECTED_VIA.get(provider_name, provider_name)
         click.echo(f"Detected: {provider_name} ({detected_via})")
-
-        if check_only:
-            ok = True
-            conn_error = None
-            if provider_name in ("anthropic", "openai"):
-                api_key_env = "ANTHROPIC_API_KEY" if provider_name == "anthropic" else "OPENAI_API_KEY"
-                api_key = os.getenv(api_key_env, "")
-                ok, conn_error = probe_provider_connectivity(provider_name, api_key)
-                if ok:
-                    click.echo("Connectivity: OK")
-                else:
-                    click.echo(f"Connectivity: FAILED — {conn_error}", err=True)
-                    _echo_proxy_guidance(_active_proxy_vars())
-                    if not json_mode:
-                        sys.exit(1)
-                    broker.add_error("provider_unreachable", str(conn_error), hint="Run ctx setup --check")
-            broker.set_data({"configured": False, "provider": provider_name, "model": model_name, "check_only": True, "connectivity_ok": ok})
-            return
 
         base_url_value = DEFAULT_BASE_URLS.get(provider_name)
         write_default_config(target_path, provider_name, model=model_name, base_url=base_url_value)
