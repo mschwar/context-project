@@ -375,7 +375,7 @@ Post-Phase-25 stress test of `--until-complete` against real-world directory tre
 All AFO stages (1–6), Phase 24 (manifest trust), Phase 25 (production hardening), and the API evaluation gate are complete. Version bumped from `0.8.0` to `1.0.0`.
 
 - [x] **Version bump** — `__version__` = `"1.0.0"`, PyPI classifier updated to Production/Stable.
-- [x] **Local provider timeout** — OpenAI-compatible local providers (Ollama, LM Studio) now use a 60s timeout to prevent hanging on slow inference.
+- [x] **Local provider timeout** — OpenAI-compatible local providers (Ollama, LM Studio) now use a 300s timeout to prevent hanging on slow inference.
 - [x] **Documentation polish** — README rewritten with cost benchmarks and clearer structure, AGENTS.md version refs updated, CONTRIBUTING.md stale Phase 16 reference removed, architecture.md component table updated with `api.py`, `mcp_server.py`, and `output.py`.
 - [x] **432 tests passing.**
 
@@ -387,6 +387,23 @@ Carry-forward from Phase 25 stress test on the 390-directory grant portfolio. Al
 - [ ] **26.2 Minimum summary length threshold** — if an LLM returns an empty or whitespace-only file summary, retry once or log a warning. Currently empty summaries pass silently and cause `--verify` failures downstream.
 - [ ] **26.3 Local model compatibility matrix** — document which local models are tested and known to produce useful summaries. Include model size, quantization, and quality notes.
 
-## Post-AFO Backlog
+## Post-1.0.0 Roadmap
 
+### Quick wins
+- [ ] **Complete products_GRANTS API evaluation** — rerun the 390-dir stress test once Anthropic credits are topped up. Establishes the cost benchmark for the largest real-world tree.
+- [ ] **Google Drive ignore rules** — add `.gdoc`, `.gsheet`, `.gslides`, `.gdraw`, `.gform` to `.ctxignore.default`. These are virtual shortcut files on Google Drive-synced trees that can't be hashed locally and produce noisy warnings.
+
+### Phase 26 — Local Model Quality Assurance
+See above.
+
+### Phase 27 — Agent Integration Dogfooding
+- [ ] **27.1 Agent navigation benchmark** — use ctx in a real multi-agent workflow. Measure how an agent performs using `ctx export --depth 1` to orient itself in an unfamiliar repo vs. raw file listing.
+- [ ] **27.2 Handoff protocol** — define a standard pattern where one agent runs `ctx refresh .` at session end and the next agent reads `ctx export` at session start, creating a durable handoff chain.
+- [ ] **27.3 Cost-per-session tracking** — instrument a real coding session to measure the incremental cost of keeping manifests fresh during active development (expected: near-zero after initial generation).
+
+### Adoption
+- [ ] **External user onboarding** — the PyPI package is live, README has cost benchmarks, AGENTS.md is a complete contract. Identify 2–3 external repos or agent frameworks to test ctx integration.
+- [ ] **Blog post / announcement** — write up the journey from 0.8.0 to 1.0.0: the AFO pivot, stress test findings, cost model, and what makes ctx different from other context tools.
+
+### Backlog
 - [ ] **Legacy command docs cleanup in ancillary specs** — sweep remaining AFO reference docs/examples that still show legacy command names where the canonical `refresh` / `check` surface should be primary.
