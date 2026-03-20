@@ -505,7 +505,7 @@ def test_until_complete_stops_when_no_progress(tmp_path, monkeypatch) -> None:
 
     assert state["call_count"] == 1
     assert result.dirs_processed == 0
-    assert len(result.errors) >= 1
+    assert len(result.errors) == 1
 
 
 def test_until_complete_retries_clear_old_errors(tmp_path, monkeypatch) -> None:
@@ -522,8 +522,8 @@ def test_until_complete_retries_clear_old_errors(tmp_path, monkeypatch) -> None:
 
     assert state["call_count"] == 2
     assert result.dirs_processed == 4
-    # Old timeout error is gone because the retry succeeded
-    assert not any("timeout" in e for e in result.errors)
+    # The retry succeeded, so the final error list should be empty
+    assert result.errors == []
 
 
 def test_until_complete_stops_on_clean_completion(tmp_path, monkeypatch) -> None:
@@ -554,3 +554,32 @@ def test_until_complete_continues_on_errors_without_budget(tmp_path, monkeypatch
     assert state["call_count"] == 2
     assert result.dirs_processed == 9
     assert result.errors == []
+
+
+def test_until_complete_honors_cumulative_usd_ceiling(tmp_path, monkeypatch) -> None:
+    """Loop should stop when cumulative spend exceeds max_usd_per_run."""
+    config = Config(
+        provider="anthropic", model="claude-haiku-4-5-20251001", api_key="test-key",
+        resume_cooldown_seconds=0, max_usd_per_run=0.001,
+    )
+
+    call_count = 0
+
+    def fake_tree(_root, _config, *_a, **_kw):
+        nonlocal call_count
+        call_count += 1
+        # Each pass uses enough tokens to exceed the tiny USD ceiling
+        return GenerateStats(dirs_processed=5, tokens_used=50_000, budget_exhausted=True, errors=["dir_a: fail"])
+
+    monkeypatch.setattr(api_module, "_build_generation_runtime", lambda *_a, **_kw: (config, object(), object()))
+    monkeypatch.setattr(api_module, "CtxLock", _NoopLock)
+    monkeypatch.setattr(api_module, "_has_manifests", lambda _root: False)
+    monkeypatch.setattr(git_module, "get_changed_files", lambda _root: [])
+    monkeypatch.setattr(api_module, "generate_tree", fake_tree)
+    monkeypatch.setattr(api_module, "update_tree", fake_tree)
+
+    result = api_module.refresh(tmp_path, until_complete=True)
+
+    # Should stop after 1 pass because cumulative USD exceeds ceiling
+    assert call_count == 1
+    assert result.dirs_processed == 5

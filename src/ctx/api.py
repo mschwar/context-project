@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import time as _time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -352,8 +353,14 @@ def refresh(
         # Clean completion: no budget limit hit and no errors.
         if not stats.budget_exhausted and not stats.errors:
             break
+        # Honor hard USD ceiling across cycles.  (The token budget is
+        # per-pass by design — _apply_token_guardrail folds it into the
+        # generator budget so each pass stops independently.)
+        if config.max_usd_per_run is not None:
+            est_cost = estimate_cost(cumulative_stats.tokens_used, config.provider, config.resolved_model())
+            if est_cost >= config.max_usd_per_run:
+                break
 
-        import time as _time
         reason = "budget" if stats.budget_exhausted else "errors"
         logger.info(
             "Cycle complete (%d dirs, %s). Cooling down %.0fs before next cycle.",
