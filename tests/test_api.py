@@ -583,3 +583,19 @@ def test_until_complete_honors_cumulative_usd_ceiling(tmp_path, monkeypatch) -> 
     # Should stop after 1 pass because cumulative USD exceeds ceiling
     assert call_count == 1
     assert result.dirs_processed == 5
+
+
+def test_refresh_result_includes_cache_fields() -> None:
+    result = api_module.RefreshResult(
+        dirs_processed=0,
+        dirs_skipped=0,
+        files_processed=0,
+        tokens_used=0,
+        errors=[],
+        budget_exhausted=False,
+        strategy="incremental",
+        est_cost_usd=0.0,
+        stale_directories=[],
+    )
+    assert result.cache_hits == 0
+    assert result.cache_misses == 0

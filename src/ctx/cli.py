@@ -1275,8 +1275,10 @@ def export(ctx: click.Context, path: str, output: Optional[str], filter_mode: st
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--verbose", "-v", is_flag=True, help="Show per-directory breakdown table.")
 @click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format.")
+@click.option("--board", is_flag=True, help="Show the running board (refresh history).")
+@click.option("--global", "show_global", is_flag=True, help="Show global running board across all repos.")
 @click.pass_context
-def stats(ctx: click.Context, path: str, verbose: bool, output_format: str) -> None:
+def stats(ctx: click.Context, path: str, verbose: bool, output_format: str, board: bool, show_global: bool) -> None:
     """Show coverage summary across all directories.
 
     Reports:
@@ -1287,9 +1289,89 @@ def stats(ctx: click.Context, path: str, verbose: bool, output_format: str) -> N
       tokens      — sum of tokens_total from all manifest frontmatters
     """
     json_mode = _json_mode(ctx)
-    _echo_legacy_warning("stats", "check --stats", json_mode=json_mode, suppress=output_format == "json")
+    _echo_legacy_warning("stats", "check --stats", json_mode=json_mode, suppress=output_format == "json" or board)
     with OutputBroker(command="check", json_mode=json_mode) as broker:
         root = Path(path).resolve()
+
+        if board:
+            from ctx.stats_board import read_board, read_global_board
+            from ctx.config import load_config as _load_cfg
+
+            if show_global:
+                board_data = read_global_board()
+                broker.set_data(board_data)
+                if output_format == "json" and not json_mode:
+                    click.echo(json.dumps(board_data, indent=2))
+                else:
+                    totals = board_data.get("totals", {})
+                    repos = board_data.get("repos", {})
+                    if not totals.get("total_runs", 0):
+                        click.echo("No runs recorded yet.")
+                    else:
+                        click.echo(f"ctx running board — global\n")
+                        click.echo(f"Repos tracked:      {totals.get('repos_touched', 0)}")
+                        click.echo(f"Total runs:         {totals.get('total_runs', 0)}")
+                        click.echo(f"Total directories:  {totals.get('total_dirs_processed', 0)}")
+                        tu = totals.get("total_tokens_used", 0)
+                        ts = totals.get("total_tokens_saved", 0)
+                        click.echo(f"Total tokens:       {tu / 1_000_000:.2f}M" if tu >= 1_000_000 else f"Total tokens:       {tu}")
+                        click.echo(f"Total cost:         ${totals.get('total_cost_usd', 0.0):.3f}")
+                        click.echo(f"Total tokens saved: {ts / 1_000_000:.2f}M  (est.)" if ts >= 1_000_000 else f"Total tokens saved: {ts}  (est.)")
+                        click.echo(f"Total cost saved:   ${totals.get('total_cost_saved_usd', 0.0):.3f} (est.)")
+                        if repos:
+                            click.echo("\nPer-repo breakdown:")
+                            for repo_key, repo_val in repos.items():
+                                click.echo(
+                                    f"  {repo_key:<40} {repo_val.get('run_count', 0):3d} runs"
+                                    f"  {repo_val.get('total_dirs_processed', 0):4d} dirs"
+                                    f"  ${repo_val.get('total_cost_usd', 0.0):.2f}"
+                                )
+            else:
+                try:
+                    config = _load_cfg(root, require_api_key=False)
+                except Exception:
+                    from ctx.config import Config as _Cfg
+                    config = _Cfg()
+                board_data = read_board(root, config)
+                broker.set_data(board_data)
+                if output_format == "json" and not json_mode:
+                    click.echo(json.dumps(board_data, indent=2))
+                else:
+                    agg = board_data.get("aggregate", {})
+                    recent = board_data.get("recent_runs", [])
+                    if not agg.get("run_count", 0):
+                        click.echo("No runs recorded yet.")
+                    else:
+                        click.echo(f"ctx running board — {board_data.get('repo', str(root))}\n")
+                        click.echo(f"Runs:           {agg.get('run_count', 0)}")
+                        click.echo(f"Directories:    {agg.get('total_dirs_processed', 0):>8}  total processed")
+                        tu = agg.get("total_tokens_used", 0)
+                        ts = agg.get("total_tokens_saved", 0)
+                        click.echo(f"Tokens used:    {tu / 1_000_000:>8.2f}M  across all runs" if tu >= 1_000_000 else f"Tokens used:    {tu:>8}  across all runs")
+                        click.echo(f"Tokens saved:   {ts / 1_000_000:>8.2f}M  (est. via cache)" if ts >= 1_000_000 else f"Tokens saved:   {ts:>8}  (est. via cache)")
+                        click.echo(f"Cost:           ${agg.get('total_cost_usd', 0.0):>8.3f}")
+                        click.echo(f"Cost saved:     ${agg.get('total_cost_saved_usd', 0.0):>8.3f}  (est. via cache)")
+                        hr = agg.get("cache_hit_rate", 0.0)
+                        click.echo(f"Cache hit rate: {hr * 100:>7.0f}%")
+                        if recent:
+                            click.echo("\nRecent runs (last 5):")
+                            for run in recent:
+                                ts_str = run.get("ts", "")[:16].replace("T", " ")
+                                rt = run.get("tokens_used", 0)
+                                rhr = run.get("cache_hits", 0)
+                                rmr = run.get("cache_misses", 0)
+                                r_total = rhr + rmr
+                                r_hr_pct = round(rhr * 100 / r_total) if r_total > 0 else 0
+                                click.echo(
+                                    f"  {ts_str}  {run.get('strategy', ''):<13}"
+                                    f"  {run.get('dirs_processed', 0):4d} dirs"
+                                    f"  {rt / 1000:.0f}K tokens"
+                                    f"  ${run.get('est_cost_usd', 0.0):.3f}"
+                                    f"  {r_hr_pct}% cache"
+                                )
+            _exit_for_broker(broker, json_mode=json_mode)
+            return
+
         spec = load_ignore_patterns(root)
         health_entries = inspect_directory_health(root, spec, root)
 

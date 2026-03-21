@@ -2343,6 +2343,120 @@ def test_update_command_shows_cost_summary(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cli_module, "update_tree", fake_update)
     
     result = runner.invoke(cli_module.cli, ["update", str(tmp_path)])
-    
+
     assert result.exit_code == 0
     assert "Estimated cost:" in result.output
+
+
+# --- ctx stats --board ---
+
+
+def _make_board_data(run_count: int = 3) -> dict:
+    return {
+        "schema_version": 1,
+        "repo": "/some/repo",
+        "aggregate": {
+            "run_count": run_count,
+            "total_dirs_processed": 100,
+            "total_tokens_used": 50000,
+            "total_tokens_saved": 20000,
+            "total_cost_usd": 0.04,
+            "total_cost_saved_usd": 0.016,
+            "cache_hit_rate": 0.67,
+        },
+        "recent_runs": [
+            {
+                "ts": "2026-03-20T21:00:00.000Z",
+                "dirs_processed": 18,
+                "tokens_used": 15000,
+                "tokens_saved": 6000,
+                "est_cost_usd": 0.012,
+                "cost_saved_usd": 0.005,
+                "cache_hits": 20,
+                "cache_misses": 10,
+                "strategy": "incremental",
+                "provider": "anthropic",
+                "model": "claude-haiku-4-5-20251001",
+            }
+        ],
+    }
+
+
+def _make_global_board_data() -> dict:
+    return {
+        "schema_version": 1,
+        "repos": {
+            "/repo/a": {"run_count": 5, "total_dirs_processed": 80, "total_cost_usd": 0.064},
+        },
+        "totals": {
+            "repos_touched": 1,
+            "total_runs": 5,
+            "total_dirs_processed": 80,
+            "total_tokens_used": 80000,
+            "total_tokens_saved": 32000,
+            "total_cost_usd": 0.064,
+            "total_cost_saved_usd": 0.026,
+        },
+    }
+
+
+def test_stats_board_human_mode(tmp_path, monkeypatch) -> None:
+    cli_module = import_module("ctx.cli")
+    import ctx.stats_board as sb_module
+
+    runner = CliRunner()
+
+    monkeypatch.setattr(sb_module, "read_board", lambda root, config: _make_board_data())
+    monkeypatch.setattr("ctx.cli.read_board", sb_module.read_board, raising=False)
+
+    result = runner.invoke(cli_module.cli, ["stats", "--board", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "Runs:" in result.output
+    assert "Tokens used:" in result.output
+    assert "Cost:" in result.output
+
+
+def test_stats_board_global_mode(tmp_path, monkeypatch) -> None:
+    cli_module = import_module("ctx.cli")
+    import ctx.stats_board as sb_module
+
+    runner = CliRunner()
+
+    monkeypatch.setattr(sb_module, "read_global_board", lambda **kw: _make_global_board_data())
+    monkeypatch.setattr("ctx.cli.read_global_board", sb_module.read_global_board, raising=False)
+
+    result = runner.invoke(cli_module.cli, ["stats", "--board", "--global", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "Repos tracked:" in result.output
+
+
+def test_stats_board_json_mode(tmp_path, monkeypatch) -> None:
+    import json as _json
+    cli_module = import_module("ctx.cli")
+    import ctx.stats_board as sb_module
+
+    runner = CliRunner()
+    board = _make_board_data(run_count=7)
+    monkeypatch.setattr(sb_module, "read_board", lambda root, config: board)
+    monkeypatch.setattr("ctx.cli.read_board", sb_module.read_board, raising=False)
+
+    result = runner.invoke(cli_module.cli, ["stats", "--board", "--format", "json", str(tmp_path)])
+
+    assert result.exit_code == 0
+    parsed = _json.loads(result.output)
+    assert parsed["aggregate"]["run_count"] == 7
+
+
+def test_stats_board_empty_state(tmp_path) -> None:
+    cli_module = import_module("ctx.cli")
+
+    runner = CliRunner()
+    empty_dir = tmp_path / "empty_repo"
+    empty_dir.mkdir()
+
+    result = runner.invoke(cli_module.cli, ["stats", "--board", str(empty_dir)])
+
+    assert result.exit_code == 0
+    assert "No runs recorded yet." in result.output
