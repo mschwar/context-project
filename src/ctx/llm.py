@@ -749,6 +749,8 @@ class CachingLLMClient:
         self._max_cache_entries = max_cache_entries
         self._disk_lock = threading.Lock()
         self._disk_cache: dict[str, str] = {}
+        self.cache_hits: int = 0
+        self.cache_misses: int = 0
         if cache_path is not None and cache_path.exists():
             try:
                 data = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -790,6 +792,10 @@ class CachingLLMClient:
     def local_batch_fallbacks(self) -> int:
         return int(getattr(self._client, "local_batch_fallbacks", 0) or 0)
 
+    @property
+    def hit_miss_counts(self) -> tuple[int, int]:
+        return self.cache_hits, self.cache_misses
+
     def summarize_files(
         self, dir_path: Path, files: list[dict]
     ) -> list[LLMResult]:
@@ -814,11 +820,13 @@ class CachingLLMClient:
             for i, _ in enumerate(files):
                 if keys[i] in self._cache:
                     file_futures.append(self._cache[keys[i]])
+                    self.cache_hits += 1
                 else:
                     fut: Future[str] = Future()
                     self._cache[keys[i]] = fut
                     file_futures.append(fut)
                     to_fetch.append(i)
+                    self.cache_misses += 1
 
         # Fetch outside the lock; resolve our Futures when done.
         # Preserve the original LLMResult (with token counts) for entries we fetched.

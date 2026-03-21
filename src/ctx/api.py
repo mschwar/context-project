@@ -68,6 +68,8 @@ class RefreshResult:
     setup_model: str | None = None
     setup_detected_via: str | None = None
     local_batch_fallbacks: int = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
 
 
 @dataclass
@@ -379,7 +381,13 @@ def refresh(
     if watch and not errors:
         run_watch(root, config, client, spec)
 
-    return RefreshResult(
+    cache_hits, cache_misses = (
+        client.hit_miss_counts
+        if hasattr(client, "hit_miss_counts")
+        else (0, 0)
+    )
+
+    result = RefreshResult(
         dirs_processed=cumulative_stats.dirs_processed,
         dirs_skipped=cumulative_stats.dirs_skipped,
         files_processed=cumulative_stats.files_processed,
@@ -395,7 +403,18 @@ def refresh(
         setup_model=setup_model,
         setup_detected_via=setup_detected_via,
         local_batch_fallbacks=int(getattr(client, "local_batch_fallbacks", 0) or 0),
+        cache_hits=cache_hits,
+        cache_misses=cache_misses,
     )
+
+    if not dry_run:
+        try:
+            from ctx.stats_board import record_run
+            record_run(root, result, config)
+        except Exception:
+            pass
+
+    return result
 
 
 def _path_relative(path: Path, root: Path) -> str:

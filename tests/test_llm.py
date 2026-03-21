@@ -1098,3 +1098,39 @@ def test_retry_attempts_increased_to_five(monkeypatch) -> None:
     from ctx.llm import RETRY_ATTEMPTS
 
     assert RETRY_ATTEMPTS == 5
+
+
+# --- CachingLLMClient hit/miss counters ---
+
+
+def test_cache_miss_counter_increments() -> None:
+    inner = _CountingClient()
+    cache = CachingLLMClient(inner)
+
+    cache.summarize_files(Path("src"), [{"name": "a.py", "content": "hello"}])
+
+    assert cache.cache_hits == 0
+    assert cache.cache_misses == 1
+
+
+def test_cache_hit_counter_increments() -> None:
+    inner = _CountingClient()
+    cache = CachingLLMClient(inner)
+
+    cache.summarize_files(Path("src"), [{"name": "a.py", "content": "same content"}])
+    cache.summarize_files(Path("other"), [{"name": "a.py", "content": "same content"}])
+
+    assert cache.cache_hits == 1
+    assert cache.cache_misses == 1
+
+
+def test_hit_miss_counts_property() -> None:
+    inner = _CountingClient()
+    cache = CachingLLMClient(inner)
+
+    cache.summarize_files(Path("src"), [{"name": "a.py", "content": "x"}])
+    cache.summarize_files(Path("src"), [{"name": "a.py", "content": "x"}])
+
+    hits, misses = cache.hit_miss_counts
+    assert hits == 1
+    assert misses == 1
