@@ -213,7 +213,7 @@ def test_read_global_board_multi_repo(tmp_path) -> None:
     assert "/repo/b" in board["repos"]
 
 
-def test_run_record_fields(tmp_path) -> None:
+def test_run_record_fields_old(tmp_path) -> None:
     config = _make_config()
     result = _make_result(cache_hits=30, cache_misses=10, tokens_used=4000)
 
@@ -223,7 +223,7 @@ def test_run_record_fields(tmp_path) -> None:
         "ts", "dirs_processed", "dirs_skipped", "files_processed",
         "tokens_used", "tokens_saved", "est_cost_usd", "cost_saved_usd",
         "cache_hits", "cache_misses", "strategy", "errors",
-        "budget_exhausted", "provider", "model",
+        "error_types", "budget_exhausted", "provider", "model",
     }
     assert expected_keys.issubset(set(record.keys()))
     assert record["cache_hits"] == 30
@@ -244,6 +244,24 @@ def test_tokens_saved_estimation() -> None:
     assert record["tokens_saved"] == round((20 / 30) * 3000)
 
 
+def test_run_record_fields(tmp_path) -> None:
+    config = _make_config()
+    result = _make_result(cache_hits=30, cache_misses=10, tokens_used=4000)
+
+    record = _build_run_record(result, config)
+
+    expected_keys = {
+        "ts", "dirs_processed", "dirs_skipped", "files_processed",
+        "tokens_used", "tokens_saved", "est_cost_usd", "cost_saved_usd",
+        "cache_hits", "cache_misses", "strategy", "errors",
+        "error_types", "budget_exhausted", "provider", "model",
+    }
+    assert expected_keys.issubset(set(record.keys()))
+    assert record["cache_hits"] == 30
+    assert record["cache_misses"] == 10
+    assert record["provider"] == "anthropic"
+
+
 def test_atomic_write_is_safe(tmp_path) -> None:
     target = tmp_path / "out.json"
     data = {"schema_version": 1, "runs": [{"ts": "2026-01-01T00:00:00.000Z"}]}
@@ -256,3 +274,174 @@ def test_atomic_write_is_safe(tmp_path) -> None:
     # No temp files left
     leftover = [f for f in tmp_path.iterdir() if f != target]
     assert leftover == []
+
+
+def test_classify_errors_transient() -> None:
+    from ctx.stats_board import _classify_errors
+    errors = [
+        "[transient, retries exhausted] Connection reset",
+        "[transient, retries exhausted] Timeout",
+        "Some other error",
+    ]
+    result = _classify_errors(errors)
+    assert result["transient"] == 2
+    assert result["other"] == 1
+    assert result["timeout"] == 0
+
+
+def test_classify_errors_all_types() -> None:
+    from ctx.stats_board import _classify_errors
+    errors = [
+        "[transient, retries exhausted] blah",
+        "Connection timeout after 60s",
+        "Rate limit exceeded",
+        "Budget exhausted",
+        "Unknown failure",
+    ]
+    result = _classify_errors(errors)
+    assert result["transient"] == 1
+    assert result["timeout"] == 1
+    assert result["rate_limit"] == 1
+    assert result["budget"] == 1
+    assert result["other"] == 1
+
+
+def test_classify_errors_empty() -> None:
+    from ctx.stats_board import _classify_errors
+    assert _classify_errors([]) == {"transient": 0, "timeout": 0, "rate_limit": 0, "budget": 0, "other": 0}
+
+
+def test_build_run_record_includes_error_types() -> None:
+    config = _make_config()
+    result = _make_result(errors=["[transient, retries exhausted] blah", "Unknown"])
+    record = _build_run_record(result, config)
+    assert "error_types" in record
+    assert record["error_types"]["transient"] == 1
+    assert record["error_types"]["other"] == 1
+
+
+def test_read_board_per_model(tmp_path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    config = _make_config()
+    record_run(root, _make_result(tokens_used=1000), config)
+    config2 = _make_config(provider="openai", model="gpt-4o")
+    record_run(root, _make_result(tokens_used=2000), config2)
+
+    board = read_board(root, config)
+    assert "per_model" in board
+    assert "anthropic/claude-haiku-4-5-20251001" in board["per_model"]
+    assert "openai/gpt-4o" in board["per_model"]
+    assert board["per_model"]["anthropic/claude-haiku-4-5-20251001"]["run_count"] == 1
+    assert board["per_model"]["openai/gpt-4o"]["run_count"] == 1
+
+
+def test_read_board_since_filter(tmp_path) -> None:
+    from ctx.stats_board import _save_json_atomic, _run_stats_path
+    root = tmp_path / "repo"
+    root.mkdir()
+    config = _make_config()
+
+    # Manually write runs with specific timestamps
+    old_run = {
+        "ts": "2020-01-01T00:00:00.000Z",
+        "dirs_processed": 5, "dirs_skipped": 0, "files_processed": 10,
+        "tokens_used": 1000, "tokens_saved": 0, "est_cost_usd": 0.001,
+        "cost_saved_usd": 0.0, "cache_hits": 0, "cache_misses": 10,
+        "strategy": "full", "errors": 0, "budget_exhausted": False,
+        "provider": "anthropic", "model": "test",
+    }
+    new_run = dict(old_run)
+    new_run["ts"] = "2099-01-01T00:00:00.000Z"
+    new_run["tokens_used"] = 2000
+
+    stats_path = _run_stats_path(root, config)
+    stats_path.parent.mkdir(parents=True, exist_ok=True)
+    _save_json_atomic(stats_path, {"schema_version": 1, "runs": [old_run, new_run]})
+
+    # Without filter: both runs
+    board = read_board(root, config)
+    assert board["aggregate"]["run_count"] == 2
+
+    # With filter: only the future run
+    board = read_board(root, config, since="2098-01-01")
+    assert board["aggregate"]["run_count"] == 1
+    assert board["aggregate"]["total_tokens_used"] == 2000
+
+
+def test_read_board_since_relative(tmp_path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    config = _make_config()
+
+    # Write a run with current timestamp (should be included with "7d" filter)
+    record_run(root, _make_result(), config)
+
+    board = read_board(root, config, since="7d")
+    assert board["aggregate"]["run_count"] == 1
+
+
+def test_read_trend(tmp_path) -> None:
+    from ctx.stats_board import read_trend
+    root = tmp_path / "repo"
+    root.mkdir()
+    config = _make_config()
+    record_run(root, _make_result(cache_hits=8, cache_misses=2), config)
+    record_run(root, _make_result(cache_hits=5, cache_misses=5), config)
+
+    trend = read_trend(root, config, count=10)
+    assert len(trend) == 2
+    assert "est_cost_usd" in trend[0]
+    assert "cache_hit_rate" in trend[0]
+    assert trend[0]["cache_hit_rate"] == 0.8
+
+
+def test_read_trend_empty(tmp_path) -> None:
+    from ctx.stats_board import read_trend
+    root = tmp_path / "repo"
+    root.mkdir()
+    config = _make_config()
+    assert read_trend(root, config) == []
+
+
+def test_record_run_logs_on_failure(tmp_path, monkeypatch, caplog) -> None:
+    """record_run should log a warning when it fails, not silently swallow."""
+    import ctx.stats_board as sb
+    root = tmp_path / "repo"
+    root.mkdir()
+    config = _make_config()
+
+    def boom(*a, **kw):
+        raise RuntimeError("disk exploded")
+
+    monkeypatch.setattr(sb, "_build_run_record", boom)
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="ctx.stats_board"):
+        record_run(root, _make_result(), config)
+    assert "disk exploded" in caplog.text
+
+
+def test_global_retry_on_failure(tmp_path, monkeypatch) -> None:
+    """_update_global should retry on OSError."""
+    import ctx.stats_board as sb
+    attempts = []
+    original_save = sb._save_json_atomic
+
+    def flaky_save(path, data):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise OSError("busy")
+        return original_save(path, data)
+
+    monkeypatch.setattr(sb, "_save_json_atomic", flaky_save)
+    monkeypatch.setattr(sb, "_GLOBAL_WRITE_BACKOFF_SECONDS", 0.001)  # fast for tests
+
+    from ctx.stats_board import _update_global, _build_run_record
+    config = _make_config()
+    record = _build_run_record(_make_result(), config)
+    global_path = tmp_path / "global.json"
+
+    _update_global(global_path, "/test", record)
+    assert len(attempts) == 3  # failed twice, succeeded on third
+    assert global_path.exists()

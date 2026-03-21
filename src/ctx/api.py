@@ -411,8 +411,8 @@ def refresh(
         try:
             from ctx.stats_board import record_run
             record_run(root, result, config)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Stats recording failed: %s", exc)
 
     return result
 
