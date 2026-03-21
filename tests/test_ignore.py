@@ -40,6 +40,16 @@ def test_load_ignore_patterns_ignores_workspace_noise_by_default(tmp_path, relat
     assert spec.match_file(relative_path)
 
 
+@pytest.mark.parametrize(
+    "relative_path",
+    ["report.gdoc", "data.gsheet", "deck.gslides", "diagram.gdraw", "survey.gform", "map.gmap", "site.gsite"],
+)
+def test_load_ignore_patterns_ignores_google_drive_shortcuts_by_default(tmp_path, relative_path: str) -> None:
+    spec = load_ignore_patterns(tmp_path)
+
+    assert spec.match_file(relative_path)
+
+
 @pytest.mark.parametrize("relative_path", ["AGENTS.md.tmp.123", "module.pyc.456"])
 def test_load_ignore_patterns_ignores_temp_editor_artifacts_by_default(tmp_path, relative_path: str) -> None:
     spec = load_ignore_patterns(tmp_path)
