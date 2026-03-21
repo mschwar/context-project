@@ -126,6 +126,39 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
             "required": [],
         },
     },
+    {
+        "name": "ctx_board",
+        "description": (
+            "Read the running board (refresh history and cost analytics) for a repository. "
+            "Returns aggregate stats, per-model breakdown, and recent runs."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory path, relative to the server root.",
+                    "default": ".",
+                },
+                "since": {
+                    "type": "string",
+                    "description": "Time filter: relative (7d, 4w) or absolute (2026-03-01).",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "ctx_global_board",
+        "description": (
+            "Read the global running board with aggregated cost analytics across all repositories."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 ]
 
 
@@ -255,6 +288,8 @@ class CtxMCPServer:
             "ctx_check": self._call_check,
             "ctx_export": self._call_export,
             "ctx_reset": self._call_reset,
+            "ctx_board": self._call_board,
+            "ctx_global_board": self._call_global_board,
         }
         handler = handlers.get(tool_name)
         if handler is None:
@@ -319,6 +354,23 @@ class CtxMCPServer:
             yes=True,
         )
         return asdict(result)
+
+    def _call_board(self, arguments: dict[str, object]) -> dict[str, object]:
+        from ctx.config import load_config, Config
+        from ctx.stats_board import read_board
+        path = self._resolve_path(arguments.get("path", "."))
+        since = arguments.get("since")
+        if since is not None and not isinstance(since, str):
+            since = None
+        try:
+            config = load_config(path, require_api_key=False)
+        except Exception:
+            config = Config()
+        return read_board(path, config, since=since)
+
+    def _call_global_board(self, arguments: dict[str, object]) -> dict[str, object]:
+        from ctx.stats_board import read_global_board
+        return read_global_board()
 
     def _resolve_path(self, relative: object) -> Path:
         if not isinstance(relative, str):

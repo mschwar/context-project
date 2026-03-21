@@ -34,6 +34,7 @@ BitNet is deprecated in this repo. Attempting to use it raises an informative er
 | `hasher.py` | Robust SHA-256 hashing logic with symlink loop detection. |
 | `manifest.py` | Parsing and serializing `CONTEXT.md` (YAML + Markdown). Atomic writes via temp file + `os.replace`. |
 | `output.py` | `OutputBroker` context manager for JSON envelope output mode. |
+| `stats_board.py` | Persistent run-stats ledger. Records every `ctx refresh` invocation; exposes per-repo and global aggregates for `ctx stats --board`. |
 | `mcp_server.py` | Stdio JSON-RPC 2.0 MCP server exposing `api.py` functions as tools. |
 | `ignore.py` | `.gitignore`-style filtering using the `pathspec` library. |
 | `git.py` | Git-aware changed-file detection for selective refresh. |

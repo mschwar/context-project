@@ -1,6 +1,6 @@
 # Phase 28 — Running Board
 
-> **Status:** Spec
+> **Status:** Complete
 > **Sprint:** 2 (Dogfooding, Analytics, Adoption)
 > **Prerequisites:** Phase 29 (Preflight) merged. Main branch clean.
 > **Tracking:** `state.md` under "Sprint 2 — Phase 28"
@@ -484,8 +484,14 @@ side-effects — use `tmp_path` fixtures throughout.
 - Modifying `ctx refresh` output (board records silently).
 - Pruning or migrating run history.
 - Per-run breakdown in the global file (global stores aggregates only).
-- Exposing board data through the MCP server.
 - Any changes to `generator.py` or language parsers.
+
+### Shipped beyond spec
+- `--since` filter — time-window filter for board runs (e.g. `7d`, `4w`, `2026-03-01`).
+- `--trend` sparklines — ASCII sparklines for cost and cache-hit trends.
+- `--format csv` — CSV export of recent runs.
+- Per-model breakdown — `ctx stats --board` now shows a per-model cost/token table.
+- MCP tools — `ctx_board` and `ctx_global_board` expose the running board via the MCP server (previously out of scope).
 
 ---
 

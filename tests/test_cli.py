@@ -2364,6 +2364,13 @@ def _make_board_data(run_count: int = 3) -> dict:
             "total_cost_saved_usd": 0.016,
             "cache_hit_rate": 0.67,
         },
+        "per_model": {
+            "anthropic/claude-haiku-4-5-20251001": {
+                "run_count": run_count,
+                "total_tokens_used": 50000,
+                "total_cost_usd": 0.04,
+            },
+        },
         "recent_runs": [
             {
                 "ts": "2026-03-20T21:00:00.000Z",
@@ -2406,7 +2413,7 @@ def test_stats_board_human_mode(tmp_path, monkeypatch) -> None:
 
     runner = CliRunner()
 
-    monkeypatch.setattr(sb_module, "read_board", lambda root, config: _make_board_data())
+    monkeypatch.setattr(sb_module, "read_board", lambda root, config, *, since=None: _make_board_data())
     monkeypatch.setattr("ctx.cli.read_board", sb_module.read_board, raising=False)
 
     result = runner.invoke(cli_module.cli, ["stats", "--board", str(tmp_path)])
@@ -2439,7 +2446,7 @@ def test_stats_board_json_mode(tmp_path, monkeypatch) -> None:
 
     runner = CliRunner()
     board = _make_board_data(run_count=7)
-    monkeypatch.setattr(sb_module, "read_board", lambda root, config: board)
+    monkeypatch.setattr(sb_module, "read_board", lambda root, config, *, since=None: board)
     monkeypatch.setattr("ctx.cli.read_board", sb_module.read_board, raising=False)
 
     result = runner.invoke(cli_module.cli, ["stats", "--board", "--format", "json", str(tmp_path)])
@@ -2460,3 +2467,57 @@ def test_stats_board_empty_state(tmp_path) -> None:
 
     assert result.exit_code == 0
     assert "No runs recorded yet." in result.output
+
+
+def test_stats_board_csv_mode(tmp_path, monkeypatch):
+    cli_module = import_module("ctx.cli")
+    import ctx.stats_board as sb_module
+
+    runner = CliRunner()
+
+    monkeypatch.setattr(sb_module, "read_board", lambda root, config, *, since=None: _make_board_data())
+    monkeypatch.setattr("ctx.cli.read_board", sb_module.read_board, raising=False)
+
+    result = runner.invoke(cli_module.cli, ["stats", "--board", "--format", "csv", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "ts," in result.output or "strategy," in result.output
+
+
+def test_stats_board_since_flag(tmp_path, monkeypatch):
+    cli_module = import_module("ctx.cli")
+    import ctx.stats_board as sb_module
+
+    runner = CliRunner()
+
+    def mock_read(root, config, *, since=None):
+        assert since == "7d"
+        return _make_board_data(run_count=1)
+
+    monkeypatch.setattr(sb_module, "read_board", mock_read)
+    monkeypatch.setattr("ctx.cli.read_board", sb_module.read_board, raising=False)
+
+    result = runner.invoke(cli_module.cli, ["stats", "--board", "--since", "7d", str(tmp_path)])
+    assert result.exit_code == 0
+
+
+def test_stats_board_trend(tmp_path, monkeypatch):
+    cli_module = import_module("ctx.cli")
+    import ctx.stats_board as sb_module
+
+    runner = CliRunner()
+
+    monkeypatch.setattr(sb_module, "read_board", lambda root, config, *, since=None: _make_board_data())
+    monkeypatch.setattr("ctx.cli.read_board", sb_module.read_board, raising=False)
+
+    def mock_trend(root, config, count=20):
+        return [
+            {"ts": "2026-03-20T00:00:00.000Z", "est_cost_usd": 0.01, "cache_hit_rate": 0.5},
+            {"ts": "2026-03-21T00:00:00.000Z", "est_cost_usd": 0.02, "cache_hit_rate": 0.8},
+        ]
+
+    monkeypatch.setattr(sb_module, "read_trend", mock_trend)
+    monkeypatch.setattr("ctx.cli.read_trend", sb_module.read_trend, raising=False)
+
+    result = runner.invoke(cli_module.cli, ["stats", "--board", "--trend", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "Trend" in result.output or "trend" in result.output or "\u2581" in result.output or "\u2588" in result.output

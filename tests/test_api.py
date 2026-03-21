@@ -599,3 +599,27 @@ def test_refresh_result_includes_cache_fields() -> None:
     )
     assert result.cache_hits == 0
     assert result.cache_misses == 0
+
+
+def test_refresh_result_cache_defaults_without_caching_client(tmp_path, monkeypatch) -> None:
+    """When client lacks hit_miss_counts, refresh should use (0, 0) defaults."""
+    config = Config(provider="openai", model="test-model", api_key="test-key")
+
+    class _FakeClient:
+        model = "test-model"
+        local_batch_fallbacks = 0
+
+    class _NoopLock:
+        def __init__(self, *a, **kw): pass
+        def __enter__(self): return self
+        def __exit__(self, *e): pass
+
+    monkeypatch.setattr(api_module, "_build_generation_runtime", lambda *a, **kw: (config, object(), _FakeClient()))
+    monkeypatch.setattr(api_module, "CtxLock", _NoopLock)
+    monkeypatch.setattr(api_module, "_has_manifests", lambda _root: True)
+    monkeypatch.setattr(git_module, "get_changed_files", lambda _root: [])
+    monkeypatch.setattr(api_module, "update_tree", lambda *a, **kw: GenerateStats(dirs_processed=0, tokens_used=0))
+
+    result = api_module.refresh(tmp_path, dry_run=False)
+    assert result.cache_hits == 0
+    assert result.cache_misses == 0

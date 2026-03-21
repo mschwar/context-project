@@ -46,7 +46,7 @@ def test_tools_list_exposes_all_tools(monkeypatch: pytest.MonkeyPatch, tmp_path:
     )
 
     tool_names = [tool["name"] for tool in responses[0]["result"]["tools"]]
-    assert tool_names == ["ctx_refresh", "ctx_check", "ctx_export", "ctx_reset"]
+    assert tool_names == ["ctx_refresh", "ctx_check", "ctx_export", "ctx_reset", "ctx_board", "ctx_global_board"]
 
 
 def test_unknown_method_returns_jsonrpc_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -295,3 +295,66 @@ def test_mcp_manifest_file_exists() -> None:
 
     assert manifest["mcpServers"]["ctx"]["command"] == "ctx"
     assert manifest["mcpServers"]["ctx"]["args"] == ["serve", "--mcp"]
+
+
+def test_mcp_board_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ctx_board MCP tool returns board data."""
+    import ctx.stats_board as sb_module
+
+    fake_board = {
+        "schema_version": 1,
+        "repo": str(tmp_path),
+        "aggregate": {"run_count": 2, "total_tokens_used": 5000},
+        "per_model": {},
+        "recent_runs": [],
+    }
+
+    monkeypatch.setattr(sb_module, "read_board", lambda root, config, *, since=None: fake_board)
+
+    target = tmp_path / "repo"
+    target.mkdir()
+
+    responses = _run_server(
+        monkeypatch,
+        tmp_path,
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "ctx_board", "arguments": {"path": "repo"}},
+            }
+        ),
+    )
+
+    payload = json.loads(responses[0]["result"]["content"][0]["text"])
+    assert payload["aggregate"]["run_count"] == 2
+
+
+def test_mcp_global_board_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ctx_global_board MCP tool returns global data."""
+    import ctx.stats_board as sb_module
+
+    fake_global = {
+        "schema_version": 1,
+        "repos": {"/repo/a": {"run_count": 3}},
+        "totals": {"total_runs": 3, "repos_touched": 1},
+    }
+
+    monkeypatch.setattr(sb_module, "read_global_board", lambda **kw: fake_global)
+
+    responses = _run_server(
+        monkeypatch,
+        tmp_path,
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "ctx_global_board", "arguments": {}},
+            }
+        ),
+    )
+
+    payload = json.loads(responses[0]["result"]["content"][0]["text"])
+    assert payload["totals"]["total_runs"] == 3
