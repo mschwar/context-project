@@ -1,10 +1,13 @@
 """Click CLI entry point for ctx.
 
 Commands:
-    ctx init <path>     Generate CONTEXT.md files for a directory tree.
-    ctx update <path>   Incrementally refresh stale CONTEXT.md files.
-    ctx status [path]   Show manifest health across a directory tree.
-    ctx diff [path]     Show which CONTEXT.md files changed since last generation.
+    ctx init [path]       Bootstrap self-maintaining .ctx/ infrastructure.
+    ctx uninit [path]     Remove .ctx/ infrastructure and git hooks.
+    ctx refresh <path>    Generate or update CONTEXT.md manifests.
+    ctx check <path>      Validate manifest health and coverage.
+    ctx export <path>     Concatenate manifests for agent ingestion.
+    ctx reset <path>      Remove generated manifests.
+    ctx stats [path]      Show coverage summary or refresh history.
 """
 
 from __future__ import annotations
@@ -38,7 +41,6 @@ from ctx.llm import TRANSIENT_ERROR_PREFIX
 from ctx.generator import (
     GenerateStats,
     check_stale_dirs,
-    generate_tree,
     inspect_directory_health,
     validate_manifest_body,
     update_tree,
@@ -424,76 +426,66 @@ def refresh(
     _exit_for_broker(broker, json_mode=json_mode)
 
 
-@cli.command(hidden=True)
-@click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
-@click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "lmstudio"]), default=None, help="LLM provider.")
-@click.option("--model", default=None, help="Model ID override.")
-@click.option("--max-depth", type=int, default=None, help="Max directory depth to process.")
-@click.option("--token-budget", type=int, default=None, help="Max total tokens before stopping.")
-@click.option("--base-url", default=None, help="Custom API base URL.")
-@click.option("--cache-path", default=None, help="Disk cache file path. Set to '' to disable.")
-@click.option("--overwrite/--no-overwrite", default=True, help="Regenerate all manifests (default) or skip already-fresh ones.")
+@cli.command()
+@click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, resolve_path=True))
+@click.option("--force", is_flag=True, help="Reinitialize even if already initialized.")
 @click.pass_context
-def init(ctx: click.Context, path: str, provider: Optional[str], model: Optional[str], max_depth: Optional[int], token_budget: Optional[int], base_url: Optional[str], cache_path: Optional[str], overwrite: bool) -> None:
-    """Generate CONTEXT.md files for a directory tree."""
+def init(ctx: click.Context, path: str, force: bool) -> None:
+    """Bootstrap self-maintaining .ctx/ infrastructure in a git repo."""
+    from ctx.init import init_project, InitError
+
     json_mode = _json_mode(ctx)
-    _echo_legacy_warning("init", "refresh", json_mode=json_mode)
-    with OutputBroker(command="refresh", json_mode=json_mode) as broker:
-        progress_state = ProgressState(start_time=time.time())
-        target_path, config, spec, client, progress_cb = _build_generation_runtime(
-            path,
-            provider=provider,
-            model=model,
-            max_depth=max_depth,
-            token_budget=token_budget,
-            base_url=base_url,
-            cache_path=cache_path,
-            progress_state=progress_state,
-            json_mode=json_mode,
-        )
-
-        click.echo(f"ctx init: generating manifests for {target_path}")
-        if not overwrite:
-            click.echo("Mode: incremental (skipping fresh manifests)")
-        if config.token_budget:
-            click.echo(f"Token budget: {config.token_budget:,}")
-        with CtxLock(target_path, command="refresh"):
-            if overwrite:
-                stats = generate_tree(target_path, config, client, spec, progress=progress_cb)
+    with OutputBroker(command="init", json_mode=json_mode) as broker:
+        try:
+            result = init_project(Path(path), force=force)
+        except InitError as exc:
+            if json_mode:
+                broker.add_error("init_failed", str(exc))
             else:
-                stats = update_tree(target_path, config, client, spec, progress=progress_cb)
-        click.echo(f"Directories processed: {stats.dirs_processed}")
-        click.echo(f"Files processed: {stats.files_processed}")
-        click.echo(f"Tokens used: {stats.tokens_used}")
-        _echo_cost_summary(stats, config.provider, config.resolved_model())
-        if stats.local_batch_fallbacks > 0:
-            click.echo(f"Local batch fallbacks: {stats.local_batch_fallbacks}")
-        click.echo(f"Errors: {len(stats.errors)}")
-        _echo_generation_errors(stats)
-        _echo_budget_warning(stats, config)
-
-        cost = _estimate_cost(stats.tokens_used, config.provider, config.resolved_model())
-        broker.set_data(
-            {
-                "dirs_processed": stats.dirs_processed,
-                "dirs_skipped": stats.dirs_skipped,
-                "files_processed": stats.files_processed,
-                "tokens_used": stats.tokens_used,
-                "errors_count": len(stats.errors),
-                "budget_exhausted": stats.budget_exhausted,
-                "strategy": "full" if overwrite else "incremental",
-                "local_batch_fallbacks": stats.local_batch_fallbacks,
-            }
-        )
-        broker.set_tokens(stats.tokens_used, cost)
-        if stats.errors:
-            for error in stats.errors:
-                broker.add_error("partial_failure", error)
+                click.echo(f"Error: {exc}", err=True)
+                sys.exit(1)
+        else:
+            broker.set_data(result)
             if not json_mode:
-                sys.exit(2 if stats.budget_exhausted and not any(
-                    TRANSIENT_ERROR_PREFIX in e for e in stats.errors
-                ) else 1)
+                click.echo(f"Initialized ctx in {result['root']}")
+                click.echo(f"  .ctx/ created with {len(result['exports'])} exports")
+                click.echo(f"  Hooks installed: {', '.join(result['hooks_installed'])}")
+                click.echo(f"  Manifests refreshed: {result['manifests_refreshed']} directories")
     _exit_for_broker(broker, json_mode=json_mode)
+
+
+@cli.command()
+@click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, resolve_path=True))
+@click.pass_context
+def uninit(ctx: click.Context, path: str) -> None:
+    """Remove .ctx/ infrastructure and git hooks."""
+    from ctx.init import uninit_project, InitError
+
+    json_mode = _json_mode(ctx)
+    with OutputBroker(command="uninit", json_mode=json_mode) as broker:
+        try:
+            result = uninit_project(Path(path))
+        except InitError as exc:
+            if json_mode:
+                broker.add_error("uninit_failed", str(exc))
+            else:
+                click.echo(f"Error: {exc}", err=True)
+                sys.exit(1)
+        else:
+            broker.set_data(result)
+            if not json_mode:
+                click.echo(f"Removed ctx from {result['root']}")
+                click.echo(f"  Hooks removed: {', '.join(result['hooks_removed'])}")
+    _exit_for_broker(broker, json_mode=json_mode)
+
+
+@cli.command(name="_hook", hidden=True)
+@click.option("--trigger", required=True, help="Hook trigger type (e.g. post-commit).")
+@click.option("--root", "root_path", required=True, type=click.Path(exists=True, file_okay=False), help="Repository root.")
+def hook_entrypoint(trigger: str, root_path: str) -> None:
+    """Internal: hook entrypoint called by git hooks. Not for direct use."""
+    from ctx.init import run_hook
+    run_hook(Path(root_path), trigger)
 
 
 @cli.command(hidden=True)

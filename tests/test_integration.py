@@ -64,23 +64,24 @@ def _copy_sample_project(tmp_path: Path) -> Path:
     return destination
 
 
-def test_ctx_init_end_to_end_creates_manifests(monkeypatch, tmp_path) -> None:
+def test_ctx_refresh_end_to_end_creates_manifests(monkeypatch, tmp_path) -> None:
+    api_module = import_module("ctx.api")
     cli_module = import_module("ctx.cli")
     runner = CliRunner()
     root = _copy_sample_project(tmp_path)
 
-    monkeypatch.setattr(cli_module, "create_client", lambda config: _EndToEndFakeClient())
-    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(api_module, "create_client", lambda config: _EndToEndFakeClient())
+    monkeypatch.setattr(api_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
 
     result = runner.invoke(
         cli_module.cli,
-        ["init", str(root)],
+        ["refresh", str(root), "--force"],
         env={"ANTHROPIC_API_KEY": _placeholder("anthropic")},
     )
 
     assert result.exit_code == 0, result.output
-    assert "Directories processed: 3" in result.output
-    assert "Files processed: 4" in result.output
+    assert "Directories refreshed:" in result.output
+    assert "Files processed:" in result.output
     assert "Errors: 0" in result.output
 
     for directory in (root, root / "docs", root / "src"):
