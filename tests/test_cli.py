@@ -14,64 +14,45 @@ from ctx.config import Config
 from ctx.generator import GenerateStats
 
 
-def test_init_command_wires_dependencies_and_prints_summary(tmp_path, monkeypatch) -> None:
+def test_init_command_success(tmp_path, monkeypatch) -> None:
+    """ctx init CLI command calls init_project and prints summary."""
+    import subprocess
+    subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=str(tmp_path), capture_output=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=str(tmp_path), capture_output=True)
+    (tmp_path / "f.py").write_text("# f\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=str(tmp_path), capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=str(tmp_path), capture_output=True)
+
+    from ctx.api import RefreshResult
+    fake_result = {
+        "root": str(tmp_path),
+        "ctx_dir": str(tmp_path / ".ctx"),
+        "hooks_installed": ["post-commit", "post-checkout", "post-merge"],
+        "manifests_refreshed": 1,
+        "exports": ["CONTEXT.md", "CONTEXT-1.md", "CONTEXT-0.md"],
+        "metadata": {},
+        "force": False,
+    }
+    monkeypatch.setattr("ctx.init.init_project", lambda *a, **kw: fake_result)
+
     cli_module = import_module("ctx.cli")
     runner = CliRunner()
-    fake_config = Config(provider="openai", model="gpt-test", api_key="test-key", max_depth=3)
-    fake_spec = object()
-    fake_client = object()
-    calls: dict[str, object] = {}
+    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
 
-    def fake_load_config(target_path: Path, **kwargs) -> Config:
-        calls["load_config"] = (target_path, kwargs)
-        return fake_config
+    assert result.exit_code == 0
+    assert "Initialized ctx" in result.output
+    assert "3 exports" in result.output
+    assert "post-commit" in result.output
 
-    def fake_load_ignore_patterns(target_path: Path):
-        calls["load_ignore_patterns"] = target_path
-        return fake_spec
 
-    def fake_create_client(config: Config):
-        calls["create_client"] = config
-        return fake_client
-
-    def fake_generate_tree(root: Path, config: Config, client: object, spec: object, *, progress):
-        calls["generate_tree"] = (root, config, client, spec)
-        progress(root / "docs", 1, 2, 50)
-        progress(root, 2, 2, 99)
-        return GenerateStats(
-            dirs_processed=2,
-            files_processed=4,
-            tokens_used=99,
-            errors=["docs: synthetic failure"],
-        )
-
-    monkeypatch.setattr(cli_module, "load_config", fake_load_config)
-    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
-    monkeypatch.setattr(cli_module, "load_ignore_patterns", fake_load_ignore_patterns)
-    monkeypatch.setattr(cli_module, "create_client", fake_create_client)
-    monkeypatch.setattr(cli_module, "generate_tree", fake_generate_tree)
-
-    result = runner.invoke(
-        cli_module.cli,
-        ["init", str(tmp_path), "--provider", "openai", "--model", "gpt-test", "--max-depth", "3"],
-    )
-
+def test_init_command_non_git_error(tmp_path) -> None:
+    """ctx init on a non-git dir prints error and exits 1."""
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
     assert result.exit_code == 1
-    assert calls["load_config"] == (
-        tmp_path,
-        {"provider": "openai", "model": "gpt-test", "max_depth": 3},
-    )
-    assert calls["load_ignore_patterns"] == tmp_path
-    assert calls["create_client"] == fake_config
-    assert calls["generate_tree"] == (tmp_path, fake_config, fake_client, fake_spec)
-    assert f"ctx init: generating manifests for {tmp_path}" in result.output
-    assert "  [1/2] Processing docs" in result.output
-    assert "  [2/2] Processing" in result.output
-    assert "Directories processed: 2" in result.output
-    assert "Files processed: 4" in result.output
-    assert "Tokens used: 99" in result.output
-    assert "Errors: 1" in result.output
-    assert "docs: synthetic failure" in result.output
+    assert "Not a git repository" in result.output
 
 
 def test_update_command_wires_dependencies_and_prints_summary(tmp_path, monkeypatch) -> None:
@@ -281,62 +262,6 @@ def test_refresh_json_reports_budget_exhausted_code(tmp_path, monkeypatch) -> No
 
 
 # --- init --overwrite ---
-
-
-def test_init_no_overwrite_calls_update_tree(tmp_path, monkeypatch) -> None:
-    """ctx init --no-overwrite should delegate to update_tree (skip fresh manifests)."""
-    cli_module = import_module("ctx.cli")
-    runner = CliRunner()
-    root = _copy_sample_project(tmp_path)
-
-    fake_config = Config(provider="openai", model="gpt-test", api_key="test-key")
-    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
-    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
-    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
-    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
-
-    calls: list[str] = []
-    monkeypatch.setattr(
-        cli_module,
-        "generate_tree",
-        lambda *a, **kw: calls.append("generate") or GenerateStats(),
-    )
-    monkeypatch.setattr(
-        cli_module,
-        "update_tree",
-        lambda *a, **kw: calls.append("update") or GenerateStats(),
-    )
-
-    result = runner.invoke(cli_module.cli, ["init", "--no-overwrite", str(root)])
-
-    assert result.exit_code == 0
-    assert calls == ["update"]
-    assert "incremental" in result.output.lower()
-
-
-def test_init_default_overwrite_calls_generate_tree(tmp_path, monkeypatch) -> None:
-    """ctx init (default) should call generate_tree."""
-    cli_module = import_module("ctx.cli")
-    runner = CliRunner()
-    root = _copy_sample_project(tmp_path)
-
-    fake_config = Config(provider="openai", model="gpt-test", api_key="test-key")
-    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
-    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
-    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
-    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
-
-    calls: list[str] = []
-    monkeypatch.setattr(
-        cli_module,
-        "generate_tree",
-        lambda *a, **kw: calls.append("generate") or GenerateStats(),
-    )
-
-    result = runner.invoke(cli_module.cli, ["init", str(root)])
-
-    assert result.exit_code == 0
-    assert calls == ["generate"]
 
 
 # --- ctx diff ---
@@ -1717,50 +1642,36 @@ def test_verify_reports_invalid_manifest_body(tmp_path) -> None:
 # --- Phase 17.1: non-zero exit on refresh errors ---
 
 
-def test_init_exits_nonzero_when_errors(tmp_path, monkeypatch) -> None:
-    """ctx init should exit 1 when any directory regeneration errors."""
+def test_init_exits_nonzero_on_init_error(tmp_path, monkeypatch) -> None:
+    """ctx init should exit 1 when init_project raises InitError."""
+    from ctx.init import InitError
     cli_module = import_module("ctx.cli")
     runner = CliRunner()
-    root = _copy_sample_project(tmp_path)
 
-    fake_config = Config(provider="openai", model="gpt-test", api_key="test-key")
-    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
-    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
-    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
-    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
-    monkeypatch.setattr(
-        cli_module,
-        "generate_tree",
-        lambda *a, **kw: GenerateStats(dirs_processed=1, errors=["src: [transient, retries exhausted] Connection error"]),
-    )
+    monkeypatch.setattr("ctx.init.init_project", lambda *a, **kw: (_ for _ in ()).throw(InitError("test failure")))
 
-    result = runner.invoke(cli_module.cli, ["init", str(root)])
+    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
 
     assert result.exit_code == 1
-    assert "Errors: 1" in result.output
+    assert "test failure" in result.output
 
 
-def test_init_exits_zero_when_no_errors(tmp_path, monkeypatch) -> None:
-    """ctx init should exit 0 when all directories complete without errors."""
+def test_init_exits_zero_on_success(tmp_path, monkeypatch) -> None:
+    """ctx init should exit 0 on success."""
     cli_module = import_module("ctx.cli")
     runner = CliRunner()
-    root = _copy_sample_project(tmp_path)
 
-    fake_config = Config(provider="openai", model="gpt-test", api_key="test-key")
-    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
-    monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
-    monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
-    monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
-    monkeypatch.setattr(
-        cli_module,
-        "generate_tree",
-        lambda *a, **kw: GenerateStats(dirs_processed=2, files_processed=4, tokens_used=50),
-    )
+    fake_result = {
+        "root": str(tmp_path), "ctx_dir": str(tmp_path / ".ctx"),
+        "hooks_installed": ["post-commit"], "manifests_refreshed": 1,
+        "exports": ["CONTEXT.md"], "metadata": {}, "force": False,
+    }
+    monkeypatch.setattr("ctx.init.init_project", lambda *a, **kw: fake_result)
 
-    result = runner.invoke(cli_module.cli, ["init", str(root)])
+    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
 
     assert result.exit_code == 0
-    assert "Errors: 0" in result.output
+    assert "Initialized ctx" in result.output
 
 
 def test_update_exits_nonzero_when_errors(tmp_path, monkeypatch) -> None:
@@ -1950,32 +1861,15 @@ def test_setup_check_skips_probe_for_local_providers(tmp_path, monkeypatch) -> N
 # --- Phase 18.1: pre-flight connectivity check ---
 
 
-def test_init_preflight_exits_on_connectivity_failure(tmp_path, monkeypatch) -> None:
-    """ctx init should exit 1 before spending tokens if provider is unreachable."""
+def test_init_non_git_shows_error(tmp_path) -> None:
+    """ctx init on a non-git directory shows a clear error message."""
     cli_module = import_module("ctx.cli")
     runner = CliRunner()
-    root = _copy_sample_project(tmp_path)
 
-    fake_config = Config(provider="anthropic", model="claude-test", api_key="test-key")
-    monkeypatch.setattr(cli_module, "load_config", lambda *a, **kw: fake_config)
-    monkeypatch.setattr(
-        cli_module,
-        "probe_provider_connectivity",
-        lambda provider, api_key, base_url=None: (False, "Connection error: refused"),
-    )
-
-    generate_calls: list[str] = []
-    monkeypatch.setattr(
-        cli_module,
-        "generate_tree",
-        lambda *a, **kw: generate_calls.append("called") or GenerateStats(),
-    )
-
-    result = runner.invoke(cli_module.cli, ["init", str(root)])
+    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
 
     assert result.exit_code == 1
-    assert "Pre-flight check failed" in result.output
-    assert not generate_calls  # LLM should never have been called
+    assert "Not a git repository" in result.output
 
 
 def test_update_preflight_exits_on_connectivity_failure(tmp_path, monkeypatch) -> None:
@@ -2025,11 +1919,11 @@ def test_preflight_skipped_for_local_providers(tmp_path, monkeypatch) -> None:
     )
     monkeypatch.setattr(
         cli_module,
-        "generate_tree",
+        "update_tree",
         lambda *a, **kw: GenerateStats(dirs_processed=1),
     )
 
-    result = runner.invoke(cli_module.cli, ["init", str(root)])
+    result = runner.invoke(cli_module.cli, ["update", str(root)])
 
     assert result.exit_code == 0
     assert not probe_calls
@@ -2050,7 +1944,7 @@ def test_preflight_shows_proxy_guidance_on_failure(tmp_path, monkeypatch) -> Non
     )
     monkeypatch.setenv("ALL_PROXY", "http://broken:9999")
 
-    result = runner.invoke(cli_module.cli, ["init", str(root)])
+    result = runner.invoke(cli_module.cli, ["update", str(root)])
 
     assert result.exit_code == 1
     assert "ALL_PROXY" in result.output
@@ -2073,14 +1967,14 @@ def test_preflight_passes_and_generation_proceeds(tmp_path, monkeypatch) -> None
     )
     monkeypatch.setattr(
         cli_module,
-        "generate_tree",
+        "update_tree",
         lambda *a, **kw: GenerateStats(dirs_processed=2, files_processed=5, tokens_used=100),
     )
 
-    result = runner.invoke(cli_module.cli, ["init", str(root)])
+    result = runner.invoke(cli_module.cli, ["update", str(root)])
 
     assert result.exit_code == 0
-    assert "Directories processed: 2" in result.output
+    assert "Directories refreshed: 2" in result.output
 
 
 # --- Phase 18.2: proxy guidance in transient error tip ---
@@ -2103,7 +1997,7 @@ def test_transient_errors_show_proxy_guidance_when_proxy_set(tmp_path, monkeypat
     )
     monkeypatch.setattr(
         cli_module,
-        "generate_tree",
+        "update_tree",
         lambda *a, **kw: GenerateStats(
             dirs_processed=1,
             errors=["src: [transient, retries exhausted] Connection error"],
@@ -2111,7 +2005,7 @@ def test_transient_errors_show_proxy_guidance_when_proxy_set(tmp_path, monkeypat
     )
     monkeypatch.setenv("HTTPS_PROXY", "http://broken:8080")
 
-    result = runner.invoke(cli_module.cli, ["init", str(root)])
+    result = runner.invoke(cli_module.cli, ["update", str(root)])
 
     assert result.exit_code == 1
     assert "HTTPS_PROXY" in result.output
@@ -2135,7 +2029,7 @@ def test_transient_errors_no_proxy_guidance_when_no_proxy_set(tmp_path, monkeypa
     )
     monkeypatch.setattr(
         cli_module,
-        "generate_tree",
+        "update_tree",
         lambda *a, **kw: GenerateStats(
             dirs_processed=1,
             errors=["src: [transient, retries exhausted] Connection error"],
@@ -2145,7 +2039,7 @@ def test_transient_errors_no_proxy_guidance_when_no_proxy_set(tmp_path, monkeypa
     for v in cli_module.PROXY_ENV_VARS:
         monkeypatch.delenv(v, raising=False)
 
-    result = runner.invoke(cli_module.cli, ["init", str(root)])
+    result = runner.invoke(cli_module.cli, ["update", str(root)])
 
     assert result.exit_code == 1
     assert "Proxy env vars" not in result.output
@@ -2249,10 +2143,10 @@ def test_echo_cost_summary_format(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
     monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
     monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
-    monkeypatch.setattr(cli_module, "generate_tree", fake_generate)
-    
-    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
-    
+    monkeypatch.setattr(cli_module, "update_tree", fake_generate)
+
+    result = runner.invoke(cli_module.cli, ["update", str(tmp_path)])
+
     assert result.exit_code == 0
     assert "Estimated cost:" in result.output
     # 50k tokens at $3/MTok = $0.15
@@ -2275,10 +2169,10 @@ def test_echo_cost_summary_local_provider(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
     monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
     monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
-    monkeypatch.setattr(cli_module, "generate_tree", fake_generate)
-    
-    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
-    
+    monkeypatch.setattr(cli_module, "update_tree", fake_generate)
+
+    result = runner.invoke(cli_module.cli, ["update", str(tmp_path)])
+
     assert result.exit_code == 0
     assert "Estimated cost: $0.00 (local provider)" in result.output
 
@@ -2298,10 +2192,10 @@ def test_echo_cost_summary_zero_tokens(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cli_module, "load_ignore_patterns", lambda *a, **kw: object())
     monkeypatch.setattr(cli_module, "create_client", lambda *a, **kw: object())
     monkeypatch.setattr(cli_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
-    monkeypatch.setattr(cli_module, "generate_tree", fake_generate)
-    
-    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
-    
+    monkeypatch.setattr(cli_module, "update_tree", fake_generate)
+
+    result = runner.invoke(cli_module.cli, ["update", str(tmp_path)])
+
     assert result.exit_code == 0
     assert "Estimated cost:" not in result.output
 

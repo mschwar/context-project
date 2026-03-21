@@ -146,14 +146,14 @@ def test_setup_exits_1_when_no_provider_detected(tmp_path, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_init_shows_setup_hint_on_missing_api_key(tmp_path, monkeypatch) -> None:
+def test_refresh_shows_setup_hint_on_missing_api_key(tmp_path, monkeypatch) -> None:
     cli_module = import_module("ctx.cli")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("CTX_PROVIDER", raising=False)
 
     runner = CliRunner()
-    result = runner.invoke(cli_module.cli, ["init", str(tmp_path)])
+    result = runner.invoke(cli_module.cli, ["update", str(tmp_path)])
 
     assert result.exit_code != 0
     assert "ctx setup" in result.output
