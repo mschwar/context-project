@@ -42,7 +42,7 @@ def _global_stats_path() -> Path:
     return global_dir / "run_stats.json"
 
 
-def _load_json_safe(path: Path, default: dict) -> dict:
+def load_json_safe(path: Path, default: dict) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
@@ -52,7 +52,7 @@ def _load_json_safe(path: Path, default: dict) -> dict:
     return default
 
 
-def _save_json_atomic(path: Path, data: dict) -> None:
+def save_json_atomic(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent)
     try:
@@ -124,7 +124,7 @@ def _build_run_record(result, config) -> dict:
 def _update_global(global_path: Path, repo_key: str, record: dict) -> None:
     for attempt in range(_GLOBAL_WRITE_RETRIES):
         try:
-            existing = _load_json_safe(global_path, {"schema_version": 1, "repos": {}, "totals": {}})
+            existing = load_json_safe(global_path, {"schema_version": 1, "repos": {}, "totals": {}})
             repos = existing.get("repos", {})
             if not isinstance(repos, dict):
                 repos = {}
@@ -150,7 +150,7 @@ def _update_global(global_path: Path, repo_key: str, record: dict) -> None:
                 "total_cost_saved_usd": round(sum(r.get("total_cost_saved_usd", 0.0) for r in repos.values()), 6),
             }
 
-            _save_json_atomic(global_path, {"schema_version": 1, "repos": repos, "totals": totals})
+            save_json_atomic(global_path, {"schema_version": 1, "repos": repos, "totals": totals})
             return
         except (OSError, PermissionError):
             if attempt < _GLOBAL_WRITE_RETRIES - 1:
@@ -166,12 +166,12 @@ def record_run(root: Path, result, config) -> None:
 
         per_repo_path = _run_stats_path(root, config)
         if per_repo_path is not None:
-            existing = _load_json_safe(per_repo_path, {"schema_version": 1, "runs": []})
+            existing = load_json_safe(per_repo_path, {"schema_version": 1, "runs": []})
             runs = existing.get("runs", [])
             if not isinstance(runs, list):
                 runs = []
             runs.append(record)
-            _save_json_atomic(per_repo_path, {"schema_version": 1, "runs": runs})
+            save_json_atomic(per_repo_path, {"schema_version": 1, "runs": runs})
 
         global_path = _global_stats_path()
         _update_global(global_path, repo_key, record)
@@ -225,7 +225,7 @@ def read_board(root: Path, config, *, since: str | None = None) -> dict:
     if per_repo_path is None:
         runs = []
     else:
-        data = _load_json_safe(per_repo_path, {"schema_version": 1, "runs": []})
+        data = load_json_safe(per_repo_path, {"schema_version": 1, "runs": []})
         runs = data.get("runs", [])
         if not isinstance(runs, list):
             runs = []
@@ -277,7 +277,7 @@ def read_trend(root: Path, config, count: int = 20) -> list[dict]:
     per_repo_path = _run_stats_path(root, config)
     if per_repo_path is None:
         return []
-    data = _load_json_safe(per_repo_path, {"schema_version": 1, "runs": []})
+    data = load_json_safe(per_repo_path, {"schema_version": 1, "runs": []})
     runs = data.get("runs", [])
     if not isinstance(runs, list):
         return []
@@ -299,5 +299,5 @@ def read_trend(root: Path, config, count: int = 20) -> list[dict]:
 def read_global_board(global_path: Path | None = None) -> dict:
     if global_path is None:
         global_path = _global_stats_path()
-    data = _load_json_safe(global_path, {"schema_version": 1, "repos": {}, "totals": {}})
+    data = load_json_safe(global_path, {"schema_version": 1, "repos": {}, "totals": {}})
     return data

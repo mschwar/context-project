@@ -14,9 +14,9 @@ from ctx.config import Config
 from ctx.stats_board import (
     _build_run_record,
     _global_stats_path,
-    _load_json_safe,
+    load_json_safe,
     _run_stats_path,
-    _save_json_atomic,
+    save_json_atomic,
     _update_global,
     read_board,
     read_global_board,
@@ -266,7 +266,7 @@ def test_atomic_write_is_safe(tmp_path) -> None:
     target = tmp_path / "out.json"
     data = {"schema_version": 1, "runs": [{"ts": "2026-01-01T00:00:00.000Z"}]}
 
-    _save_json_atomic(target, data)
+    save_json_atomic(target, data)
 
     assert target.exists()
     loaded = json.loads(target.read_text(encoding="utf-8"))
@@ -337,7 +337,7 @@ def test_read_board_per_model(tmp_path) -> None:
 
 
 def test_read_board_since_filter(tmp_path) -> None:
-    from ctx.stats_board import _save_json_atomic, _run_stats_path
+    from ctx.stats_board import save_json_atomic, _run_stats_path
     root = tmp_path / "repo"
     root.mkdir()
     config = _make_config()
@@ -357,7 +357,7 @@ def test_read_board_since_filter(tmp_path) -> None:
 
     stats_path = _run_stats_path(root, config)
     stats_path.parent.mkdir(parents=True, exist_ok=True)
-    _save_json_atomic(stats_path, {"schema_version": 1, "runs": [old_run, new_run]})
+    save_json_atomic(stats_path, {"schema_version": 1, "runs": [old_run, new_run]})
 
     # Without filter: both runs
     board = read_board(root, config)
@@ -426,7 +426,7 @@ def test_global_retry_on_failure(tmp_path, monkeypatch) -> None:
     """_update_global should retry on OSError."""
     import ctx.stats_board as sb
     attempts = []
-    original_save = sb._save_json_atomic
+    original_save = sb.save_json_atomic
 
     def flaky_save(path, data):
         attempts.append(1)
@@ -434,7 +434,7 @@ def test_global_retry_on_failure(tmp_path, monkeypatch) -> None:
             raise OSError("busy")
         return original_save(path, data)
 
-    monkeypatch.setattr(sb, "_save_json_atomic", flaky_save)
+    monkeypatch.setattr(sb, "save_json_atomic", flaky_save)
     monkeypatch.setattr(sb, "_GLOBAL_WRITE_BACKOFF_SECONDS", 0.001)  # fast for tests
 
     from ctx.stats_board import _update_global, _build_run_record
