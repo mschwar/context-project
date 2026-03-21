@@ -15,7 +15,7 @@ pip install ctx-tool
 
 - Requires Python 3.10+
 - Current CLI command: `ctx`
-- Current release line: `1.0.0`
+- Current release line: `1.1.0`
 - Machine-readable mode: set `CTX_OUTPUT=json` or pass `--output json`
 - HTTP server mode: install `ctx-tool[serve]`
 
@@ -59,6 +59,46 @@ cache_path: .ctx-cache/llm_cache.json
 | `CTX_EXTENSIONS` | all text files | Comma-separated extension allowlist |
 
 ## Commands
+### `ctx init [path]`
+
+Bootstrap self-maintaining `.ctx/` infrastructure in a git repository. This is the recommended first command for any new repo.
+
+What it does:
+1. Generates initial manifests via `ctx refresh`
+2. Creates `.ctx/` directory with depth-tiered exports (CONTEXT.md, CONTEXT-1.md, CONTEXT-0.md)
+3. Writes `metadata.json` and `.ctx/.gitignore`
+4. Installs git hooks (post-commit, post-checkout, post-merge) that auto-refresh manifests in the background
+5. Adds `.ctx/` to root `.gitignore`
+
+Common flags:
+- `--force` — reinitialize even if `.ctx/` already exists
+
+After init, manifests auto-refresh on every git commit, checkout, and merge via background hooks. No manual `ctx refresh` needed.
+
+### `ctx uninit [path]`
+
+Remove `.ctx/` infrastructure and git hooks from a repository. Reverses everything `ctx init` created.
+
+What it does:
+1. Removes ctx blocks from git hook files (preserves non-ctx hook content)
+2. Removes `.ctx/` directory
+3. Removes `.ctx/` entry from root `.gitignore`
+
+### `.ctx/` Directory Structure
+
+After `ctx init`, the `.ctx/` directory contains:
+
+| File | Purpose |
+|------|---------|
+| `CONTEXT.md` | Full-depth export of all manifests |
+| `CONTEXT-1.md` | Depth-1 export (root + immediate children) |
+| `CONTEXT-0.md` | Depth-0 export (root only) |
+| `metadata.json` | Init metadata: version, timestamps, repo ID, hook list |
+| `hook_log.json` | Hook telemetry: trigger type, duration, success/failure |
+| `.gitignore` | Ignores all `.ctx/` contents from git |
+
+The `.ctx/` exports are refreshed automatically by git hooks after every commit, checkout, or merge. SDK consumers and agents can read these pre-compiled exports without running `ctx export`.
+
 ### `ctx refresh <path>`
 
 Generate or update `CONTEXT.md` manifests using the fastest valid strategy for the tree.
@@ -300,10 +340,12 @@ If `ctx check` still reports stale manifests, rerun `ctx refresh . --force` on t
 When an incoming agent lands in an unfamiliar repo:
 
 ```bash
-ctx check . --output json
-ctx refresh . --output json
-ctx export . --depth 1 --output json
+ctx init .                          # one-time: creates .ctx/ + hooks + manifests
+ctx check . --output json           # verify health
+ctx export . --depth 1 --output json  # ingest manifests
 ```
+
+If already initialized (`.ctx/` exists), skip `ctx init` and use `ctx refresh .` to update.
 
 ### CI Freshness Gate
 
@@ -326,6 +368,8 @@ repos:
 
 | User phrase | Canonical command |
 |-------------|-------------------|
+| `set up ctx` / `initialize ctx` / `bootstrap ctx` | `ctx init .` |
+| `remove ctx` / `uninstall ctx hooks` / `teardown ctx` | `ctx uninit .` |
 | `update ctx` / `update context` / `refresh manifests` | `ctx refresh .` |
 | `check ctx` / `is context fresh` | `ctx check .` |
 | `show me the context` / `what's in this repo` | `ctx export . --depth 1` |
