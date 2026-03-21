@@ -3,7 +3,7 @@
 Current development status and upcoming milestones.
 
 ## Current Health (March 2026)
-- **Status:** Stable. Phases 1–21, Phase 24, and Phase 25 are complete; AFO Stages 1–6 are complete and closeout is documented.
+- **Status:** Stable. Phases 1–21, Phase 24, Phase 25, and Phase 28 are complete; AFO Stages 1–6 are complete and closeout is documented.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache. Rate limit handling uses Retry-After headers with 60s backoff ceiling and 5 retry attempts. Mid-level budget enforcement via `threading.Event`. Configurable concurrency defaults to 1 worker for cloud providers, 4 for local.
 - **Test Coverage:** 432 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
@@ -12,7 +12,8 @@ Current development status and upcoming milestones.
 - **Exit Codes:** 0 = success, 1 = error, 2 = partial success (budget exhausted, no real errors).
 - **Manifest Trust:** refresh is git-optional on extracted trees, `## Files` / `## Subdirectories` are rendered deterministically from the real filesystem, `ctx check --verify` validates manifest bodies, UTF-8 boundary reads no longer misclassify valid text as binary, and local-provider fallback counts are surfaced in CLI/API results.
 - **Documentation:** `AGENTS.md` is now the machine-readable onboarding contract, `README.md` is demoted to a short human-facing pitch, and generated manifests append a source footer.
-- **MCP Integration:** `ctx serve --mcp` now exposes a stdio JSON-RPC server backed by `api.py`; HTTP serving remains available via the optional `[serve]` extra.
+- **MCP Integration:** `ctx serve --mcp` now exposes a stdio JSON-RPC server backed by `api.py`; HTTP serving remains available via the optional `[serve]` extra. The MCP server now includes `ctx_board` and `ctx_global_board` tools for reading running board data.
+- **Running Board:** `ctx stats --board` displays a persistent refresh history (per-repo and global). Supports `--since` time filters, `--trend` sparklines, per-model cost breakdown, and `--format csv` export. Stats are recorded automatically after every non-dry-run `ctx refresh`.
 - **Pricing:** Updated for Claude 4.x (Opus/Sonnet/Haiku) and GPT-4.1 models. Default fallback is 0.80 (Haiku 4.5 pricing).
 
 ## Completed Milestones
@@ -431,10 +432,10 @@ Persistent, append-only stats ledger that accumulates across every `ctx refresh`
 
 **Surface:** `ctx stats --board` (per-repo) and `ctx stats --board --global` (cross-repo aggregate). Machine-readable via `--format json`.
 
-- [ ] **28.1 Per-repo stats ledger** — append run metadata (timestamp, dirs processed, tokens, cost, cache hits) to `.ctx-cache/stats.json` after every `ctx refresh`. Read-only from `ctx stats --board`.
-- [ ] **28.2 Global stats aggregation** — aggregate per-repo stats into `~/.ctx/stats.json`. Updated on each run. Surface via `ctx stats --board --global`.
-- [ ] **28.3 Cache savings tracking** — track cache hit count and estimated tokens/cost saved per run. Requires instrumenting `CachingLLMClient` to report hits vs misses.
-- [ ] **28.4 Board export** — `ctx stats --board --format json` for machine-readable export. Foundation for future public-facing leaderboard webpage (dirs, files, model, cost, tokens saved, money saved).
+- [x] **28.1 Per-repo stats ledger** — append run metadata (timestamp, dirs processed, tokens, cost, cache hits) to `.ctx-cache/run_stats.json` after every `ctx refresh`. Read-only from `ctx stats --board`.
+- [x] **28.2 Global stats aggregation** — aggregate per-repo stats into `~/.ctx/run_stats.json`. Updated on each run. Surface via `ctx stats --board --global`.
+- [x] **28.3 Cache savings tracking** — track cache hit count and estimated tokens/cost saved per run. `CachingLLMClient` now reports hits vs misses via `hit_miss_counts` property.
+- [x] **28.4 Board export** — `ctx stats --board --format json` (and `--format csv`) for machine-readable export. Foundation for future public-facing leaderboard webpage. Beyond-spec additions: `--since` filter, `--trend` sparklines, per-model breakdown, and `ctx_board`/`ctx_global_board` MCP tools.
 
 ### Adoption
 

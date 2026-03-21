@@ -213,6 +213,18 @@ Common flags:
 }
 ```
 
+### `ctx stats [path]`
+
+Show coverage summary or refresh history for a directory tree.
+
+Common flags:
+- `--board` — show the running board (refresh history) instead of coverage table
+- `--global` — show global running board across all repos (with `--board`)
+- `--since <window>` — filter board runs to a time window (e.g. `7d`, `4w`, `2026-03-01`)
+- `--trend` — show cost and cache-hit sparklines in board output
+- `--format text|json|csv` — output format (`csv` available with `--board`)
+- `--verbose` — per-directory breakdown (coverage mode)
+
 ## Exit Codes
 | Code | Meaning |
 |------|---------|
@@ -250,6 +262,17 @@ Project-local `.mcp.json`:
   }
 }
 ```
+
+Available MCP tools exposed by `ctx serve --mcp`:
+
+| Tool | Description |
+|------|-------------|
+| `ctx_refresh` | Generate or update manifests for a path |
+| `ctx_check` | Validate manifest health and coverage |
+| `ctx_export` | Concatenate manifests for ingestion |
+| `ctx_reset` | Remove generated manifests |
+| `ctx_board` | Read the per-repo running board (refresh history, cost analytics, per-model breakdown) |
+| `ctx_global_board` | Read the global running board across all repos |
 
 ### Session Bootstrap
 
