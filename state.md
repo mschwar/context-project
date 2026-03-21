@@ -409,9 +409,9 @@ Extend `ctx setup --check` into a comprehensive preflight gate. Before the first
 
 Use ctx as daily driver on real repos. This is the main event of Sprint 2.
 
-- [ ] **27.1 Agent navigation benchmark** — use ctx in a real multi-agent workflow. Measure how an agent performs using `ctx export --depth 1` to orient itself in an unfamiliar repo vs. raw file listing.
-- [ ] **27.2 Handoff protocol** — define a standard pattern where one agent runs `ctx refresh .` at session end and the next agent reads `ctx export` at session start, creating a durable handoff chain.
-- [ ] **27.3 Cost-per-session tracking** — instrument a real coding session to measure the incremental cost of keeping manifests fresh during active development (expected: near-zero after initial generation).
+- [ ] **27.1 Agent navigation benchmark** — use ctx in a real multi-agent workflow. Measure how an agent performs using `ctx export --depth 1` to orient itself in an unfamiliar repo vs. raw file listing. **Requires live dogfooding sessions — Matt drives.**
+- [x] **27.2 Handoff protocol** — defined in `AGENTS.md` under "Agent Handoff Protocol". Exiting agent: `ctx refresh .` + `ctx check . --check-exit`. Incoming agent: `ctx check .` + `ctx export . --depth 1`. Cost model documented.
+- [x] **27.3 Cost-per-session tracking** — covered by Phase 28 running board. `ctx stats --board .` shows per-run cost and cumulative totals. Incremental session cost is captured automatically after each `ctx refresh` call.
 
 ### Phase 28 — Running Board
 

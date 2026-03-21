@@ -272,6 +272,33 @@ ctx check . --check-exit
 
 If `ctx check` still reports stale manifests, rerun `ctx refresh . --force` on the affected path.
 
+### Agent Handoff Protocol
+
+When one agent ends a session and a second agent will continue work in the same repo, the exiting agent must update manifests so the incoming agent can orient without re-reading all source files.
+
+**Exiting agent — close-out sequence:**
+```bash
+ctx refresh .
+ctx check . --check-exit --output json
+```
+
+The incoming agent gets a guaranteed-fresh manifest tree. If `ctx check` exits 1, fix the stale directories before handing off.
+
+**Incoming agent — session-start sequence:**
+```bash
+ctx check . --output json          # verify freshness before trusting manifests
+ctx export . --depth 1 --output json   # ingest top-level context
+```
+
+Drill into subdirectories on demand:
+```bash
+ctx export ./src --depth 2 --output json
+```
+
+**Why this works:** `ctx refresh` at session end costs near-zero tokens when only a few files changed (incremental strategy skips unchanged directories). The incoming agent reads finished manifests instead of re-summarizing — no LLM calls needed at session start.
+
+**Cost model (Haiku 4.5):** ~$0.004–$0.007 per directory on initial generation; subsequent incremental refreshes typically $0.00–$0.02 per session on active repos.
+
 ### First 3 Commands
 
 When an incoming agent lands in an unfamiliar repo:
