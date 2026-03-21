@@ -241,6 +241,17 @@ def _display_status_path(path: str) -> str:
     return "." if path == "." else f"./{path}"
 
 
+def _sparkline(values: list[float]) -> str:
+    """Render a list of values as an ASCII sparkline."""
+    if not values:
+        return ""
+    blocks = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
+    lo, hi = min(values), max(values)
+    if lo == hi:
+        return blocks[4] * len(values)
+    return "".join(blocks[min(int((v - lo) / (hi - lo) * 7), 7)] for v in values)
+
+
 def _json_mode(ctx: click.Context) -> bool:
     return bool(ctx.obj and ctx.obj.get("json_mode"))
 
@@ -1274,11 +1285,13 @@ def export(ctx: click.Context, path: str, output: Optional[str], filter_mode: st
 @cli.command(hidden=True)
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--verbose", "-v", is_flag=True, help="Show per-directory breakdown table.")
-@click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format.")
+@click.option("--format", "output_format", type=click.Choice(["text", "json", "csv"]), default="text", help="Output format.")
 @click.option("--board", is_flag=True, help="Show the running board (refresh history).")
 @click.option("--global", "show_global", is_flag=True, help="Show global running board across all repos.")
+@click.option("--since", default=None, help="Filter runs to a time window (e.g. 7d, 4w, 2026-03-01).")
+@click.option("--trend", is_flag=True, help="Show cost and cache-hit sparklines.")
 @click.pass_context
-def stats(ctx: click.Context, path: str, verbose: bool, output_format: str, board: bool, show_global: bool) -> None:
+def stats(ctx: click.Context, path: str, verbose: bool, output_format: str, board: bool, show_global: bool, since: Optional[str], trend: bool) -> None:
     """Show coverage summary across all directories.
 
     Reports:
@@ -1294,7 +1307,7 @@ def stats(ctx: click.Context, path: str, verbose: bool, output_format: str, boar
         root = Path(path).resolve()
 
         if board:
-            from ctx.stats_board import read_board, read_global_board
+            from ctx.stats_board import read_board, read_global_board, read_trend
             from ctx.config import load_config as _load_cfg
 
             if show_global:
@@ -1332,9 +1345,18 @@ def stats(ctx: click.Context, path: str, verbose: bool, output_format: str, boar
                 except Exception:
                     from ctx.config import Config as _Cfg
                     config = _Cfg()
-                board_data = read_board(root, config)
+                board_data = read_board(root, config, since=since)
                 broker.set_data(board_data)
-                if output_format == "json" and not json_mode:
+                if output_format == "csv" and not json_mode:
+                    recent = board_data.get("recent_runs", [])
+                    if recent:
+                        headers = list(recent[0].keys())
+                        click.echo(",".join(headers))
+                        for run in recent:
+                            click.echo(",".join(str(run.get(h, "")) for h in headers))
+                    else:
+                        click.echo("No runs recorded yet.")
+                elif output_format == "json" and not json_mode:
                     click.echo(json.dumps(board_data, indent=2))
                 else:
                     agg = board_data.get("aggregate", {})
@@ -1369,6 +1391,23 @@ def stats(ctx: click.Context, path: str, verbose: bool, output_format: str, boar
                                     f"  ${run.get('est_cost_usd', 0.0):.3f}"
                                     f"  {r_hr_pct}% cache"
                                 )
+                        per_model = board_data.get("per_model", {})
+                        if per_model:
+                            click.echo("\nPer-model breakdown:")
+                            for model_key, model_val in per_model.items():
+                                click.echo(
+                                    f"  {model_key:<40} {model_val.get('run_count', 0):3d} runs"
+                                    f"  {model_val.get('total_tokens_used', 0):>8} tokens"
+                                    f"  ${model_val.get('total_cost_usd', 0.0):.3f}"
+                                )
+                        if trend:
+                            trend_data = read_trend(root, config)
+                            if trend_data:
+                                costs = [t["est_cost_usd"] for t in trend_data]
+                                hit_rates = [t["cache_hit_rate"] for t in trend_data]
+                                click.echo(f"\nTrend (last {len(trend_data)} runs):")
+                                click.echo(f"  Cost:      {_sparkline(costs)}")
+                                click.echo(f"  Cache hit: {_sparkline(hit_rates)}")
             _exit_for_broker(broker, json_mode=json_mode)
             return
 
