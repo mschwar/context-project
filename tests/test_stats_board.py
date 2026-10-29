@@ -445,3 +445,53 @@ def test_global_retry_on_failure(tmp_path, monkeypatch) -> None:
     _update_global(global_path, "/test", record)
     assert len(attempts) == 3  # failed twice, succeeded on third
     assert global_path.exists()
+
+
+def test_prune_runs_keeps_more_generous_of_count_or_days() -> None:
+    from datetime import datetime, timezone
+    from ctx.stats_board import prune_runs
+
+    now = datetime(2026, 10, 29, 0, 0, 0, tzinfo=timezone.utc)
+    old_runs = [{"ts": f"2026-01-{(i % 28) + 1:02d}T00:00:00.000Z", "id": i} for i in range(8)]
+    recent_runs = [{"ts": f"2026-10-{(i % 28) + 1:02d}T00:00:00.000Z", "id": 100 + i} for i in range(3)]
+    combined = old_runs + recent_runs  # 11 runs total
+
+    # max_runs=5 is more generous than the 3 recent runs within 90 days -> keeps last 5
+    pruned_by_count = prune_runs(combined, max_runs=5, retention_days=90, now=now)
+    assert len(pruned_by_count) == 5
+    assert [r["id"] for r in pruned_by_count] == [6, 7, 100, 101, 102]
+
+    # When recent runs (6) exceed max_runs (4), 90-day window is more generous -> keeps all 6 recent runs
+    many_recent = old_runs[:2] + [{"ts": "2026-10-15T00:00:00.000Z", "id": 200 + i} for i in range(6)]
+    pruned_by_age = prune_runs(many_recent, max_runs=4, retention_days=90, now=now)
+    assert len(pruned_by_age) == 6
+    assert all(r["id"] >= 200 for r in pruned_by_age)
+
+
+def test_record_run_prunes_old_per_repo_records_without_affecting_global(tmp_path, monkeypatch) -> None:
+    import ctx.stats_board as sb
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    global_path = tmp_path / "global.json"
+    monkeypatch.setattr(sb, "_global_stats_path", lambda: global_path)
+    monkeypatch.setattr(sb, "DEFAULT_MAX_RUNS", 3)
+
+    config = _make_config()
+    stats_path = _run_stats_path(root, config)
+    stats_path.parent.mkdir(parents=True, exist_ok=True)
+    # Seed 4 ancient runs (>90 days old)
+    ancient_runs = [
+        {"ts": f"2020-01-0{i}T00:00:00.000Z", "dirs_processed": 1, "tokens_used": 100}
+        for i in range(1, 5)
+    ]
+    save_json_atomic(stats_path, {"schema_version": 1, "runs": ancient_runs})
+
+    # Record a 5th run (now); with DEFAULT_MAX_RUNS=3 and only 1 recent run, last 3 are kept
+    record_run(root, _make_result(tokens_used=500), config)
+
+    per_repo = json.loads(stats_path.read_text(encoding="utf-8"))
+    assert len(per_repo["runs"]) == 3
+    global_data = json.loads(global_path.read_text(encoding="utf-8"))
+    assert global_data["totals"]["total_runs"] == 1
+

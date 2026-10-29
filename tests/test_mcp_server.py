@@ -377,12 +377,14 @@ def test_resources_list_exposes_ctx_exports(monkeypatch: pytest.MonkeyPatch, tmp
         ".ctx/CONTEXT-1.md",
         ".ctx/CONTEXT-0.md",
         ".ctx/metadata.json",
+        ".ctx/hook_log.json",
     ]
     assert uris == [
         "ctx://.ctx/CONTEXT.md",
         "ctx://.ctx/CONTEXT-1.md",
         "ctx://.ctx/CONTEXT-0.md",
         "ctx://.ctx/metadata.json",
+        "ctx://.ctx/hook_log.json",
     ]
 
 
@@ -393,6 +395,7 @@ def test_resources_list_exposes_ctx_exports(monkeypatch: pytest.MonkeyPatch, tmp
         ("ctx://.ctx/CONTEXT-1.md", "CONTEXT-1.md", "text/markdown", "# Depth-1 export\n"),
         ("ctx://.ctx/CONTEXT-0.md", "CONTEXT-0.md", "text/markdown", "# Depth-0 export\n"),
         ("ctx://.ctx/metadata.json", "metadata.json", "application/json", '{"schema_version": 1}\n'),
+        ("ctx://.ctx/hook_log.json", "hook_log.json", "application/json", '{"runs": [{"trigger": "post-commit"}]}\n'),
         (".ctx/CONTEXT-1.md", "CONTEXT-1.md", "text/markdown", "# Shorthand relative URI\n"),
     ],
 )
@@ -517,4 +520,30 @@ def test_resources_read_blocks_path_traversal(
     error = responses[0]["error"]
     assert error["code"] == -32602
     assert error["data"]["code"] == "path_traversal_denied"
+
+
+def test_resources_read_hook_log_defaults_to_empty_runs_when_initialized(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ctx_dir = tmp_path / ".ctx"
+    ctx_dir.mkdir()
+    (ctx_dir / "metadata.json").write_text('{"schema_version": 1}\n', encoding="utf-8")
+
+    responses = _run_server(
+        monkeypatch,
+        tmp_path,
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "resources/read",
+                "params": {"uri": "ctx://.ctx/hook_log.json"},
+            }
+        ),
+    )
+
+    contents = responses[0]["result"]["contents"]
+    assert len(contents) == 1
+    assert json.loads(contents[0]["text"]) == {"runs": []}
+
 

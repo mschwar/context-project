@@ -145,8 +145,32 @@ def test_phase29_closeout_and_mcp_resources_documented() -> None:
         "ctx://.ctx/CONTEXT-1.md",
         "ctx://.ctx/CONTEXT-0.md",
         "ctx://.ctx/metadata.json",
+        "ctx://.ctx/hook_log.json",
     ):
         assert f"`{uri}`" in agents
 
     assert "## MCP Resources for .ctx/ Exports ✓" in todos
+
+
+def test_phase30_closeout_and_architectural_pivot_documented() -> None:
+    reflection = REPO_ROOT / "archive" / "reflections" / "2026-10-29-phase30-reflection.md"
+    state = (REPO_ROOT / "state.md").read_text(encoding="utf-8")
+    todos = (REPO_ROOT / "TODOS.md").read_text(encoding="utf-8")
+    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+    assert reflection.exists()
+    reflection_text = reflection.read_text(encoding="utf-8")
+    assert "## Disposition Table" in reflection_text
+    assert "Carry into Phase 31" in reflection_text
+
+    assert "### Phase 30 — High-Signal Architectural & Invariant Maps Pivot & Queue Drain ✓" in state
+    for item in ("30.1", "30.2", "30.3", "30.4", "30.5", "30.6", "30.7"):
+        assert f"[x] **{item}" in state
+
+    assert "## Run History Pruning ✓" in todos
+    assert "## ctx-sdk: Standalone Python Package for .ctx/ Consumers ✓" in todos
+    assert "## Architectural Pivot — High-Signal Architectural & Invariant Maps (Phase 30) ✓" in todos
+    assert "`--tier2`" in agents
+    assert "`--capsule`" in agents
+
 

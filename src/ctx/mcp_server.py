@@ -186,6 +186,12 @@ RESOURCE_DEFINITIONS: list[dict[str, str]] = [
         "description": "Repository initialization metadata, version, timestamps, and installed git hooks.",
         "mimeType": "application/json",
     },
+    {
+        "uri": "ctx://.ctx/hook_log.json",
+        "name": ".ctx/hook_log.json",
+        "description": "Git hook execution telemetry: trigger types, durations, and success/failure status.",
+        "mimeType": "application/json",
+    },
 ]
 
 _RESOURCE_LOOKUP: dict[str, dict[str, str]] = {}
@@ -385,6 +391,13 @@ class CtxMCPServer:
         if not file_path.is_relative_to(ctx_dir.resolve()):
             raise PathTraversalDeniedError(uri)
         if not file_path.is_file():
+            if filename == "hook_log.json" and (ctx_dir / "metadata.json").is_file():
+                return {
+                    "uri": resource["uri"],
+                    "name": resource["name"],
+                    "mimeType": resource["mimeType"],
+                    "text": json.dumps({"runs": []}, indent=2) + "\n",
+                }
             raise ResourceNotFoundError(resource["name"])
 
         return {

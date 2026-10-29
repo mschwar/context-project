@@ -69,6 +69,7 @@ def init_project(
     root: Path,
     *,
     force: bool = False,
+    tier2: bool = False,
 ) -> dict:
     """Bootstrap .ctx/ infrastructure in a git repo.
 
@@ -88,16 +89,39 @@ def init_project(
             f"Already initialized: {ctx_dir} exists. Use --force to reinitialize."
         )
 
-    # 3. Generate initial manifests via api.refresh
-    from ctx.api import refresh
-    refresh_result = refresh(root, force=force)
-
-    # 4. Create .ctx/ export layer
     ctx_dir.mkdir(exist_ok=True)
-    _populate_ctx_dir(root, ctx_dir)
+    metadata = _build_metadata(root)
+
+    if tier2:
+        from ctx.skeleton import (
+            extract_skeleton,
+            render_context_0,
+            render_context_1,
+            render_context_full,
+        )
+
+        # Write .gitignore entries first so structural_hash includes root .gitignore state
+        (ctx_dir / ".gitignore").write_text("*\n", encoding="utf-8")
+        _add_to_gitignore(root, CTX_DIR + "/")
+
+        skeleton = extract_skeleton(root)
+        (ctx_dir / "CONTEXT-0.md").write_text(render_context_0(skeleton), encoding="utf-8")
+        (ctx_dir / "CONTEXT-1.md").write_text(render_context_1(skeleton), encoding="utf-8")
+        (ctx_dir / "CONTEXT.md").write_text(render_context_full(skeleton), encoding="utf-8")
+        metadata["mode"] = "tier2"
+        metadata["structural_hash"] = skeleton.structural_hash
+        metadata["boundary_doc_hash"] = skeleton.boundary_doc_hash
+        manifests_refreshed = len(skeleton.subsystems)
+    else:
+        # 3. Generate initial manifests via api.refresh
+        from ctx.api import refresh
+        refresh_result = refresh(root, force=force)
+
+        # 4. Create .ctx/ export layer
+        _populate_ctx_dir(root, ctx_dir)
+        manifests_refreshed = refresh_result.dirs_processed
 
     # 5. Write metadata.json
-    metadata = _build_metadata(root)
     save_json_atomic(ctx_dir / METADATA_FILE, metadata)
 
     # 6. Write .ctx/.gitignore (ignore everything in .ctx/)
@@ -109,15 +133,18 @@ def init_project(
     # 8. Install git hooks
     hooks_installed = _install_hooks(root)
 
-    return {
+    result = {
         "root": str(root),
         "ctx_dir": str(ctx_dir),
         "hooks_installed": hooks_installed,
-        "manifests_refreshed": refresh_result.dirs_processed,
+        "manifests_refreshed": manifests_refreshed,
         "exports": [name for name, _ in EXPORT_TIERS],
         "metadata": metadata,
         "force": force,
     }
+    if tier2:
+        result["mode"] = "tier2"
+    return result
 
 
 def uninit_project(root: Path) -> dict:
@@ -171,19 +198,44 @@ def run_hook(root: Path, trigger: str) -> None:
         return
 
     try:
-        # Quiet refresh
-        from ctx.api import refresh
-        refresh(root)
-
-        # Re-export at all depth tiers
-        _populate_ctx_dir(root, ctx_dir)
-
-        # Update last_refresh in metadata
         meta_path = ctx_dir / METADATA_FILE
-        if meta_path.exists():
-            meta = load_json_safe(meta_path, {})
-            meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
-            save_json_atomic(meta_path, meta)
+        meta = load_json_safe(meta_path, {}) if meta_path.exists() else {}
+
+        if isinstance(meta, dict) and meta.get("mode") == "tier2":
+            from ctx.skeleton import (
+                extract_skeleton,
+                render_context_0,
+                render_context_1,
+                render_context_full,
+                should_invoke_llm,
+            )
+
+            skeleton = extract_skeleton(root)
+            exports_missing = any(
+                not (ctx_dir / filename).is_file() for filename, _ in EXPORT_TIERS
+            )
+            if should_invoke_llm(meta, skeleton) or exports_missing:
+                ctx_dir.mkdir(exist_ok=True)
+                (ctx_dir / "CONTEXT-0.md").write_text(render_context_0(skeleton), encoding="utf-8")
+                (ctx_dir / "CONTEXT-1.md").write_text(render_context_1(skeleton), encoding="utf-8")
+                (ctx_dir / "CONTEXT.md").write_text(render_context_full(skeleton), encoding="utf-8")
+                meta["structural_hash"] = skeleton.structural_hash
+                meta["boundary_doc_hash"] = skeleton.boundary_doc_hash
+            if meta_path.exists():
+                meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
+                save_json_atomic(meta_path, meta)
+        else:
+            # Quiet refresh
+            from ctx.api import refresh
+            refresh(root)
+
+            # Re-export at all depth tiers
+            _populate_ctx_dir(root, ctx_dir)
+
+            # Update last_refresh in metadata
+            if meta_path.exists() and isinstance(meta, dict):
+                meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
+                save_json_atomic(meta_path, meta)
 
     except Exception as exc:
         success = False

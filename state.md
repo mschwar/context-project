@@ -449,11 +449,19 @@ Persistent, append-only stats ledger that accumulates across every `ctx refresh`
 - **Phase 26 — Local Model Quality Assurance** — deferred until the cloud/agent path is bulletproof. Pre-flight quality check (29.2) covers the critical failure mode; the full local model compatibility matrix and minimum-length thresholds wait.
 - **Public leaderboard webpage** — future export from running board data to a public-facing page. Scoped after Phase 28 lands and generates real data.
 
-### Phase 30 — Telemetry & SDK Follow-ups (Backlog)
+### Phase 30 — High-Signal Architectural & Invariant Maps Pivot & Queue Drain ✓
 
-Carry-forward items from Phase 29 and MCP Resources closeout.
+Pivot from "Summarize Every File" (per-directory leaf `CONTEXT.md` blurbs that go stale on every commit and duplicate native frontier glob/grep/AST search) to **High-Signal Architectural & Invariant Maps** focused on non-obvious architectural invariants, authority boundaries, cross-directory data flows, and entrypoints/footguns:
 
-- [ ] **30.1 Surface `.ctx/hook_log.json` telemetry in MCP resources or `ctx check`** — expose hook execution history and failure diagnostics once `ctx init` background hooks accumulate dogfooding runs.
+- [x] **30.1 Surface `.ctx/hook_log.json` telemetry in MCP resources or `ctx check`** — exposed `ctx://.ctx/hook_log.json` as a read-only MCP resource and surfaced `hook_runs`/`hook_failures` telemetry in `ctx check` summary.
+- [x] **30.2 Run history pruning (`TODOS.md` P3)** — added configurable retention policy (`max_runs=500`, `retention_days=90`, whichever is more generous) to `record_run()` in `src/ctx/stats_board.py` so per-repo `run_stats.json` never grows unbounded while preserving global aggregates.
+- [x] **30.3 `ctx.sdk` consumer module (`TODOS.md` P3)** — provided lightweight typed `CtxProject.load(path)` access to `.ctx/` metadata, depth-tiered exports (`CONTEXT.md`, `CONTEXT-1.md`, `CONTEXT-0.md`), and `hook_log.json` with zero LLM or CLI dependencies.
+- [x] **30.4 Deterministic Structural Skeleton First, LLM Only for Semantics (`src/ctx/skeleton.py`)** — made symbol/export/dependency/entrypoint/boundary-doc extraction 100% deterministic and zero-cost (sub-second on git hook) using existing language parsers (`python`, `js/ts`, `rust`, `go`, `java`, `csharp`, `kotlin`, `ruby`, `php`, `swift`, `elixir`), computing `structural_hash` and `boundary_doc_hash` so LLM synthesis is only needed when structural signatures or README/ADR/AGENTS/SYSTEM boundaries change.
+- [x] **30.5 Root + Subsystem Architecture Synthesis (`ctx init --tier2`)** — instead of littering every leaf folder with a `CONTEXT.md`, `ctx init --tier2` (and background hook refresh in `tier2` mode) emits a single gitignored `.ctx/` tiered architectural index (`CONTEXT-0.md` = 1-page repo architecture, authority boundaries, & entrypoints; `CONTEXT-1.md` = subsystem dependency, exported symbol & invariant map; `CONTEXT.md` = full synthesis) served via MCP Resources.
+- [x] **30.6 Automatic Ingestion Pre-Processor Capsule for `gbrain` and `project-ledger` (`ctx export --depth 1 --capsule`)** — added `api.build_fleet_capsule()` and `ctx export --capsule` so `ctx export --depth 1 --capsule` generates a compact structured JSON/Markdown capsule feeding `state/projects/<id>.json` and `gbrain` ingestion even on unindexed checkouts without API keys.
+- [x] **30.7 Legacy command docs cleanup in ancillary specs** — swept remaining references in `RUNBOOK.md` that showed legacy `ctx update` / `ctx status` commands so canonical `ctx refresh` / `ctx check` are primary.
+- [x] **30.Z Gate closeout** — reflection filed at `archive/reflections/2026-10-29-phase30-reflection.md`; 555 tests passing.
 
-### Backlog
-- [ ] **Legacy command docs cleanup in ancillary specs** — sweep remaining AFO reference docs/examples that still show legacy command names where the canonical `refresh` / `check` surface should be primary.
+### Phase 31 — Hybrid Semantic Synthesis on Structural Change (Backlog)
+
+- [ ] **31.1 Optional LLM invariant synthesis on `should_invoke_llm()` trigger** — when `ctx init --tier2` or `run_hook` detects a `structural_hash` or `boundary_doc_hash` change and an LLM provider is configured, optionally enrich the deterministic Tier 2 `CONTEXT-0.md`/`CONTEXT-1.md` maps with concise LLM-synthesized cross-module invariant notes.

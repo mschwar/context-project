@@ -72,6 +72,7 @@ What it does:
 
 Common flags:
 - `--force` — reinitialize even if `.ctx/` already exists
+- `--tier2` — synthesize a gitignored `.ctx/` architectural & invariant map (`CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`) deterministically with zero LLM calls and without writing per-directory `CONTEXT.md` files
 
 After init, manifests auto-refresh on every git commit, checkout, and merge via background hooks. No manual `ctx refresh` needed.
 
@@ -197,6 +198,7 @@ Concatenate generated manifests for agent ingestion.
 Common flags:
 - `--filter all|stale|missing` — select which manifests to export
 - `--depth <n>` — limit traversal depth
+- `--capsule` — emit a deterministic structural & invariant capsule for `project-ledger` and `gbrain` ingestion
 - `--output <file>` — write export text to a file in human mode
 - `--output json` — emit the JSON envelope only
 
@@ -318,10 +320,23 @@ Available read-only MCP resources exposed by `ctx serve --mcp` (after `ctx init`
 
 | Resource URI | MIME Type | Description |
 |--------------|-----------|-------------|
-| `ctx://.ctx/CONTEXT.md` | `text/markdown` | Full-depth export of all `CONTEXT.md` manifests |
-| `ctx://.ctx/CONTEXT-1.md` | `text/markdown` | Depth-1 export (root and immediate children) |
-| `ctx://.ctx/CONTEXT-0.md` | `text/markdown` | Depth-0 export (root manifest only) |
-| `ctx://.ctx/metadata.json` | `application/json` | Init metadata: version, timestamps, repo ID, installed hooks |
+| `ctx://.ctx/CONTEXT.md` | `text/markdown` | Full-depth export of all `CONTEXT.md` manifests (or full Tier 2 synthesis) |
+| `ctx://.ctx/CONTEXT-1.md` | `text/markdown` | Depth-1 export (or Tier 2 module dependency & invariant map) |
+| `ctx://.ctx/CONTEXT-0.md` | `text/markdown` | Depth-0 export (or Tier 2 1-page repo architecture, authority boundaries & entrypoints) |
+| `ctx://.ctx/metadata.json` | `application/json` | Init metadata: version, timestamps, repo ID, installed hooks, structural/boundary hashes |
+| `ctx://.ctx/hook_log.json` | `application/json` | Git hook execution telemetry: trigger types, durations, and success/failure status |
+
+### Python Consumer SDK (`ctx.sdk`)
+
+Zero-dependency reader for tools consuming `.ctx/` exports:
+
+```python
+from ctx.sdk import CtxProject
+
+proj = CtxProject.load("/path/to/repo")
+context_0 = proj.get_context(depth=0)
+stale = proj.is_stale()
+```
 
 ### Session Bootstrap
 

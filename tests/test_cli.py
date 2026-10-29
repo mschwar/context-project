@@ -2415,3 +2415,33 @@ def test_stats_board_trend(tmp_path, monkeypatch):
     result = runner.invoke(cli_module.cli, ["stats", "--board", "--trend", str(tmp_path)])
     assert result.exit_code == 0
     assert "Trend" in result.output or "trend" in result.output or "\u2581" in result.output or "\u2588" in result.output
+
+
+def test_cli_init_tier2_and_export_capsule(tmp_path) -> None:
+    import json
+    import subprocess
+
+    cli_module = import_module("ctx.cli")
+    runner = CliRunner()
+
+    repo = tmp_path / "tier2_repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", str(repo)], capture_output=True, check=True)
+    (repo / "AGENTS.md").write_text("# AGENTS\n\nContract.\n\n## Authority\n", encoding="utf-8")
+    (repo / "app.py").write_text("def start() -> None:\n    pass\n", encoding="utf-8")
+
+    init_res = runner.invoke(cli_module.cli, ["--output", "json", "init", "--tier2", str(repo)])
+    assert init_res.exit_code == 0, init_res.output
+    init_env = json.loads(init_res.output)
+    assert init_env["status"] == "success"
+    assert init_env["data"]["mode"] == "tier2"
+    assert (repo / ".ctx" / "CONTEXT-0.md").is_file()
+    assert not (repo / "CONTEXT.md").exists()
+
+    cap_res = runner.invoke(cli_module.cli, ["--output", "json", "export", "--depth", "1", "--capsule", str(repo)])
+    assert cap_res.exit_code == 0, cap_res.output
+    cap_env = json.loads(cap_res.output)
+    assert cap_env["status"] == "success"
+    assert cap_env["data"]["structural_hash"].startswith("sha256:")
+    assert "Architecture & Authority Map (CONTEXT-0)" in cap_env["data"]["capsule_markdown"]
+

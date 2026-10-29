@@ -30,9 +30,17 @@ mypy src/ctx
 ## Using the CLI
 
 ### Initialize a project
-Create initial manifests for a directory tree.
+Bootstrap `.ctx/` exports and git hooks, or synthesize a Tier 2 architectural & invariant map without writing per-directory `CONTEXT.md` files:
 ```bash
+ctx init /path/to/project --tier2
+ctx init /path/to/project
 ctx refresh /path/to/project --force
+```
+
+### Export a fleet capsule
+Generate a deterministic structural & invariant capsule for `project-ledger` and `gbrain` ingestion:
+```bash
+ctx export /path/to/project --depth 1 --capsule --output json
 ```
 
 ### Update a project
@@ -129,7 +137,7 @@ Phase 16 work is intentionally split into small gates for narrower models.
 
 `ctx` caches LLM summaries in `.ctx-cache/llm_cache.json` (relative to the project root). The cache key includes the model name, so switching models always produces a cache miss rather than serving stale summaries.
 
-**Resetting the cache:** delete `.ctx-cache/llm_cache.json` (or the whole `.ctx-cache/` directory). The next `ctx update` will regenerate all summaries at normal token cost.
+**Resetting the cache:** delete `.ctx-cache/llm_cache.json` (or the whole `.ctx-cache/` directory). The next `ctx refresh` will regenerate all summaries at normal token cost.
 
 **After upgrading ctx** (or changing the `model` config key): all prior cache entries will be misses on the first run. This is intentional — the one-time regeneration cost is preferable to serving summaries from the wrong model.
 
@@ -137,19 +145,19 @@ Phase 16 work is intentionally split into small gates for narrower models.
 
 ## Common Failure Modes
 
-### `ctx status .` or `ctx update . --dry-run` fails on workspace cache directories
+### `ctx check .` or `ctx refresh . --dry-run` fails on workspace cache directories
 **Symptom**: A local workspace cache such as `.pytest_cache/` causes `PermissionError` during traversal.
 **Fix**: Current default ignores skip `.pytest_cache/`, `.worktrees/`, and `.tmp/`. If a custom cache directory is still surfacing, add it to `.ctxignore`.
 
-### `ctx update .` reports provider connection errors even though `ctx setup --check` detects a provider
-**Symptom**: `ctx setup --check` detects Anthropic or OpenAI, but `ctx init` / `ctx update` still fails with connection errors.
+### `ctx refresh .` reports provider connection errors even though `ctx setup --check` detects a provider
+**Symptom**: `ctx setup --check` detects Anthropic or OpenAI, but `ctx init` / `ctx refresh` still fails with connection errors.
 **Fix**: Check shell proxy env vars first. A broken `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` can break real provider calls while setup detection still looks healthy. In PowerShell, retry with:
 ```powershell
 $env:HTTP_PROXY=''
 $env:HTTPS_PROXY=''
 $env:ALL_PROXY=''
 $env:NO_PROXY='*'
-python -m ctx update .
+python -m ctx refresh .
 ```
 
 ### Local Provider Still Hits Context Limits

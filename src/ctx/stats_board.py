@@ -20,6 +20,30 @@ logger = logging.getLogger(__name__)
 
 _GLOBAL_WRITE_RETRIES = 3
 _GLOBAL_WRITE_BACKOFF_SECONDS = 0.1
+DEFAULT_MAX_RUNS = 500
+DEFAULT_RETENTION_DAYS = 90
+
+
+def prune_runs(
+    runs: list[dict],
+    *,
+    max_runs: int = DEFAULT_MAX_RUNS,
+    retention_days: int = DEFAULT_RETENTION_DAYS,
+    now: datetime | None = None,
+) -> list[dict]:
+    """Prune per-repo run history using the more generous of retention_days or max_runs.
+
+    A run is pruned only when the total count exceeds *max_runs* AND the run is
+    older than *retention_days* (whichever window keeps more records).
+    """
+    if len(runs) <= max_runs:
+        return runs
+
+    ref_now = now or datetime.now(timezone.utc)
+    cutoff_str = (ref_now - timedelta(days=retention_days)).strftime("%Y-%m-%dT%H:%M:%S")
+    within_window = [r for r in runs if r.get("ts", "") >= cutoff_str]
+    by_count = runs[-max_runs:] if max_runs > 0 else []
+    return within_window if len(within_window) >= len(by_count) else by_count
 
 
 def _run_stats_path(root: Path, config) -> Path | None:
@@ -171,6 +195,9 @@ def record_run(root: Path, result, config) -> None:
             if not isinstance(runs, list):
                 runs = []
             runs.append(record)
+            max_runs = getattr(config, "stats_max_runs", DEFAULT_MAX_RUNS) or DEFAULT_MAX_RUNS
+            retention_days = getattr(config, "stats_retention_days", DEFAULT_RETENTION_DAYS) or DEFAULT_RETENTION_DAYS
+            runs = prune_runs(runs, max_runs=int(max_runs), retention_days=int(retention_days))
             save_json_atomic(per_repo_path, {"schema_version": 1, "runs": runs})
 
         global_path = _global_stats_path()

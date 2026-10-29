@@ -498,3 +498,56 @@ def test_stale_pid_allows_hook(tmp_path) -> None:
     # Clean up
     if pid_path.exists():
         pid_path.unlink()
+
+
+# ── Test 24: init --tier2 synthesizes .ctx/ maps without LLM or leaf CONTEXT.md ──
+
+def test_init_tier2_creates_architectural_maps_without_leaf_manifests(tmp_path) -> None:
+    repo = _make_git_repo(tmp_path / "repo")
+    (repo / "AGENTS.md").write_text("# AGENTS\n\nGovernance contract.\n\n## Rules\n", encoding="utf-8")
+    sub = repo / "src" / "pkg"
+    sub.mkdir(parents=True)
+    (sub / "service.py").write_text("class Service:\n    def execute(self) -> None:\n        pass\n", encoding="utf-8")
+
+    with patch("ctx.api.refresh") as mock_refresh:
+        result = init_project(repo, tier2=True)
+        mock_refresh.assert_not_called()
+
+    assert result["mode"] == "tier2"
+    # No leaf CONTEXT.md written
+    assert not (repo / "CONTEXT.md").exists()
+    assert not (sub / "CONTEXT.md").exists()
+
+    # .ctx/ tiered architectural maps written
+    ctx_dir = repo / CTX_DIR
+    assert "mode: tier2" in (ctx_dir / "CONTEXT-0.md").read_text(encoding="utf-8")
+    assert "##Cross-Directory" in (ctx_dir / "CONTEXT-1.md").read_text(encoding="utf-8") or "## Cross-Directory Dependency & Export Map" in (ctx_dir / "CONTEXT-1.md").read_text(encoding="utf-8")
+    assert "## File-Level Structural Signatures" in (ctx_dir / "CONTEXT.md").read_text(encoding="utf-8")
+
+    meta = json.loads((ctx_dir / METADATA_FILE).read_text(encoding="utf-8"))
+    assert meta["mode"] == "tier2"
+    assert meta["structural_hash"].startswith("sha256:")
+    assert meta["boundary_doc_hash"].startswith("sha256:")
+
+
+# ── Test 25: tier2 hook skips rewrite when structural/boundary hashes unchanged ──
+
+def test_run_hook_tier2_updates_only_on_structural_or_boundary_change(tmp_path) -> None:
+    repo = _make_git_repo(tmp_path / "repo")
+    (repo / "AGENTS.md").write_text("# AGENTS\n\nContract.\n", encoding="utf-8")
+    init_project(repo, tier2=True)
+
+    ctx_dir = repo / CTX_DIR
+    c0_path = ctx_dir / "CONTEXT-0.md"
+    c0_path.write_text("# Sentinel unchanged content\n", encoding="utf-8")
+
+    # Internal comment change in hello.py should NOT trigger tier2 rewrite
+    (repo / "hello.py").write_text("# updated comment only\n", encoding="utf-8")
+    run_hook(repo, "post-commit")
+    assert c0_path.read_text(encoding="utf-8") == "# Sentinel unchanged content\n"
+
+    # Adding a public function SHOULD trigger tier2 rewrite
+    (repo / "hello.py").write_text("def exported_entrypoint() -> int:\n    return 42\n", encoding="utf-8")
+    run_hook(repo, "post-commit")
+    assert "Architecture & Authority Map (CONTEXT-0)" in c0_path.read_text(encoding="utf-8")
+

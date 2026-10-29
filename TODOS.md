@@ -1,6 +1,8 @@
 # TODOS
 
-## Run History Pruning
+## Run History Pruning ✓
+
+**Status:** Complete — implemented `prune_runs()`, `DEFAULT_MAX_RUNS = 500`, and `DEFAULT_RETENTION_DAYS = 90` in `src/ctx/stats_board.py`, wired into `record_run()`.
 
 **What:** Add configurable retention policy to prune old run records from per-repo `run_stats.json`.
 
@@ -46,7 +48,9 @@
 **Priority:** P2 — high value for agent integration, low effort
 **Depends on:** ctx init (shipped in 1.1.0)
 
-## ctx-sdk: Standalone Python Package for .ctx/ Consumers
+## ctx-sdk: Standalone Python Package for .ctx/ Consumers ✓
+
+**Status:** Complete — implemented zero-dependency `src/ctx/sdk.py` (`CtxProject.load(path)`, `get_context(depth)`, `metadata`, `hook_telemetry`, `is_stale()`).
 
 **What:** Extract a lightweight `ctx-sdk` package that reads `.ctx/` exports without depending on the full `ctx-tool` CLI or LLM providers.
 
@@ -67,3 +71,18 @@
 **Effort:** M (human: ~1 week / CC: ~30 min)
 **Priority:** P3 — wait for `.ctx/` adoption before investing
 **Depends on:** MCP Resources (above) for design alignment on resource naming
+
+## Architectural Pivot — High-Signal Architectural & Invariant Maps (Phase 30) ✓
+
+**Status:** Complete — shipped `src/ctx/skeleton.py`, `ctx init --tier2`, `ctx export --depth 1 --capsule` (`api.build_fleet_capsule`), and `ctx://.ctx/hook_log.json` MCP resource.
+
+### 1. Shift from "Bottom-Up File Blurbs" to "Root + Subsystem Architecture Synthesis" (`ctx init --tier2`) ✓
+- **Why:** Modern frontier agents have fast native glob/grep/AST search, 200k–1M+ context windows, and `gbrain` hybrid search. Per-directory 20-word file blurbs go stale on every commit; what agents actually need are non-obvious architectural invariants, authority boundaries, cross-directory data flows, and entrypoints/footguns.
+- **What:** `ctx init --tier2` writes a single gitignored `.ctx/` tiered index (`CONTEXT-0.md` = 1-page repo architecture, authority boundaries, & entrypoints; `CONTEXT-1.md` = module dependency & invariant map; `CONTEXT.md` = full synthesis) without littering leaf folders with `CONTEXT.md` files, served via MCP Resources.
+
+### 2. Deterministic Structural Skeleton First, LLM Only for Semantics (`src/ctx/skeleton.py`) ✓
+- **What:** Make symbol/export/dependency extraction 100% deterministic and zero-cost (sub-second on git hook) across all built-in AST/regex parsers, computing `structural_hash` and `boundary_doc_hash` so LLM calls are only needed when structural signatures or README/ADR/AGENTS/SYSTEM boundaries change.
+
+### 3. Fleet Ingestion Pre-Processor Capsule (`ctx export --depth 1 --capsule`) ✓
+- **What:** Have `ctx export --depth 1 --capsule` (`api.build_fleet_capsule`) generate a compact capsule summary feeding `state/projects/<id>.json` for `project-ledger` and `gbrain` code checkout ingestion.
+

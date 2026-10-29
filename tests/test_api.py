@@ -623,3 +623,52 @@ def test_refresh_result_cache_defaults_without_caching_client(tmp_path, monkeypa
     result = api_module.refresh(tmp_path, dry_run=False)
     assert result.cache_hits == 0
     assert result.cache_misses == 0
+
+
+def test_check_health_includes_hook_telemetry_when_present(tmp_path, monkeypatch) -> None:
+    import json
+
+    entries = [_Entry(path=tmp_path, relative_path=".", status="fresh")]
+    monkeypatch.setattr(api_module, "load_ignore_patterns", lambda *_a, **_kw: object())
+    monkeypatch.setattr(api_module, "inspect_directory_health", lambda *_a, **_kw: entries)
+
+    ctx_dir = tmp_path / ".ctx"
+    ctx_dir.mkdir()
+    (ctx_dir / "hook_log.json").write_text(
+        json.dumps({
+            "runs": [
+                {"trigger": "post-commit", "success": True},
+                {"trigger": "post-merge", "success": False, "error": "timeout"},
+            ]
+        }),
+        encoding="utf-8",
+    )
+
+    result = api_module.check(tmp_path)
+    assert result.summary["hook_runs"] == 2
+    assert result.summary["hook_failures"] == 1
+
+
+def test_build_fleet_capsule_generates_compact_sensor_payload(tmp_path) -> None:
+    import json
+
+    (tmp_path / "AGENTS.md").write_text("# AGENTS\n\nFleet contract.\n\n## Rules\n", encoding="utf-8")
+    src = tmp_path / "src" / "demo"
+    src.mkdir(parents=True)
+    (src / "cli.py").write_text("def run_cli() -> None:\n    pass\n", encoding="utf-8")
+
+    out_json = tmp_path / "capsule.json"
+    capsule = api_module.build_fleet_capsule(tmp_path, depth=1, output_file=str(out_json))
+
+    assert capsule.repo_id.startswith("sha256:")
+    assert capsule.structural_hash.startswith("sha256:")
+    assert capsule.boundary_doc_hash.startswith("sha256:")
+    assert capsule.languages.get("Python") == 1
+    assert any(b["path"] == "AGENTS.md" for b in capsule.authority_boundaries)
+    assert any(s["path"] == "src/demo" for s in capsule.subsystems)
+    assert "Architecture & Authority Map (CONTEXT-0)" in capsule.capsule_markdown
+
+    saved = json.loads(out_json.read_text(encoding="utf-8"))
+    assert saved["repo_id"] == capsule.repo_id
+    assert saved["structural_hash"] == capsule.structural_hash
+

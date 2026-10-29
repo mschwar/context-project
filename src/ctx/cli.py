@@ -429,15 +429,23 @@ def refresh(
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, resolve_path=True))
 @click.option("--force", is_flag=True, help="Reinitialize even if already initialized.")
+@click.option(
+    "--tier2",
+    is_flag=True,
+    help="Synthesize a gitignored .ctx/ architectural & invariant map without writing per-directory CONTEXT.md files.",
+)
 @click.pass_context
-def init(ctx: click.Context, path: str, force: bool) -> None:
+def init(ctx: click.Context, path: str, force: bool, tier2: bool = False) -> None:
     """Bootstrap self-maintaining .ctx/ infrastructure in a git repo."""
     from ctx.init import init_project, InitError
 
     json_mode = _json_mode(ctx)
     with OutputBroker(command="init", json_mode=json_mode) as broker:
         try:
-            result = init_project(Path(path), force=force)
+            init_kwargs: dict[str, object] = {"force": force}
+            if tier2:
+                init_kwargs["tier2"] = True
+            result = init_project(Path(path), **init_kwargs)
         except InitError as exc:
             if json_mode:
                 broker.add_error("init_failed", str(exc))
@@ -1200,8 +1208,20 @@ def _directory_within_depth(path: Path, root: Path, depth: Optional[int]) -> boo
     help="Which manifests to export: all (default), stale, or missing.",
 )
 @click.option("--depth", type=int, default=None, help="Limit export to N levels of nesting (0 = root only).")
+@click.option(
+    "--capsule",
+    is_flag=True,
+    help="Emit a deterministic structural & invariant capsule for project-ledger and gbrain ingestion.",
+)
 @click.pass_context
-def export(ctx: click.Context, path: str, output: Optional[str], filter_mode: str, depth: Optional[int]) -> None:
+def export(
+    ctx: click.Context,
+    path: str,
+    output: Optional[str],
+    filter_mode: str,
+    depth: Optional[int],
+    capsule: bool = False,
+) -> None:
     """Concatenate all CONTEXT.md files to stdout or a file.
 
     Each manifest is prefixed with a header line:
@@ -1212,6 +1232,20 @@ def export(ctx: click.Context, path: str, output: Optional[str], filter_mode: st
     json_mode = _json_mode(ctx)
     with OutputBroker(command="export", json_mode=json_mode) as broker:
         root = Path(path).resolve()
+        if capsule:
+            capsule_res = api.build_fleet_capsule(
+                root,
+                depth=1 if depth is None else depth,
+                output_file=output,
+            )
+            broker.set_data(asdict(capsule_res))
+            if not json_mode:
+                if output:
+                    click.echo(f"Exported fleet capsule for {capsule_res.repo_name} to {output}")
+                else:
+                    click.echo(capsule_res.capsule_markdown, nl=False)
+            return
+
         spec = load_ignore_patterns(root)
         health_entries = [
             entry for entry in inspect_directory_health(root, spec, root)
