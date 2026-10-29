@@ -22,6 +22,16 @@ def test_packaged_default_ignore_file_contains_expected_patterns() -> None:
     assert "*.egg-info" in contents
     assert "*.dist-info" in contents
     assert "pip-wheel-metadata/" in contents
+    for ext in ("*.gdoc", "*.gsheet", "*.gslides", "*.gdraw", "*.gform", "*.gmap", "*.gsite"):
+        assert ext in contents
+
+
+def test_repo_and_packaged_default_ignore_files_match() -> None:
+    from pathlib import Path
+    packaged_default = files("ctx").joinpath(".ctxignore.default").read_text(encoding="utf-8")
+    repo_default = (Path(__file__).resolve().parents[1] / ".ctxignore.default").read_text(encoding="utf-8")
+
+    assert repo_default == packaged_default
 
 
 def test_load_ignore_patterns_uses_repo_default_file(tmp_path) -> None:

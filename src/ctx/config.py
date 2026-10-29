@@ -240,6 +240,11 @@ def write_default_config(path: Path, provider: str, model: str | None = None, ba
     (path / ".ctxconfig").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _iter_config_dirs(start_dir: Path) -> list[Path]:
+    """Return directories from *start_dir* upward for .ctxconfig lookup."""
+    return [start_dir, *start_dir.parents]
+
+
 def load_config(
     target_path: Path,
     *,
@@ -276,7 +281,7 @@ def load_config(
     provider_explicit = False
 
     start_dir = target_path if target_path.is_dir() else target_path.parent
-    for directory in (start_dir, *start_dir.parents):
+    for directory in _iter_config_dirs(start_dir):
         config_path = directory / ".ctxconfig"
         if not config_path.exists():
             continue

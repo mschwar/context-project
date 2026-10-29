@@ -118,3 +118,35 @@ def test_pyproject_agent_metadata_present() -> None:
         '"Typing :: Typed"',
     ]:
         assert classifier in text
+
+
+def test_phase29_closeout_and_mcp_resources_documented() -> None:
+    reflection = REPO_ROOT / "archive" / "reflections" / "2026-10-29-phase29-reflection.md"
+    state = (REPO_ROOT / "state.md").read_text(encoding="utf-8")
+    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    todos = (REPO_ROOT / "TODOS.md").read_text(encoding="utf-8")
+
+    assert reflection.exists()
+    reflection_text = reflection.read_text(encoding="utf-8")
+    assert "## Disposition Table" in reflection_text
+    assert "Carry into Phase 30" in reflection_text
+
+    assert "### Phase 29 — Preflight Onboarding ✓" in state
+    assert "[x] **29.1 Provider connectivity validation**" in state
+    assert "[x] **29.2 Model response quality check**" in state
+    assert "[x] **29.3 Environment readiness**" in state
+    assert "[x] **29.4 Actionable failure messages**" in state
+    assert "[x] **Google Drive ignore rules**" in state
+    assert "[x] **MCP Resources for `.ctx/` exports**" in state
+    assert "30.1 Surface `.ctx/hook_log.json` telemetry in MCP resources or `ctx check`" in state
+
+    for uri in (
+        "ctx://.ctx/CONTEXT.md",
+        "ctx://.ctx/CONTEXT-1.md",
+        "ctx://.ctx/CONTEXT-0.md",
+        "ctx://.ctx/metadata.json",
+    ):
+        assert f"`{uri}`" in agents
+
+    assert "## MCP Resources for .ctx/ Exports ✓" in todos
+

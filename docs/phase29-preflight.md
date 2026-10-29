@@ -1,6 +1,6 @@
 # Phase 29 — Preflight Onboarding
 
-> **Status:** Spec
+> **Status:** Complete
 > **Sprint:** 2 (Dogfooding, Analytics, Adoption)
 > **Prerequisites:** None. This is the first phase of Sprint 2.
 > **Tracking:** `state.md` under "Sprint 2"

@@ -36,6 +36,8 @@ def test_initialize_handshake(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
 
     assert responses[0]["result"]["serverInfo"]["name"] == "ctx"
     assert responses[0]["result"]["protocolVersion"] == mcp_module.PROTOCOL_VERSION
+    assert "tools" in responses[0]["result"]["capabilities"]
+    assert "resources" in responses[0]["result"]["capabilities"]
 
 
 def test_tools_list_exposes_all_tools(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -358,3 +360,161 @@ def test_mcp_global_board_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
     payload = json.loads(responses[0]["result"]["content"][0]["text"])
     assert payload["totals"]["total_runs"] == 3
+
+
+def test_resources_list_exposes_ctx_exports(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    responses = _run_server(
+        monkeypatch,
+        tmp_path,
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "resources/list", "params": {}}),
+    )
+
+    resources = responses[0]["result"]["resources"]
+    names = [r["name"] for r in resources]
+    uris = [r["uri"] for r in resources]
+    assert names == [
+        ".ctx/CONTEXT.md",
+        ".ctx/CONTEXT-1.md",
+        ".ctx/CONTEXT-0.md",
+        ".ctx/metadata.json",
+    ]
+    assert uris == [
+        "ctx://.ctx/CONTEXT.md",
+        "ctx://.ctx/CONTEXT-1.md",
+        "ctx://.ctx/CONTEXT-0.md",
+        "ctx://.ctx/metadata.json",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("uri", "filename", "expected_mime", "sample_content"),
+    [
+        ("ctx://.ctx/CONTEXT.md", "CONTEXT.md", "text/markdown", "# Full export\n"),
+        ("ctx://.ctx/CONTEXT-1.md", "CONTEXT-1.md", "text/markdown", "# Depth-1 export\n"),
+        ("ctx://.ctx/CONTEXT-0.md", "CONTEXT-0.md", "text/markdown", "# Depth-0 export\n"),
+        ("ctx://.ctx/metadata.json", "metadata.json", "application/json", '{"schema_version": 1}\n'),
+        (".ctx/CONTEXT-1.md", "CONTEXT-1.md", "text/markdown", "# Shorthand relative URI\n"),
+    ],
+)
+def test_resources_read_returns_ctx_export_contents(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    uri: str,
+    filename: str,
+    expected_mime: str,
+    sample_content: str,
+) -> None:
+    ctx_dir = tmp_path / ".ctx"
+    ctx_dir.mkdir()
+    (ctx_dir / filename).write_text(sample_content, encoding="utf-8")
+
+    responses = _run_server(
+        monkeypatch,
+        tmp_path,
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "resources/read",
+                "params": {"uri": uri},
+            }
+        ),
+    )
+
+    contents = responses[0]["result"]["contents"]
+    assert len(contents) == 1
+    assert contents[0]["name"] == f".ctx/{filename}"
+    assert contents[0]["mimeType"] == expected_mime
+    assert contents[0]["text"] == sample_content
+
+
+def test_resources_read_when_not_initialized_returns_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    responses = _run_server(
+        monkeypatch,
+        tmp_path,
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "resources/read",
+                "params": {"uri": "ctx://.ctx/CONTEXT.md"},
+            }
+        ),
+    )
+
+    error = responses[0]["error"]
+    assert error["code"] == -32602
+    assert error["data"]["code"] == "ctx_not_initialized"
+    assert "ctx init" in error["message"]
+
+
+def test_resources_read_missing_file_returns_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".ctx").mkdir()
+
+    responses = _run_server(
+        monkeypatch,
+        tmp_path,
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "resources/read",
+                "params": {"uri": "ctx://.ctx/CONTEXT-0.md"},
+            }
+        ),
+    )
+
+    error = responses[0]["error"]
+    assert error["code"] == -32602
+    assert error["data"]["code"] == "resource_not_found"
+
+
+def test_resources_read_unknown_uri_returns_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".ctx").mkdir()
+
+    responses = _run_server(
+        monkeypatch,
+        tmp_path,
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "resources/read",
+                "params": {"uri": "ctx://.ctx/unknown.txt"},
+            }
+        ),
+    )
+
+    error = responses[0]["error"]
+    assert error["code"] == -32602
+    assert error["data"]["code"] == "unknown_resource"
+
+
+def test_resources_read_blocks_path_traversal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".ctx").mkdir()
+
+    responses = _run_server(
+        monkeypatch,
+        tmp_path,
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "resources/read",
+                "params": {"uri": "ctx://../secret.txt"},
+            }
+        ),
+    )
+
+    error = responses[0]["error"]
+    assert error["code"] == -32602
+    assert error["data"]["code"] == "path_traversal_denied"
+

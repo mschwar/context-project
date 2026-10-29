@@ -314,6 +314,15 @@ Available MCP tools exposed by `ctx serve --mcp`:
 | `ctx_board` | Read the per-repo running board (refresh history, cost analytics, per-model breakdown) |
 | `ctx_global_board` | Read the global running board across all repos |
 
+Available read-only MCP resources exposed by `ctx serve --mcp` (after `ctx init`):
+
+| Resource URI | MIME Type | Description |
+|--------------|-----------|-------------|
+| `ctx://.ctx/CONTEXT.md` | `text/markdown` | Full-depth export of all `CONTEXT.md` manifests |
+| `ctx://.ctx/CONTEXT-1.md` | `text/markdown` | Depth-1 export (root and immediate children) |
+| `ctx://.ctx/CONTEXT-0.md` | `text/markdown` | Depth-0 export (root manifest only) |
+| `ctx://.ctx/metadata.json` | `application/json` | Init metadata: version, timestamps, repo ID, installed hooks |
+
 ### Session Bootstrap
 
 ```bash

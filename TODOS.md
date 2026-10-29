@@ -22,7 +22,9 @@
 **Priority:** P3 — not urgent, ledger is small per-record
 **Depends on:** Nothing — can be done independently
 
-## MCP Resources for .ctx/ Exports
+## MCP Resources for .ctx/ Exports ✓
+
+**Status:** Complete — implemented in `src/ctx/mcp_server.py` (`resources/list` and `resources/read` handlers exposing `ctx://.ctx/CONTEXT.md`, `ctx://.ctx/CONTEXT-1.md`, `ctx://.ctx/CONTEXT-0.md`, and `ctx://.ctx/metadata.json`).
 
 **What:** Expose `.ctx/CONTEXT.md`, `.ctx/CONTEXT-1.md`, `.ctx/CONTEXT-0.md`, and `.ctx/metadata.json` as MCP resources (read-only URIs) alongside the existing MCP tools.
 

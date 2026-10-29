@@ -161,6 +161,41 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
     },
 ]
 
+RESOURCE_DEFINITIONS: list[dict[str, str]] = [
+    {
+        "uri": "ctx://.ctx/CONTEXT.md",
+        "name": ".ctx/CONTEXT.md",
+        "description": "Full-depth export of all CONTEXT.md manifests in the repository.",
+        "mimeType": "text/markdown",
+    },
+    {
+        "uri": "ctx://.ctx/CONTEXT-1.md",
+        "name": ".ctx/CONTEXT-1.md",
+        "description": "Depth-1 export of CONTEXT.md manifests (root and immediate children).",
+        "mimeType": "text/markdown",
+    },
+    {
+        "uri": "ctx://.ctx/CONTEXT-0.md",
+        "name": ".ctx/CONTEXT-0.md",
+        "description": "Depth-0 export of the root CONTEXT.md manifest only.",
+        "mimeType": "text/markdown",
+    },
+    {
+        "uri": "ctx://.ctx/metadata.json",
+        "name": ".ctx/metadata.json",
+        "description": "Repository initialization metadata, version, timestamps, and installed git hooks.",
+        "mimeType": "application/json",
+    },
+]
+
+_RESOURCE_LOOKUP: dict[str, dict[str, str]] = {}
+for _res in RESOURCE_DEFINITIONS:
+    _filename = _res["name"].split("/", 1)[1]
+    _RESOURCE_LOOKUP[_res["uri"]] = _res
+    _RESOURCE_LOOKUP[f"ctx://{_filename}"] = _res
+    _RESOURCE_LOOKUP[_res["name"]] = _res
+    _RESOURCE_LOOKUP[_filename] = _res
+
 
 class MCPToolError(ValueError):
     """Base class for client-visible MCP tool argument errors."""
@@ -206,6 +241,30 @@ class PathNotDirectoryError(MCPToolError):
 
     def __init__(self, path: str) -> None:
         super().__init__(f"Path is not a directory: {path}", error_code="path_not_directory")
+
+
+class UnknownResourceError(MCPToolError):
+    """Raised when a requested MCP resource URI is not recognized."""
+
+    def __init__(self, uri: str) -> None:
+        super().__init__(f"Unknown resource: {uri}", error_code="unknown_resource")
+
+
+class CtxNotInitializedError(MCPToolError):
+    """Raised when .ctx/ resources are requested before ctx init has been run."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Repository not initialized: .ctx/ directory not found. Run 'ctx init' first.",
+            error_code="ctx_not_initialized",
+        )
+
+
+class ResourceNotFoundError(MCPToolError):
+    """Raised when .ctx/ exists but the requested export/metadata file is missing."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Resource file not found: {name}", error_code="resource_not_found")
 
 
 class CtxMCPServer:
@@ -255,6 +314,12 @@ class CtxMCPServer:
         if method == "tools/call":
             self._handle_tools_call(request_id, request.get("params", {}))
             return
+        if method == "resources/list":
+            self._write_result(request_id, {"resources": RESOURCE_DEFINITIONS})
+            return
+        if method == "resources/read":
+            self._handle_resources_read(request_id, request.get("params", {}))
+            return
         if method == "shutdown":
             self._shutdown_requested = True
             self._write_result(request_id, {})
@@ -267,10 +332,67 @@ class CtxMCPServer:
             request_id,
             {
                 "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {"tools": {"listChanged": False}},
+                "capabilities": {
+                    "tools": {"listChanged": False},
+                    "resources": {"subscribe": False, "listChanged": False},
+                },
                 "serverInfo": {"name": "ctx", "version": __version__},
             },
         )
+
+    def _handle_resources_read(self, request_id: Any, params: object) -> None:
+        if not isinstance(params, dict):
+            self._write_error(request_id, -32602, "Invalid params for resources/read")
+            return
+
+        uri = params.get("uri")
+        if not isinstance(uri, str) or not uri.strip():
+            self._write_error(request_id, -32602, "Invalid params for resources/read: uri is required")
+            return
+
+        try:
+            content_item = self._read_resource(uri.strip(), params.get("path", "."))
+        except MCPToolError as exc:
+            self._write_error(
+                request_id,
+                -32602,
+                str(exc),
+                data={"code": exc.error_code},
+            )
+            return
+        except Exception as exc:
+            self._write_error(request_id, -32603, str(exc))
+            return
+
+        self._write_result(request_id, {"contents": [content_item]})
+
+    def _read_resource(self, uri: str, relative_path: object = ".") -> dict[str, str]:
+        stripped = uri[len("ctx://") :] if uri.startswith("ctx://") else uri
+        if ".." in Path(stripped).parts:
+            raise PathTraversalDeniedError(uri)
+
+        resource = _RESOURCE_LOOKUP.get(uri)
+        if resource is None:
+            raise UnknownResourceError(uri)
+
+        target_root = self._resolve_path(relative_path)
+        ctx_dir = target_root / ".ctx"
+        if not ctx_dir.is_dir():
+            raise CtxNotInitializedError()
+
+        filename = resource["name"].split("/", 1)[1]
+        file_path = (ctx_dir / filename).resolve()
+        if not file_path.is_relative_to(ctx_dir.resolve()):
+            raise PathTraversalDeniedError(uri)
+        if not file_path.is_file():
+            raise ResourceNotFoundError(resource["name"])
+
+        return {
+            "uri": resource["uri"],
+            "name": resource["name"],
+            "mimeType": resource["mimeType"],
+            "text": file_path.read_text(encoding="utf-8"),
+        }
 
     def _handle_tools_call(self, request_id: Any, params: object) -> None:
         if not isinstance(params, dict):

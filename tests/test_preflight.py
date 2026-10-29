@@ -404,3 +404,112 @@ def test_setup_check_backward_compatible(monkeypatch, tmp_path):
     assert envelope["data"]["check_only"] is True
     assert "provider" in envelope["data"]["checks"]
     assert "connectivity" in envelope["data"]["checks"]
+
+
+# ---------------------------------------------------------------------------
+# 6.4 Direct unit tests for probe_model_quality / _probe_local_models / edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_probe_model_quality_valid_summary():
+    from ctx.preflight import probe_model_quality
+
+    fake_config = Config(provider="anthropic", model="claude-haiku-4-5-20251001", api_key="sk-test")
+    mock_result = MagicMock()
+    mock_result.text = "Returns a greeting string."
+    mock_client = MagicMock()
+    mock_client.summarize_files.return_value = [mock_result]
+
+    with patch("ctx.llm.create_client", return_value=mock_client):
+        ok, err = probe_model_quality(fake_config)
+    assert ok is True
+    assert err is None
+
+
+@pytest.mark.parametrize("bad_text", ["", "   ", "abc"])
+def test_probe_model_quality_rejects_empty_or_short_summary(bad_text: str):
+    from ctx.preflight import probe_model_quality
+
+    fake_config = Config(provider="ollama", model="llama3.2", api_key="not-needed")
+    mock_result = MagicMock()
+    mock_result.text = bad_text
+    mock_client = MagicMock()
+    mock_client.summarize_files.return_value = [mock_result]
+
+    with patch("ctx.llm.create_client", return_value=mock_client):
+        ok, err = probe_model_quality(fake_config)
+    assert ok is False
+    assert err is None
+
+
+def test_probe_model_quality_handles_timeout_and_exception():
+    from ctx.preflight import probe_model_quality
+
+    fake_config = Config(provider="ollama", model="llama3.2", api_key="not-needed")
+    mock_client = MagicMock()
+    mock_client.summarize_files.side_effect = TimeoutError("timed out")
+
+    with patch("ctx.llm.create_client", return_value=mock_client):
+        ok, err = probe_model_quality(fake_config)
+    assert ok is False
+    assert err == "timeout"
+
+    mock_client.summarize_files.side_effect = RuntimeError("model not found")
+    with patch("ctx.llm.create_client", return_value=mock_client):
+        ok, err = probe_model_quality(fake_config)
+    assert ok is False
+    assert err == "model not found"
+
+
+def test_probe_local_models_loaded_and_empty():
+    from ctx.preflight import _probe_local_models
+
+    mock_resp = MagicMock()
+    mock_resp.__enter__.return_value = mock_resp
+    mock_resp.read.return_value = json.dumps({"data": [{"id": "llama3.2"}]}).encode("utf-8")
+    with patch("ctx.preflight.urllib.request.urlopen", return_value=mock_resp):
+        ok, err = _probe_local_models("http://localhost:11434")
+    assert ok is True
+    assert err is None
+
+    mock_resp.read.return_value = json.dumps({"data": []}).encode("utf-8")
+    with patch("ctx.preflight.urllib.request.urlopen", return_value=mock_resp):
+        ok, err = _probe_local_models("http://localhost:11434")
+    assert ok is False
+    assert err == "no models loaded"
+
+
+def test_preflight_invalid_ctxconfig_continues_and_reports_path(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    cfg_path = tmp_path / ".ctxconfig"
+    cfg_path.write_text(":::invalid_yaml\n[\n", encoding="utf-8")
+
+    with patch("ctx.preflight.detect_provider", return_value=("anthropic", None)), \
+         patch("ctx.preflight.probe_provider_connectivity", return_value=(True, None)):
+        result = run_preflight(str(tmp_path))
+
+    assert result.ready is False
+    cfg_check = next(c for c in result.checks if c.name == "config")
+    assert cfg_check.status == "fail"
+    assert str(cfg_path) in cfg_check.detail
+    assert cfg_check.fix is not None
+    conn_check = next(c for c in result.checks if c.name == "connectivity")
+    assert conn_check.status == "ok"
+
+
+def test_preflight_cloud_connectivity_fail_with_proxy_hint(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("HTTPS_PROXY", "http://bad-proxy:8080")
+    fake_config = Config(provider="anthropic", model="claude-haiku-4-5-20251001", api_key="sk-test")
+
+    with patch("ctx.preflight.detect_provider", return_value=("anthropic", None)), \
+         patch("ctx.preflight.load_config", return_value=fake_config), \
+         patch("ctx.preflight.probe_provider_connectivity", return_value=(False, "Connection refused")):
+        result = run_preflight(str(tmp_path))
+
+    assert result.ready is False
+    conn = next(c for c in result.checks if c.name == "connectivity")
+    assert conn.status == "fail"
+    assert conn.fix is not None
+    assert "HTTPS_PROXY" in conn.fix
+

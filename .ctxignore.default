@@ -67,6 +67,15 @@ CONTEXT.md
 # ctx disk cache
 .ctx-cache/
 
+# Google Drive virtual shortcut files (can't be hashed locally)
+*.gdoc
+*.gsheet
+*.gslides
+*.gdraw
+*.gform
+*.gmap
+*.gsite
+
 # Binary files are handled by ctx itself: they stay visible in manifests as
 # `[binary: ...]` entries and are not sent to the LLM. Add patterns below only
 # for files or directories that should be skipped entirely.

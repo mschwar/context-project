@@ -2,17 +2,17 @@
 
 Current development status and upcoming milestones.
 
-## Current Health (March 2026)
-- **Status:** Stable. Phases 1–21, Phase 24, Phase 25, and Phase 28 are complete; AFO Stages 1–6 are complete and closeout is documented.
+## Current Health (October 2026)
+- **Status:** Stable. Phases 1–21, Phase 24, Phase 25, Phase 28, and Phase 29 are complete; AFO Stages 1–6 and `ctx init` (v1.1.0) are complete and closeout is documented.
 - **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache. Rate limit handling uses Retry-After headers with 60s backoff ceiling and 5 retry attempts. Mid-level budget enforcement via `threading.Event`. Configurable concurrency defaults to 1 worker for cloud providers, 4 for local.
-- **Test Coverage:** 432 tests passing across all modules.
+- **Test Coverage:** 538 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
-- **Agent Surface:** canonical `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands backed by `src/ctx/api.py`, with hidden legacy aliases preserved for compatibility. `--until-complete` flag enables resilient auto-resume for large trees.
+- **Agent Surface:** canonical `ctx init`, `ctx uninit`, `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands backed by `src/ctx/api.py` and `src/ctx/init.py`, with hidden legacy aliases preserved for compatibility. `--until-complete` flag enables resilient auto-resume for large trees. `ctx setup --check` provides a 7-check preflight onboarding gate (`src/ctx/preflight.py`).
 - **Configuration:** full `CTX_*` env-var parity for scalar config fields, shared cost estimation, zero-config refresh bootstrap for env/local providers, and hard `max_tokens_per_run` / `max_usd_per_run` guardrails. `files_per_call` (formerly `batch_size`) and `max_concurrent_dirs` are configurable.
 - **Exit Codes:** 0 = success, 1 = error, 2 = partial success (budget exhausted, no real errors).
 - **Manifest Trust:** refresh is git-optional on extracted trees, `## Files` / `## Subdirectories` are rendered deterministically from the real filesystem, `ctx check --verify` validates manifest bodies, UTF-8 boundary reads no longer misclassify valid text as binary, and local-provider fallback counts are surfaced in CLI/API results.
 - **Documentation:** `AGENTS.md` is now the machine-readable onboarding contract, `README.md` is demoted to a short human-facing pitch, and generated manifests append a source footer.
-- **MCP Integration:** `ctx serve --mcp` now exposes a stdio JSON-RPC server backed by `api.py`; HTTP serving remains available via the optional `[serve]` extra. The MCP server now includes `ctx_board` and `ctx_global_board` tools for reading running board data.
+- **MCP Integration:** `ctx serve --mcp` exposes a stdio JSON-RPC server backed by `api.py`; HTTP serving remains available via the optional `[serve]` extra. The MCP server includes `ctx_board` and `ctx_global_board` tools plus read-only MCP resources (`ctx://.ctx/CONTEXT.md`, `ctx://.ctx/CONTEXT-1.md`, `ctx://.ctx/CONTEXT-0.md`, `ctx://.ctx/metadata.json`).
 - **Running Board:** `ctx stats --board` displays a persistent refresh history (per-repo and global). Supports `--since` time filters, `--trend` sparklines, per-model cost breakdown, and `--format csv` export. Stats are recorded automatically after every non-dry-run `ctx refresh`.
 - **Pricing:** Updated for Claude 4.x (Opus/Sonnet/Haiku) and GPT-4.1 models. Default fallback is 0.80 (Haiku 4.5 pricing).
 
@@ -392,19 +392,21 @@ Carry-forward from Phase 25 stress test on the 390-directory grant portfolio. Al
 
 Execution order: Phase 29 → Quick wins → Phase 27 → Phase 28 → Adoption.
 
-### Phase 29 — Preflight Onboarding
+### Phase 29 — Preflight Onboarding ✓
 
 Extend `ctx setup --check` into a comprehensive preflight gate. Before the first real run on a repo, verify everything needed to succeed.
 
-- [ ] **29.1 Provider connectivity validation** — go beyond env-var presence: actually call the provider with a minimal request and confirm a substantive response. Fail with an actionable message ("API key set but returned 401 — check key validity").
-- [ ] **29.2 Model response quality check** — send one sample file to the configured model and verify the response contains substantive text, not empty/placeholder output. Warn if the model appears non-functional.
-- [ ] **29.3 Environment readiness** — verify `.ctxignore` exists or defaults are sane, git repo is detected (or explicit non-git acknowledgment), and disk write permissions on the target tree.
-- [ ] **29.4 Actionable failure messages** — every preflight check that fails must print exactly what to do to fix it. No stack traces, no ambiguous errors.
+- [x] **29.1 Provider connectivity validation** — go beyond env-var presence: actually call the provider with a minimal request and confirm a substantive response. Fail with an actionable message ("API key set but returned 401 — check key validity").
+- [x] **29.2 Model response quality check** — send one sample file to the configured model and verify the response contains substantive text, not empty/placeholder output. Warn if the model appears non-functional.
+- [x] **29.3 Environment readiness** — verify `.ctxignore` exists or defaults are sane, git repo is detected (or explicit non-git acknowledgment), and disk write permissions on the target tree.
+- [x] **29.4 Actionable failure messages** — every preflight check that fails must print exactly what to do to fix it. No stack traces, no ambiguous errors.
+- [x] **29.Z Gate closeout** — reflection filed at `archive/reflections/2026-10-29-phase29-reflection.md`; 538 tests passing.
 
 ### Quick Wins
 
 - [ ] **Complete products_GRANTS API evaluation** — rerun the 390-dir stress test once Anthropic credits are topped up. Establishes the cost benchmark for the largest real-world tree.
-- [ ] **Google Drive ignore rules** — add `.gdoc`, `.gsheet`, `.gslides`, `.gdraw`, `.gform` to `.ctxignore.default`. These are virtual shortcut files on Google Drive-synced trees that can't be hashed locally and produce noisy warnings.
+- [x] **Google Drive ignore rules** — add `.gdoc`, `.gsheet`, `.gslides`, `.gdraw`, `.gform` (plus `.gmap`, `.gsite`) to `.ctxignore.default`. These are virtual shortcut files on Google Drive-synced trees that can't be hashed locally and produce noisy warnings.
+- [x] **MCP Resources for `.ctx/` exports** — expose `.ctx/CONTEXT.md`, `.ctx/CONTEXT-1.md`, `.ctx/CONTEXT-0.md`, and `.ctx/metadata.json` as read-only MCP resources (`resources/list` and `resources/read`) in `src/ctx/mcp_server.py`.
 
 ### Phase 27 — Agent Integration Dogfooding
 
@@ -446,6 +448,12 @@ Persistent, append-only stats ledger that accumulates across every `ctx refresh`
 
 - **Phase 26 — Local Model Quality Assurance** — deferred until the cloud/agent path is bulletproof. Pre-flight quality check (29.2) covers the critical failure mode; the full local model compatibility matrix and minimum-length thresholds wait.
 - **Public leaderboard webpage** — future export from running board data to a public-facing page. Scoped after Phase 28 lands and generates real data.
+
+### Phase 30 — Telemetry & SDK Follow-ups (Backlog)
+
+Carry-forward items from Phase 29 and MCP Resources closeout.
+
+- [ ] **30.1 Surface `.ctx/hook_log.json` telemetry in MCP resources or `ctx check`** — expose hook execution history and failure diagnostics once `ctx init` background hooks accumulate dogfooding runs.
 
 ### Backlog
 - [ ] **Legacy command docs cleanup in ancillary specs** — sweep remaining AFO reference docs/examples that still show legacy command names where the canonical `refresh` / `check` surface should be primary.

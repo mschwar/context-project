@@ -15,6 +15,7 @@ from ctx.config import (
     LOCAL_PROVIDERS,
     PROXY_ENV_VARS,
     MissingApiKeyError,
+    _iter_config_dirs,
     detect_provider,
     load_config,
     probe_provider_connectivity,
@@ -127,7 +128,7 @@ def run_preflight(path: str = ".") -> PreflightResult:
         config = load_config(target, provider=provider_name, require_api_key=True)
         config_detail = f"loaded from {target.resolve()}"
         # Check for .ctxconfig file specifically
-        for d in (target.resolve(), *target.resolve().parents):
+        for d in _iter_config_dirs(target.resolve()):
             if (d / ".ctxconfig").exists():
                 config_detail = f"loaded from {d / '.ctxconfig'}"
                 break
@@ -145,11 +146,16 @@ def run_preflight(path: str = ".") -> PreflightResult:
             fix=f"set {api_key_env} in your environment.",
         ))
         config_failed_fatal = True
-    except Exception as exc:
+    except Exception:
+        cfg_file = next(
+            (d / ".ctxconfig" for d in _iter_config_dirs(target.resolve()) if (d / ".ctxconfig").exists()),
+            None,
+        )
+        cfg_loc = f" at {cfg_file}" if cfg_file else ""
         checks.append(PreflightCheck(
             name="config",
             status="fail",
-            detail=f".ctxconfig contains invalid YAML.",
+            detail=f".ctxconfig{cfg_loc} contains invalid YAML.",
             fix="check the file for syntax errors, or delete it and run `ctx setup` to regenerate.",
         ))
 
@@ -189,8 +195,10 @@ def run_preflight(path: str = ".") -> PreflightResult:
                     fix=f"start {resolved_provider} before running ctx.",
                 ))
     else:
-        api_key = config.api_key if config else ""
-        base_url = config.base_url if config else None
+        api_key = config.api_key if config else os.getenv(
+            "ANTHROPIC_API_KEY" if resolved_provider == "anthropic" else "OPENAI_API_KEY", ""
+        ).strip()
+        base_url = config.base_url if config else (os.getenv("CTX_BASE_URL", "").strip() or None)
         ok, err = probe_provider_connectivity(resolved_provider, api_key, base_url)
         if ok:
             conn_ok = True
@@ -204,21 +212,28 @@ def run_preflight(path: str = ".") -> PreflightResult:
             proxy_vars = [v for v in PROXY_ENV_VARS if os.getenv(v)]
             if "401" in err_str or "403" in err_str or "Authentication" in err_str or "authentication" in err_str:
                 api_key_env = "ANTHROPIC_API_KEY" if resolved_provider == "anthropic" else "OPENAI_API_KEY"
+                http_code = " (HTTP 401)" if "401" in err_str else (" (HTTP 403)" if "403" in err_str else "")
                 checks.append(PreflightCheck(
                     name="connectivity",
                     status="fail",
-                    detail=f"authentication failed — API key is set but invalid.",
+                    detail=f"authentication failed{http_code} — API key is set but invalid.",
                     fix=f"verify your {api_key_env} value is a valid, active key.",
                 ))
             elif proxy_vars:
                 var_list = ", ".join(proxy_vars)
+                if os.name == "nt":
+                    unset_cmd = "PowerShell: " + "; ".join(
+                        f"Remove-Item Env:{v} -ErrorAction SilentlyContinue" for v in proxy_vars
+                    )
+                else:
+                    unset_cmd = f"unset {' '.join(proxy_vars)}"
                 checks.append(PreflightCheck(
                     name="connectivity",
                     status="fail",
                     detail=f"cannot reach {resolved_provider} API — {err_str}.",
                     fix=(
                         f"proxy env vars detected ({var_list}). A broken proxy may be blocking requests.\n"
-                        f"       Try unsetting: unset {' '.join(proxy_vars)}"
+                        f"       Try unsetting: {unset_cmd}"
                     ),
                 ))
             else:
