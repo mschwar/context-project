@@ -26,5 +26,7 @@ pytest-cache-files-*/
 # ctx disk cache
 .ctx-cache/
 
-# Environment
+# Environment / local tooling
 .env
+.project-ledger.json
+uv.lock
