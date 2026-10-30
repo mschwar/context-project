@@ -161,8 +161,29 @@ def _find_config_path(target_path: Path) -> Path | None:
     return None
 
 
+def _iter_tree_manifests(root: Path) -> list[Path]:
+    """Return source-tree CONTEXT.md paths under root, excluding .ctx/ and .ctx-cache/."""
+    return sorted(
+        p
+        for p in root.rglob("CONTEXT.md")
+        if ".ctx" not in p.relative_to(root).parts
+        and ".ctx-cache" not in p.relative_to(root).parts
+    )
+
+
 def _has_manifests(root: Path) -> bool:
-    return any(root.rglob("CONTEXT.md"))
+    return bool(_iter_tree_manifests(root))
+
+
+def _is_tier2_repo(root: Path) -> bool:
+    """Return True when root is initialized in Tier 2 (.ctx/ only, no root CONTEXT.md)."""
+    meta_path = root / ".ctx" / "metadata.json"
+    if not meta_path.is_file() or (root / "CONTEXT.md").is_file():
+        return False
+    from ctx.stats_board import load_json_safe
+
+    data = load_json_safe(meta_path, {})
+    return isinstance(data, dict) and data.get("mode") == "tier2"
 
 
 def _directory_within_depth(path: Path, root: Path, depth: Optional[int]) -> bool:
@@ -442,6 +463,121 @@ def _path_relative(path: Path, root: Path) -> str:
     return rel or "."
 
 
+def _check_tier2(
+    root: Path,
+    *,
+    verify: bool = False,
+    stats: bool = False,
+    diff: bool = False,
+    verbose: bool = False,
+    check_exit: bool = False,
+    quiet: bool = False,
+    stat: bool = False,
+) -> CheckResult:
+    """Evaluate freshness, coverage, and structure for a Tier 2 (.ctx/-only) repository."""
+    from ctx.generator import _estimate_tokens
+    from ctx.sdk import CtxProject
+    from ctx.stats_board import load_json_safe
+
+    ctx_dir = root / ".ctx"
+    expected_exports = ("CONTEXT.md", "CONTEXT-0.md", "CONTEXT-1.md")
+    missing_exports = [name for name in expected_exports if not (ctx_dir / name).is_file()]
+    proj = CtxProject.load(root, walk_parents=False)
+    is_stale_flag = proj.is_stale() if proj is not None else True
+
+    if len(missing_exports) == len(expected_exports):
+        status = "missing"
+    elif missing_exports or is_stale_flag:
+        status = "stale"
+    else:
+        status = "fresh"
+
+    full_map_path = ctx_dir / "CONTEXT.md"
+    full_map_text = full_map_path.read_text(encoding="utf-8") if full_map_path.is_file() else ""
+    tokens_est = _estimate_tokens(full_map_text) if full_map_text else 0
+
+    if diff:
+        stale_list = [".ctx/CONTEXT.md"] if status != "fresh" else []
+        directories = [{"path": p, "status": "stale"} for p in stale_list]
+        summary: dict[str, object] = {
+            "modified": 0,
+            "new": 0,
+            "stale": len(stale_list),
+            "quiet": quiet,
+            "stat": stat,
+            "tier2": True,
+        }
+        return CheckResult(mode="diff", directories=directories, summary=summary)
+
+    if stats:
+        directories = (
+            [{"path": ".", "status": "covered" if status == "fresh" else status, "tokens": tokens_est}]
+            if verbose
+            else []
+        )
+        summary = {
+            "dirs": 1,
+            "covered": 0 if status == "missing" else 1,
+            "missing": 1 if status == "missing" else 0,
+            "stale": 1 if status == "stale" else 0,
+            "tokens": tokens_est,
+            "tier2": True,
+        }
+        return CheckResult(mode="stats", directories=directories, summary=summary)
+
+    if verify:
+        has_valid_header = full_map_text.startswith("---\n") and "mode: tier2" in full_map_text
+        directories = []
+        invalid_body_count = 0
+        if status == "missing":
+            directories.append({"path": ".", "status": "missing"})
+            invalid_count = 1
+        elif missing_exports or not has_valid_header:
+            issues = [f"Missing Tier 2 export: .ctx/{name}" for name in missing_exports]
+            if not has_valid_header:
+                issues.append("Tier 2 .ctx/CONTEXT.md is missing valid mode: tier2 frontmatter.")
+            directories.append({"path": ".", "status": "invalid_body", "issues": issues})
+            invalid_count = 1
+            invalid_body_count = 1
+        elif status == "stale":
+            directories.append({"path": ".", "status": "stale"})
+            invalid_count = 1
+        else:
+            invalid_count = 0
+
+        summary = {
+            "dirs": 1,
+            "fresh": 1 if invalid_count == 0 else 0,
+            "stale": 1 if status == "stale" else 0,
+            "missing": 1 if status == "missing" else 0,
+            "invalid": invalid_count,
+            "invalid_body": invalid_body_count,
+            "check_exit": check_exit,
+            "tier2": True,
+        }
+        return CheckResult(mode="verify", directories=directories, summary=summary)
+
+    directories = [{"path": ".", "status": status}]
+    summary = {
+        "total": 1,
+        "fresh": 1 if status == "fresh" else 0,
+        "stale": 1 if status == "stale" else 0,
+        "missing": 1 if status == "missing" else 0,
+        "check_exit": check_exit,
+        "tier2": True,
+    }
+    hook_log_path = ctx_dir / "hook_log.json"
+    if hook_log_path.is_file():
+        hook_data = load_json_safe(hook_log_path, {"runs": []})
+        runs = hook_data.get("runs", []) if isinstance(hook_data, dict) else []
+        if isinstance(runs, list):
+            summary["hook_runs"] = len(runs)
+            summary["hook_failures"] = sum(
+                1 for r in runs if isinstance(r, dict) and not r.get("success", True)
+            )
+    return CheckResult(mode="health", directories=directories, summary=summary)
+
+
 def check(
     root: Path,
     *,
@@ -458,6 +594,18 @@ def check(
     modes = [verify, stats, diff]
     if sum(1 for enabled in modes if enabled) > 1:
         raise ValueError("Only one check mode may be selected.")
+
+    if _is_tier2_repo(root):
+        return _check_tier2(
+            root,
+            verify=verify,
+            stats=stats,
+            diff=diff,
+            verbose=verbose,
+            check_exit=check_exit,
+            quiet=quiet,
+            stat=stat,
+        )
 
     if diff:
         ref = since or "HEAD"
@@ -494,7 +642,7 @@ def check(
         if not git_available:
             if since is not None:
                 raise ValueError("--since requires git to be available and the path to be inside a git repository.")
-            for manifest in sorted(root.rglob("CONTEXT.md")):
+            for manifest in _iter_tree_manifests(root):
                 try:
                     manifest_mtime = manifest.stat().st_mtime
                     if any(
@@ -627,6 +775,51 @@ def export_context(
     depth: int | None = None,
 ) -> ExportResult:
     """Export manifests with filter/depth controls."""
+    if _is_tier2_repo(root):
+        from ctx.sdk import CtxProject
+
+        if depth == 0:
+            target_name = "CONTEXT-0.md"
+        elif depth == 1:
+            target_name = "CONTEXT-1.md"
+        else:
+            target_name = "CONTEXT.md"
+        target_file = root / ".ctx" / target_name
+        label = f".ctx/{target_name}"
+        proj = CtxProject.load(root, walk_parents=False)
+        is_stale_flag = proj.is_stale() if proj is not None else True
+
+        if filter_mode == "missing":
+            if not target_file.is_file():
+                content = "# ./ [MISSING]"
+                count = 1
+            else:
+                content = ""
+                count = 0
+        elif filter_mode == "stale":
+            if target_file.is_file() and is_stale_flag:
+                content = f"# {label}\n\n{target_file.read_text(encoding='utf-8')}"
+                count = 1
+            else:
+                content = ""
+                count = 0
+        else:
+            if target_file.is_file():
+                content = f"# {label}\n\n{target_file.read_text(encoding='utf-8')}"
+                count = 1
+            else:
+                content = ""
+                count = 0
+
+        if output_file:
+            Path(output_file).write_text(content, encoding="utf-8")
+        return ExportResult(
+            manifests_exported=count,
+            filter=filter_mode,
+            depth=depth,
+            content=content,
+        )
+
     spec = load_ignore_patterns(root)
     health_entries = [
         entry
@@ -679,7 +872,7 @@ def reset(
     yes: bool = False,
 ) -> ResetResult:
     """Remove CONTEXT.md files from a tree."""
-    manifests = sorted(root.rglob("CONTEXT.md"))
+    manifests = _iter_tree_manifests(root)
     paths = [_path_relative(manifest, root) for manifest in manifests]
 
     if dry_run:

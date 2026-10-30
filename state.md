@@ -3,9 +3,9 @@
 Current development status and upcoming milestones.
 
 ## Current Health (October 2026)
-- **Status:** Stable. Phases 1–21, Phase 24, Phase 25, Phase 28, and Phase 29 are complete; AFO Stages 1–6 and `ctx init` (v1.1.0) are complete and closeout is documented.
-- **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache. Rate limit handling uses Retry-After headers with 60s backoff ceiling and 5 retry attempts. Mid-level budget enforcement via `threading.Event`. Configurable concurrency defaults to 1 worker for cloud providers, 4 for local.
-- **Test Coverage:** 538 tests passing across all modules.
+- **Status:** Stable. Phases 1–21, Phase 24, Phase 25, Phase 28, Phase 29, Phase 30, and Phase 30.8 (AI-Server Live Dogfood Hardening, Issue #73) are complete and closeout is documented.
+- **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache. Rate limit handling uses Retry-After headers with 60s backoff ceiling and 5 retry attempts (local timeouts capped at 2 attempts). Mid-level budget enforcement via `threading.Event`. Configurable concurrency defaults to 1 worker for cloud and local single-GPU providers (overridable via `max_concurrent_dirs` / `CTX_MAX_CONCURRENT_DIRS`).
+- **Test Coverage:** 566 tests passing across all modules.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
 - **Agent Surface:** canonical `ctx init`, `ctx uninit`, `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands backed by `src/ctx/api.py` and `src/ctx/init.py`, with hidden legacy aliases preserved for compatibility. `--until-complete` flag enables resilient auto-resume for large trees. `ctx setup --check` provides a 7-check preflight onboarding gate (`src/ctx/preflight.py`).
 - **Configuration:** full `CTX_*` env-var parity for scalar config fields, shared cost estimation, zero-config refresh bootstrap for env/local providers, and hard `max_tokens_per_run` / `max_usd_per_run` guardrails. `files_per_call` (formerly `batch_size`) and `max_concurrent_dirs` are configurable.
@@ -462,6 +462,23 @@ Pivot from "Summarize Every File" (per-directory leaf `CONTEXT.md` blurbs that g
 - [x] **30.7 Legacy command docs cleanup in ancillary specs** — swept remaining references in `RUNBOOK.md` that showed legacy `ctx update` / `ctx status` commands so canonical `ctx refresh` / `ctx check` are primary.
 - [x] **30.Z Gate closeout** — reflection filed at `archive/reflections/2026-10-29-phase30-reflection.md`; 555 tests passing.
 
+### Phase 30.8 — AI-Server Live Dogfood Hardening Gate ✓
+
+Claimed job ([#73](https://github.com/mschwar/context-project/issues/73)) resolving all bugs and operator/agent friction surfaced during live `ai-server` dogfooding across CLI, git hooks, Ollama (`qwen2.5:7b-instruct`), LiteLLM OpenAI-compatible proxy, Tier 1 & Tier 2 modes, `ctx.sdk`, HTTP `ctx serve`, and stdio MCP `ctx serve --mcp`:
+
+- [x] **30.8.1 `.ctx/` ignore parity, `ctx init` ordering, & `ctx reset` `.ctx/` protection** — added `.ctx/` and `.ctx-hook.pid` to `.ctxignore.default` and `src/ctx/.ctxignore.default`; updated `.gitignore` before `refresh()` in Tier 1 `init_project()`; excluded `.ctx/` exports from `_has_manifests()` and `ctx reset`.
+- [x] **30.8.2 Zero-config `ctx setup --check` local model resolution & embedding-model filtering** — skipped `*embed*` models when selecting a default completion model in `detect_provider()`, and passed `detected_model` into `run_preflight()` when no explicit model is configured.
+- [x] **30.8.3 OpenAI-compatible `base_url` `/v1` probe normalization & preflight hints** — normalized trailing `/v1` in `probe_provider_connectivity()` and `_probe_local_models()`, and emitted endpoint-specific preflight fix hints when custom `base_url` is configured.
+- [x] **30.8.4 Single-GPU local concurrency, immediate mid-directory batch disable, & timeout retry cap** — defaulted `_DEFAULT_LOCAL_PARALLEL_DIRS = 1`; dynamically re-evaluated `_effective_files_per_call()` per chunk with thread-safe `_local_batching_disabled` and 1-file plain-text tolerance; capped local `APITimeoutError` retries at `LOCAL_TIMEOUT_RETRY_ATTEMPTS = 2`.
+- [x] **30.8.5 Subcommand `--output [human|json]` support & `ctx export --output json` collision fix** — supported trailing `--output [human|json]` on canonical subcommands, added `--out-file` to `ctx export`, and routed `ctx export --output json|human` to output-format selection instead of writing `./json`.
+- [x] **30.8.6 `ctx check --check-exit` & `ctx setup --check` JSON-mode non-zero exit enforcement** — ensured `cli.check` and `cli.setup` always invoke `_exit_for_broker()` in `json_mode` so CI freshness checks exit non-zero on stale/missing/invalid manifests.
+- [x] **30.8.7 Tier 2 (`mode: "tier2"`) awareness across `ctx check`, MCP `ctx_check`, `ctx export`, and HTTP `ctx serve`** — recognized Tier 2 repos via `.ctx/metadata.json` across health/verify/stats/diff checks, tiered exports, and HTTP `/mcp/context`, while blocking `/mcp/context/.ctx`.
+- [x] **30.8.8 Prompt few-shot JSON array examples & redundant filename-prefix stripping** — replaced `- <filename>: ...` examples in `file_summary_system` with valid JSON array examples and stripped echoed `<filename>: ` prefixes in `generator.py`.
+- [x] **30.8.9 `ctx.sdk` `hook_telemetry` alias & zero-dependency `is_stale()`** — added `CtxProject.hook_telemetry` property alias and guarded `ctx.skeleton` import in `CtxProject.is_stale()` against `ImportError`.
+- [x] **30.8.10 `pytest` global stats isolation (`CTX_GLOBAL_STATS_PATH`)** — supported `CTX_GLOBAL_STATS_PATH` in `stats_board._global_stats_path()` and isolated pytest runs in `tests/conftest.py`.
+- [x] **30.8.Z Gate closeout** — reflection filed at `archive/reflections/2026-10-30-phase30-8-dogfood-hardening-reflection.md`; 566 tests passing.
+
 ### Phase 31 — Hybrid Semantic Synthesis on Structural Change (Backlog)
 
 - [ ] **31.1 Optional LLM invariant synthesis on `should_invoke_llm()` trigger** — when `ctx init --tier2` or `run_hook` detects a `structural_hash` or `boundary_doc_hash` change and an LLM provider is configured, optionally enrich the deterministic Tier 2 `CONTEXT-0.md`/`CONTEXT-1.md` maps with concise LLM-synthesized cross-module invariant notes.
+- [ ] **31.2 Optional OpenAI structured-output / constrained JSON-schema capability probe for local providers** — probe whether a local OpenAI-compatible server supports constrained JSON-array `response_format` during preflight/client init so batch file summarization avoids malformed-JSON fallback even on smaller 7B models.

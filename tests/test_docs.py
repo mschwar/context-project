@@ -174,3 +174,22 @@ def test_phase30_closeout_and_architectural_pivot_documented() -> None:
     assert "`--capsule`" in agents
 
 
+def test_phase30_8_dogfood_hardening_closeout_documented() -> None:
+    reflection = REPO_ROOT / "archive" / "reflections" / "2026-10-30-phase30-8-dogfood-hardening-reflection.md"
+    state = (REPO_ROOT / "state.md").read_text(encoding="utf-8")
+    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+    assert reflection.exists()
+    reflection_text = reflection.read_text(encoding="utf-8")
+    assert "## Disposition Table" in reflection_text
+    assert "Carry into Phase 31" in reflection_text
+
+    assert "### Phase 30.8 — AI-Server Live Dogfood Hardening Gate ✓" in state
+    for item in [f"30.8.{i}" for i in range(1, 11)]:
+        assert f"[x] **{item}" in state
+    assert "31.2 Optional OpenAI structured-output" in state
+    assert "`--out-file <file>`" in agents
+    assert "`CTX_GLOBAL_STATS_PATH`" in agents
+
+
+

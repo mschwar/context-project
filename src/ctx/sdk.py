@@ -118,7 +118,10 @@ class CtxProject:
                 return True
         meta = self.metadata
         if meta.mode == "tier2" and meta.structural_hash and meta.boundary_doc_hash:
-            from ctx.skeleton import extract_skeleton, should_invoke_llm
+            try:
+                from ctx.skeleton import extract_skeleton, should_invoke_llm
+            except ImportError:
+                return False
 
             skeleton = extract_skeleton(self.root)
             return should_invoke_llm(
@@ -169,6 +172,11 @@ class CtxProject:
                 )
             )
         return result
+
+    @property
+    def hook_telemetry(self) -> list[HookRun]:
+        """Alias for hook_runs matching the SDK specification."""
+        return self.hook_runs
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-serializable snapshot of metadata, available tiers, and hook telemetry."""

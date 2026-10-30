@@ -90,6 +90,9 @@ def init_project(
         )
 
     ctx_dir.mkdir(exist_ok=True)
+    # Write .gitignore entries first so initial hashes include root .gitignore state
+    (ctx_dir / ".gitignore").write_text("*\n", encoding="utf-8")
+    _add_to_gitignore(root, CTX_DIR + "/")
     metadata = _build_metadata(root)
 
     if tier2:
@@ -99,10 +102,6 @@ def init_project(
             render_context_1,
             render_context_full,
         )
-
-        # Write .gitignore entries first so structural_hash includes root .gitignore state
-        (ctx_dir / ".gitignore").write_text("*\n", encoding="utf-8")
-        _add_to_gitignore(root, CTX_DIR + "/")
 
         skeleton = extract_skeleton(root)
         (ctx_dir / "CONTEXT-0.md").write_text(render_context_0(skeleton), encoding="utf-8")
@@ -124,13 +123,7 @@ def init_project(
     # 5. Write metadata.json
     save_json_atomic(ctx_dir / METADATA_FILE, metadata)
 
-    # 6. Write .ctx/.gitignore (ignore everything in .ctx/)
-    (ctx_dir / ".gitignore").write_text("*\n", encoding="utf-8")
-
-    # 7. Update root .gitignore
-    _add_to_gitignore(root, CTX_DIR + "/")
-
-    # 8. Install git hooks
+    # 6. Install git hooks
     hooks_installed = _install_hooks(root)
 
     result = {

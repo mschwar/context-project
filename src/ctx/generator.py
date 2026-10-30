@@ -43,7 +43,7 @@ from ctx.lang_parsers.swift_parser import parse_swift_file
 from ctx.lang_parsers.elixir_parser import parse_elixir_file
 
 
-_DEFAULT_LOCAL_PARALLEL_DIRS = 4
+_DEFAULT_LOCAL_PARALLEL_DIRS = 1
 _DEFAULT_CLOUD_PARALLEL_DIRS = 1
 
 
@@ -469,6 +469,18 @@ def _manifest_model(config: Config, client: LLMClient) -> str:
     return config.resolved_model()
 
 
+def _strip_redundant_filename_prefix(name: str, summary: str) -> str:
+    """Strip an echoed leading '<filename>: ' prefix when the model repeats the filename."""
+    cleaned = summary.strip()
+    lower = cleaned.lower()
+    for candidate in (f"`{name}`:", f"**{name}**:", f"{name}:", f"{name} —", f"{name} -"):
+        if lower.startswith(candidate.lower()):
+            remainder = cleaned[len(candidate) :].strip()
+            if remainder:
+                return remainder
+    return cleaned
+
+
 def _generate_directory_manifest(
     path: Path,
     root: Path,
@@ -506,7 +518,12 @@ def _generate_directory_manifest(
             continue
 
         result = text_results[text_index]
-        file_summaries.append(FileSummary(name=entry["name"], summary=result.text))
+        file_summaries.append(
+            FileSummary(
+                name=entry["name"],
+                summary=_strip_redundant_filename_prefix(entry["name"], result.text),
+            )
+        )
         text_index += 1
 
     subdir_summaries: list[SubdirSummary] = []

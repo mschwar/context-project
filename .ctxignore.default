@@ -64,8 +64,11 @@ desktop.ini
 # ctx output (don't index your own manifests)
 CONTEXT.md
 
-# ctx disk cache
+# ctx disk cache and internal export/hook state
 .ctx-cache/
+.ctx/
+.ctx-hook.pid
+.project-ledger.json
 
 # Google Drive virtual shortcut files (can't be hashed locally)
 *.gdoc

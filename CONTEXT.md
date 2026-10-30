@@ -1,51 +1,50 @@
 ---
-generated: '2026-03-18T22:47:19Z'
-generator: ctx/0.8.0
-model: claude-haiku-4-5-20251001
-content_hash: sha256:c4cd23275bacaed675c5c9977e66dc04eeb36e7d453299021e825e0ede8dee24
-files: 19
+generated: '2026-10-30T15:05:37Z'
+generator: ctx/1.1.0
+model: qwen2.5:7b-instruct
+content_hash: sha256:1c0bacbbf21afe258353657f67c8e12784fd37f987581541c4891b1ff048932a
+files: 20
 dirs: 8
-tokens_total: 15117
+tokens_total: 17692
 ---
-# C:/Users/Matty/Documents/context-project
+# /central/repos/active/context-project
 
-A filesystem-native hierarchical manifest system (ctx) that enables AI agents to navigate and understand codebases through automatically generated CONTEXT.md files.
+Documentation, guidelines, and configuration for the context-project, including version control, testing, and agent-friendly development practices.
 
 ## Files
-- **.ctxignore.default** — Default ignore patterns for ctx tool, excluding version control, dependencies, IDE files, and temporary artifacts.
-- **.gitattributes** — Configures Git to auto-detect text files and normalize line endings to LF.
-- **.gitignore** — Specifies files and directories to exclude from version control and context generation.
-- **.pre-commit-hooks.yaml** — Pre-commit hook configuration that validates CONTEXT.md manifests are fresh before commits.
-- **=4.0** — Empty or malformed file with no discernible purpose.
-- **AGENTS.md** — Documentation of ctx tool features, configuration, commands, error codes, and integration patterns for agent-driven codebase navigation.
-- **AGENT_FIRST_OVERHAUL.md** — Living plan documenting the agent-first overhaul of ctx, detailing thesis, kept components, surface changes, and six-stage rollout for autonomous agent infrastructure.
-- **CONTRIBUTING.md** — Developer workflow guidelines for agentic SDLC including context maintenance, implementation blocks, and test-driven autonomy.
-- **GATE_CLOSEOUT.md** — Defines the mandatory closeout sequence for each project phase, including validation, reflection, suggestion disposition, and founder sign-off.
-- **README.md** — Quick-start guide directing users to install ctx-tool, set API keys, and consult AGENTS.md for command contract.
-- **RUNBOOK.md** — Operational guide for running, validating, developing, and releasing ctx with CLI usage examples and troubleshooting.
-- **architecture.md** — System design overview covering bottom-up generation, content hashing, and component responsibilities.
-- **commitlint.config.mjs** — Configuration file specifying commitlint extends conventional commit rules.
-- **mcp.json** — MCP server configuration file exposing ctx as a Model Context Protocol service for agent integration.
-- **package-lock.json** — Dependency lock file for Node.js packages including commitlint and Husky.
-- **package.json** — Node.js package metadata and development dependencies for the ctx project.
-- **pyproject.toml** — Python package metadata defining ctx-tool distribution with dependencies, entry points, and optional extras.
-- **rules.md** — Engineering standards and agentic rules for code quality, testing, and manifest protocol compliance.
-- **state.md** — Development status document tracking ctx project milestones, completed phases, and current health as of March 2026.
+- **.ctxignore.default** — Default ignore patterns for ctx projects.
+- **.gitattributes** — Configures Git to auto detect text files and normalize line endings.
+- **.gitignore** — Excludes files and directories for version control, including Python cache, IDE local files, test artifacts, and environment files.
+- **.pre-commit-hooks.yaml** — Pre-commit hook for validating ctx manifest files are up to date.
+- **=4.0** — Version specification for package compatibility.
+- **AGENTS.md** — Documentation and instructions for ctx tool usage and configuration.
+- **AGENT_FIRST_OVERHAUL.md** — Comprehensive plan for reorienting the `ctx` tool towards autonomous agent consumption, detailing the transition from human-operated to agent-friendly interfaces and surfaces.
+- **CONTRIBUTING.md** — Guides contributors on maintaining the agentic software development lifecycle including context updates, testing, and commit practices.
+- **GATE_CLOSEOUT.md** — Defines the gate closeout protocol including validation, reflection, and documentation steps.
+- **README.md** — Quick start guide and usage instructions for ctx tool.
+- **RUNBOOK.md** — Instructions for operating, validating, and developing ctx, including CLI commands and release procedures.
+- **TODOS.md** — Describes TODO items for improving context project management, including run history pruning, MCP resource exposure, and SDK development.
+- **architecture.md** — Describes the architecture and components of the ctx project, including generation, hashing, and summarization processes.
+- **commitlint.config.mjs** — Configuration for commit linting using conventional commit standards.
+- **mcp.json** — Filesystem-native context layer configuration for generating and managing CONTEXT.md manifests.
+- **package-lock.json** — Package lockfile for versioned dependencies and devDependencies.
+- **package.json** — Manifest defining project metadata and dependencies for npm packaging.
+- **pyproject.toml** — Configuration for the project including dependencies, URLs, and scripts.
+- **rules.md** — Defines engineering standards, agentic rules, and testing requirements for the project.
+- **state.md** — Summary of the current development status and upcoming milestones for the `ctx` project.
 
 ## Subdirectories
 - **.githooks/** — This directory contains Git hooks that enforce automated testing and code quality checks before commits are made to the repository.
 - **.github/** — This directory contains GitHub configuration files and automation workflows that support CI/CD processes and custom actions for the context-project.
 - **.husky/** — This directory contains Git hooks that enforce code quality standards and branching workflows through automated validation at commit and push stages.
-- **archive/** — This directory contains design documents, AI analysis, and roadmap materials for the ctx project—a filesystem-native hierarchical manifest system enabling AI agents to navigate codebases via CONTEXT.md files.
-- **docs/** — Documentation and architectural specifications for the context-project, including design decisions and implementation guidelines.
+- **archive/** — Contains historical and reflective documents related to the development of the context-project CLI tool and its associated filesystem-native context management system.
+- **docs/** — Tracks and aggregates context refresh run statistics for analytics and public leaderboard, alongside design documents for the `ctx` tool's architecture and new feature implementations.
 - **documents/** — This directory contains strategic planning and architectural thesis documents for the context-project, focusing on agent-first design principles and system overhaul strategies.
-- **src/** — Source code for the context-project, containing the core implementation of ctx and related utilities.
-- **tests/** — Comprehensive test suite covering CLI commands, language parsers, manifest generation, LLM integration, and agent workflows.
+- **src/** — Unified API and CLI entry points for managing and generating CONTEXT.md files, integrating various utilities and services.
+- **tests/** — Tests for various components of the context-project, including CLI, API, language parsers, and server functionalities.
 
 ## Notes
-- The project follows an agent-first architecture with agentic SDLC workflows documented in CONTRIBUTING.md and GATE_CLOSEOUT.md.
-- Pre-commit hooks and commitlint enforce manifest freshness and conventional commit standards.
-- ctx is distributed as both a Node.js package and Python tool (ctx-tool) with MCP server integration for agent consumption.
-- Development status and rollout phases are tracked in state.md and AGENT_FIRST_OVERHAUL.md respectively.
+- Cross-module relationships: The `src` directory contains the unified API and CLI entry points, while `tests` houses the test suites for various components.
+- Architectural notes: The project follows agent-first design principles and includes comprehensive documentation for transitioning from human-operated to autonomous agent consumption.
 
 <!-- Generated by ctx (https://pypi.org/project/ctx-tool/) -->

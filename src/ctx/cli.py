@@ -258,6 +258,22 @@ def _json_mode(ctx: click.Context) -> bool:
     return bool(ctx.obj and ctx.obj.get("json_mode"))
 
 
+def _resolve_json_mode(ctx: click.Context, sub_output_mode: str | None = None) -> bool:
+    ctx.ensure_object(dict)
+    if sub_output_mode is not None:
+        ctx.obj["json_mode"] = sub_output_mode.strip().lower() == "json"
+    return bool(ctx.obj.get("json_mode"))
+
+
+_subcommand_output_option = click.option(
+    "--output",
+    "sub_output_mode",
+    type=click.Choice(["human", "json"]),
+    default=None,
+    help="Output format (human or json).",
+)
+
+
 def _exit_for_broker(broker: OutputBroker, *, json_mode: bool) -> None:
     if not json_mode:
         return
@@ -342,6 +358,7 @@ def cli(ctx: click.Context, output_mode: str | None) -> None:
 @click.option("--token-budget", type=int, default=None)
 @click.option("--base-url", default=None)
 @click.option("--cache-path", default=None)
+@_subcommand_output_option
 @click.pass_context
 def refresh(
     ctx: click.Context,
@@ -357,9 +374,10 @@ def refresh(
     token_budget: Optional[int],
     base_url: Optional[str],
     cache_path: Optional[str],
+    sub_output_mode: Optional[str] = None,
 ) -> None:
     """Generate or update CONTEXT.md manifests."""
-    json_mode = _json_mode(ctx)
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
     with OutputBroker(command="refresh", json_mode=json_mode) as broker:
         state = ProgressState(start_time=time.time())
         result = api.refresh(
@@ -434,12 +452,19 @@ def refresh(
     is_flag=True,
     help="Synthesize a gitignored .ctx/ architectural & invariant map without writing per-directory CONTEXT.md files.",
 )
+@_subcommand_output_option
 @click.pass_context
-def init(ctx: click.Context, path: str, force: bool, tier2: bool = False) -> None:
+def init(
+    ctx: click.Context,
+    path: str,
+    force: bool,
+    tier2: bool = False,
+    sub_output_mode: Optional[str] = None,
+) -> None:
     """Bootstrap self-maintaining .ctx/ infrastructure in a git repo."""
     from ctx.init import init_project, InitError
 
-    json_mode = _json_mode(ctx)
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
     with OutputBroker(command="init", json_mode=json_mode) as broker:
         try:
             init_kwargs: dict[str, object] = {"force": force}
@@ -464,12 +489,13 @@ def init(ctx: click.Context, path: str, force: bool, tier2: bool = False) -> Non
 
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, resolve_path=True))
+@_subcommand_output_option
 @click.pass_context
-def uninit(ctx: click.Context, path: str) -> None:
+def uninit(ctx: click.Context, path: str, sub_output_mode: Optional[str] = None) -> None:
     """Remove .ctx/ infrastructure and git hooks."""
     from ctx.init import uninit_project, InitError
 
-    json_mode = _json_mode(ctx)
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
     with OutputBroker(command="uninit", json_mode=json_mode) as broker:
         try:
             result = uninit_project(Path(path))
@@ -667,6 +693,7 @@ def status(ctx: click.Context, path: str, check_exit_code: bool) -> None:
 @click.option("--quiet", is_flag=True)
 @click.option("--stat", is_flag=True)
 @click.option("--check-exit", is_flag=True)
+@_subcommand_output_option
 @click.pass_context
 def check(
     ctx: click.Context,
@@ -679,9 +706,10 @@ def check(
     quiet: bool,
     stat: bool,
     check_exit: bool,
+    sub_output_mode: Optional[str] = None,
 ) -> None:
     """Check manifest health, coverage, validation, or diffs."""
-    json_mode = _json_mode(ctx)
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
     with OutputBroker(command="check", json_mode=json_mode) as broker:
         result = api.check(
             Path(path),
@@ -706,9 +734,7 @@ def check(
                 changed_count = summary.get("modified", 0) + summary.get("new", 0) + summary.get("stale", 0)
                 if quiet and changed_count > 0:
                     broker.add_error("stale_manifests", "Manifest changes detected.")
-            return
-
-        if result.mode == "health":
+        elif result.mode == "health":
             click.echo("STATUS   PATH")
             for entry in result.directories:
                 click.echo(f"{entry['status']:<8} {_display_status_path(str(entry['path']))}")
@@ -716,9 +742,7 @@ def check(
             click.echo(f"{summary['fresh']} fresh, {summary['stale']} stale, {summary['missing']} missing")
             if check_exit and (summary["stale"] > 0 or summary["missing"] > 0):
                 sys.exit(1)
-            return
-
-        if result.mode == "stats":
+        elif result.mode == "stats":
             summary = result.summary
             click.echo(f"dirs:    {summary['dirs']}")
             click.echo(f"covered: {summary['covered']}")
@@ -732,9 +756,7 @@ def check(
                 for row in result.directories:
                     token_str = str(row.get("tokens")) if row.get("tokens") is not None else "-"
                     click.echo(f"{str(row['path']):<32} {str(row['status']):<9} {token_str}")
-            return
-
-        if result.mode == "diff":
+        elif result.mode == "diff":
             modified = sorted(entry["path"] for entry in result.directories if entry["status"] == "modified")
             new_files = sorted(entry["path"] for entry in result.directories if entry["status"] == "new")
             stale = sorted(entry["path"] for entry in result.directories if entry["status"] == "stale")
@@ -742,8 +764,7 @@ def check(
             if quiet:
                 if changed or stale:
                     sys.exit(1)
-                return
-            if stat:
+            elif stat:
                 if stale:
                     click.echo(f"{len(stale)} stale")
                 else:
@@ -753,55 +774,52 @@ def check(
                     if new_files:
                         parts.append(f"{len(new_files)} new")
                     click.echo(", ".join(parts) if parts else "No CONTEXT.md files changed.")
-                return
-            if stale:
+            elif stale:
                 click.echo(f"{len(stale)} CONTEXT.md file{'s' if len(stale) != 1 else ''} may be stale (mtime check):")
                 for file_path in stale:
                     click.echo(f"  [stale] {file_path}")
+            elif not changed:
+                click.echo("No CONTEXT.md files changed.")
             else:
-                if not changed:
-                    click.echo("No CONTEXT.md files changed.")
-                else:
-                    click.echo(f"{len(changed)} CONTEXT.md file{'s' if len(changed) != 1 else ''} changed:")
-                    for file_path in changed:
-                        label = "new" if file_path in new_files else "mod"
-                        click.echo(f"  [{label}] {file_path}")
-            return
-
-        invalid_entries = [entry for entry in result.directories if entry["status"] != "fresh"]
-        malformed = [entry["path"] for entry in invalid_entries if entry["status"] == "malformed"]
-        missing = [entry["path"] for entry in invalid_entries if entry["status"] == "missing"]
-        stale = [entry["path"] for entry in invalid_entries if entry["status"] == "stale"]
-        missing_fields = [entry for entry in invalid_entries if entry["status"] == "missing_fields"]
-        invalid_bodies = [entry for entry in invalid_entries if entry["status"] == "invalid_body"]
-        if malformed:
-            click.echo("Malformed frontmatter:")
-            for rel in malformed:
-                click.echo(f"  {rel}")
-        if missing_fields:
-            click.echo("Missing required fields:")
-            for item in missing_fields:
-                click.echo(f"  {item['path']}: {', '.join(item['fields'])}")
-        if invalid_bodies:
-            click.echo("Invalid manifest bodies:")
-            for item in invalid_bodies:
-                click.echo(f"  {item['path']}:")
-                for issue in item["issues"]:
-                    click.echo(f"    - {issue}")
-        if stale:
-            click.echo("Stale manifests:")
-            for rel in stale:
-                click.echo(f"  {rel}")
-        if missing:
-            click.echo("Missing manifests:")
-            for rel in missing:
-                click.echo(f"  {rel}")
-        if invalid_entries:
-            summary = result.summary
-            click.echo(f"\nHealth summary: {summary['fresh']} fresh, {summary['stale']} stale, {summary['missing']} missing.")
-            click.echo(f"Found {summary['invalid']} directory issue(s).")
-            sys.exit(1)
-        click.echo("All manifests are valid, present, and fresh.")
+                click.echo(f"{len(changed)} CONTEXT.md file{'s' if len(changed) != 1 else ''} changed:")
+                for file_path in changed:
+                    label = "new" if file_path in new_files else "mod"
+                    click.echo(f"  [{label}] {file_path}")
+        else:
+            invalid_entries = [entry for entry in result.directories if entry["status"] != "fresh"]
+            malformed = [entry["path"] for entry in invalid_entries if entry["status"] == "malformed"]
+            missing = [entry["path"] for entry in invalid_entries if entry["status"] == "missing"]
+            stale = [entry["path"] for entry in invalid_entries if entry["status"] == "stale"]
+            missing_fields = [entry for entry in invalid_entries if entry["status"] == "missing_fields"]
+            invalid_bodies = [entry for entry in invalid_entries if entry["status"] == "invalid_body"]
+            if malformed:
+                click.echo("Malformed frontmatter:")
+                for rel in malformed:
+                    click.echo(f"  {rel}")
+            if missing_fields:
+                click.echo("Missing required fields:")
+                for item in missing_fields:
+                    click.echo(f"  {item['path']}: {', '.join(item['fields'])}")
+            if invalid_bodies:
+                click.echo("Invalid manifest bodies:")
+                for item in invalid_bodies:
+                    click.echo(f"  {item['path']}:")
+                    for issue in item["issues"]:
+                        click.echo(f"    - {issue}")
+            if stale:
+                click.echo("Stale manifests:")
+                for rel in stale:
+                    click.echo(f"  {rel}")
+            if missing:
+                click.echo("Missing manifests:")
+                for rel in missing:
+                    click.echo(f"  {rel}")
+            if invalid_entries:
+                summary = result.summary
+                click.echo(f"\nHealth summary: {summary['fresh']} fresh, {summary['stale']} stale, {summary['missing']} missing.")
+                click.echo(f"Found {summary['invalid']} directory issue(s).")
+                sys.exit(1)
+            click.echo("All manifests are valid, present, and fresh.")
     _exit_for_broker(broker, json_mode=json_mode)
 
 
@@ -951,10 +969,16 @@ def watch(ctx: click.Context, path: str, provider: Optional[str], model: Optiona
 @cli.command(hidden=True)
 @click.argument("path", default=".", required=False)
 @click.option("--check", "check_only", is_flag=True, help="Print detected provider without writing config.")
+@_subcommand_output_option
 @click.pass_context
-def setup(ctx: click.Context, path: str, check_only: bool) -> None:
+def setup(
+    ctx: click.Context,
+    path: str,
+    check_only: bool,
+    sub_output_mode: Optional[str] = None,
+) -> None:
     """Auto-detect LLM provider and write .ctxconfig."""
-    json_mode = _json_mode(ctx)
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
     _echo_legacy_warning("setup", "refresh --setup", json_mode=json_mode)
     with OutputBroker(command="setup", json_mode=json_mode) as broker:
         target_path = Path(path)
@@ -996,36 +1020,37 @@ def setup(ctx: click.Context, path: str, check_only: bool) -> None:
                     f"{sum(1 for c in result.checks if c.status == 'fail')} check(s) failed",
                     hint="ctx setup --check",
                 )
-            return
+        else:
+            def _probe_msg(provider: str) -> None:
+                label = {"ollama": "Ollama", "lmstudio": "LM Studio"}.get(provider, provider)
+                click.echo(f"Probing {label}...")
 
-        def _probe_msg(provider: str) -> None:
-            label = {"ollama": "Ollama", "lmstudio": "LM Studio"}.get(provider, provider)
-            click.echo(f"Probing {label}...")
+            cancelled = False
+            if config_file.exists():
+                click.echo(f".ctxconfig already exists:\n\n{config_file.read_text(encoding='utf-8')}")
+                if not click.confirm("Overwrite?", default=False):
+                    click.echo("Cancelled.")
+                    broker.set_data({"configured": False, "provider": None, "model": None})
+                    cancelled = True
 
-        if not check_only and config_file.exists():
-            click.echo(f".ctxconfig already exists:\n\n{config_file.read_text(encoding='utf-8')}")
-            if not click.confirm("Overwrite?", default=False):
-                click.echo("Cancelled.")
-                broker.set_data({"configured": False, "provider": None, "model": None})
-                return
+            if not cancelled:
+                det = detect_provider(_probe_callback=_probe_msg)
+                if det is None:
+                    raise click.UsageError(
+                        "No LLM provider detected.\n"
+                        "  Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or start Ollama / LM Studio first."
+                    )
 
-        det = detect_provider(_probe_callback=_probe_msg)
-        if det is None:
-            raise click.UsageError(
-                "No LLM provider detected.\n"
-                "  Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or start Ollama / LM Studio first."
-            )
+                provider_name, model_name = det
+                detected_via = PROVIDER_DETECTED_VIA.get(provider_name, provider_name)
+                click.echo(f"Detected: {provider_name} ({detected_via})")
 
-        provider_name, model_name = det
-        detected_via = PROVIDER_DETECTED_VIA.get(provider_name, provider_name)
-        click.echo(f"Detected: {provider_name} ({detected_via})")
-
-        base_url_value = DEFAULT_BASE_URLS.get(provider_name)
-        write_default_config(target_path, provider_name, model=model_name, base_url=base_url_value)
-        click.echo(f"Config written to {config_file}")
-        click.echo("\nNext step: run `ctx refresh .` to generate manifests.")
-        broker.set_data({"configured": True, "provider": provider_name, "model": model_name})
-        broker.set_recommended_next("ctx refresh .")
+                base_url_value = DEFAULT_BASE_URLS.get(provider_name)
+                write_default_config(target_path, provider_name, model=model_name, base_url=base_url_value)
+                click.echo(f"Config written to {config_file}")
+                click.echo("\nNext step: run `ctx refresh .` to generate manifests.")
+                broker.set_data({"configured": True, "provider": provider_name, "model": model_name})
+                broker.set_recommended_next("ctx refresh .")
     _exit_for_broker(broker, json_mode=json_mode)
 
 
@@ -1200,7 +1225,17 @@ def _directory_within_depth(path: Path, root: Path, depth: Optional[int]) -> boo
 
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
-@click.option("--output", "-o", default=None, help="Output file path (default: stdout).")
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    help="Output file path (default: stdout), or 'json'/'human' to select output format.",
+)
+@click.option(
+    "--out-file",
+    default=None,
+    help="Output file path (unambiguous alternative to -o/--output).",
+)
 @click.option(
     "--filter", "filter_mode",
     type=click.Choice(["all", "stale", "missing"]),
@@ -1218,8 +1253,9 @@ def export(
     ctx: click.Context,
     path: str,
     output: Optional[str],
-    filter_mode: str,
-    depth: Optional[int],
+    out_file: Optional[str] = None,
+    filter_mode: str = "all",
+    depth: Optional[int] = None,
     capsule: bool = False,
 ) -> None:
     """Concatenate all CONTEXT.md files to stdout or a file.
@@ -1229,82 +1265,105 @@ def export(
 
     Respects .ctxignore patterns (same as ctx init/update).
     """
-    json_mode = _json_mode(ctx)
+    resolved_out_file = out_file
+    sub_output_mode: Optional[str] = None
+    if output is not None:
+        if output.strip().lower() in ("json", "human"):
+            sub_output_mode = output.strip().lower()
+        elif resolved_out_file is None:
+            resolved_out_file = output
+
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
     with OutputBroker(command="export", json_mode=json_mode) as broker:
         root = Path(path).resolve()
         if capsule:
             capsule_res = api.build_fleet_capsule(
                 root,
                 depth=1 if depth is None else depth,
-                output_file=output,
+                output_file=resolved_out_file,
             )
             broker.set_data(asdict(capsule_res))
             if not json_mode:
-                if output:
-                    click.echo(f"Exported fleet capsule for {capsule_res.repo_name} to {output}")
+                if resolved_out_file:
+                    click.echo(f"Exported fleet capsule for {capsule_res.repo_name} to {resolved_out_file}")
                 else:
                     click.echo(capsule_res.capsule_markdown, nl=False)
-            return
-
-        spec = load_ignore_patterns(root)
-        health_entries = [
-            entry for entry in inspect_directory_health(root, spec, root)
-            if _directory_within_depth(entry.path, root, depth)
-        ]
-
-        if filter_mode == "missing":
-            missing_dirs = []
-            for entry in health_entries:
-                if entry.status != "missing":
-                    continue
-                rel_display = entry.relative_path if entry.relative_path != "." else ""
-                missing_dirs.append((rel_display + "/") if rel_display else "./")
-            content = "\n".join(f"# {d} [MISSING]" for d in missing_dirs)
-            broker.set_data(
-                {
-                    "manifests_exported": len(missing_dirs),
-                    "filter": filter_mode,
-                    "depth": depth,
-                    "content": content,
-                }
+        elif api._is_tier2_repo(root):
+            exp_res = api.export_context(
+                root,
+                output_file=resolved_out_file,
+                filter_mode=filter_mode,
+                depth=depth,
             )
-            if output:
-                Path(output).write_text(content, encoding="utf-8")
-                n = len(missing_dirs)
-                click.echo(f"Exported {n} missing director{'y' if n == 1 else 'ies'} to {output}")
-            elif content:
-                click.echo(content, nl=False)
-            return
-
-        files = [
-            entry.path / "CONTEXT.md"
-            for entry in health_entries
-            if entry.status != "missing" and (filter_mode != "stale" or entry.status == "stale")
-        ]
-
-        parts = []
-        for f in files:
-            try:
-                rel = f.relative_to(root).as_posix()
-            except ValueError:
-                rel = f.as_posix()
-            parts.append(f"# {rel}\n\n{f.read_text(encoding='utf-8')}")
-
-        content = "\n\n".join(parts)
-        broker.set_data(
-            {
-                "manifests_exported": len(files),
-                "filter": filter_mode,
-                "depth": depth,
-                "content": content,
-            }
-        )
-
-        if output:
-            Path(output).write_text(content, encoding="utf-8")
-            click.echo(f"Exported {len(files)} manifest{'s' if len(files) != 1 else ''} to {output}")
+            broker.set_data(asdict(exp_res))
+            if not json_mode:
+                if resolved_out_file:
+                    n = exp_res.manifests_exported
+                    if filter_mode == "missing":
+                        click.echo(f"Exported {n} missing director{'y' if n == 1 else 'ies'} to {resolved_out_file}")
+                    else:
+                        click.echo(f"Exported {n} manifest{'s' if n != 1 else ''} to {resolved_out_file}")
+                elif exp_res.content:
+                    click.echo(exp_res.content, nl=False)
         else:
-            click.echo(content, nl=False)
+            spec = load_ignore_patterns(root)
+            health_entries = [
+                entry for entry in inspect_directory_health(root, spec, root)
+                if _directory_within_depth(entry.path, root, depth)
+            ]
+
+            if filter_mode == "missing":
+                missing_dirs = []
+                for entry in health_entries:
+                    if entry.status != "missing":
+                        continue
+                    rel_display = entry.relative_path if entry.relative_path != "." else ""
+                    missing_dirs.append((rel_display + "/") if rel_display else "./")
+                content = "\n".join(f"# {d} [MISSING]" for d in missing_dirs)
+                broker.set_data(
+                    {
+                        "manifests_exported": len(missing_dirs),
+                        "filter": filter_mode,
+                        "depth": depth,
+                        "content": content,
+                    }
+                )
+                if resolved_out_file:
+                    Path(resolved_out_file).write_text(content, encoding="utf-8")
+                    n = len(missing_dirs)
+                    click.echo(f"Exported {n} missing director{'y' if n == 1 else 'ies'} to {resolved_out_file}")
+                elif content:
+                    click.echo(content, nl=False)
+            else:
+                files = [
+                    entry.path / "CONTEXT.md"
+                    for entry in health_entries
+                    if entry.status != "missing" and (filter_mode != "stale" or entry.status == "stale")
+                ]
+
+                parts = []
+                for f in files:
+                    try:
+                        rel = f.relative_to(root).as_posix()
+                    except ValueError:
+                        rel = f.as_posix()
+                    parts.append(f"# {rel}\n\n{f.read_text(encoding='utf-8')}")
+
+                content = "\n\n".join(parts)
+                broker.set_data(
+                    {
+                        "manifests_exported": len(files),
+                        "filter": filter_mode,
+                        "depth": depth,
+                        "content": content,
+                    }
+                )
+
+                if resolved_out_file:
+                    Path(resolved_out_file).write_text(content, encoding="utf-8")
+                    click.echo(f"Exported {len(files)} manifest{'s' if len(files) != 1 else ''} to {resolved_out_file}")
+                else:
+                    click.echo(content, nl=False)
     _exit_for_broker(broker, json_mode=json_mode)
 
 
@@ -1517,17 +1576,25 @@ def stats(ctx: click.Context, path: str, verbose: bool, output_format: str, boar
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
 @click.option("--dry-run", is_flag=True, help="List CONTEXT.md files that would be deleted without removing them.")
+@_subcommand_output_option
 @click.pass_context
-def reset(ctx: click.Context, path: str, yes: bool, dry_run: bool) -> None:
+def reset(
+    ctx: click.Context,
+    path: str,
+    yes: bool,
+    dry_run: bool,
+    sub_output_mode: Optional[str] = None,
+) -> None:
     """Remove all CONTEXT.md files from the directory tree."""
-    json_mode = _json_mode(ctx)
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
     with OutputBroker(command="reset", json_mode=json_mode) as broker:
         root = Path(path).resolve()
         if json_mode and not yes and not dry_run:
             broker.add_error("confirmation_required", "--yes flag required in non-interactive mode", hint="Re-run with --yes.")
         else:
+            aborted = False
             if not yes and not dry_run and not json_mode:
-                manifests = sorted(root.rglob("CONTEXT.md"))
+                manifests = api._iter_tree_manifests(root)
                 if manifests:
                     confirmed = click.confirm(
                         f"Found {len(manifests)} CONTEXT.md file(s). Delete all?", default=False
@@ -1535,22 +1602,24 @@ def reset(ctx: click.Context, path: str, yes: bool, dry_run: bool) -> None:
                     if not confirmed:
                         click.echo("Aborted.")
                         broker.set_data({"manifests_removed": 0, "paths": []})
-                        return
-                yes = True
+                        aborted = True
+                if not aborted:
+                    yes = True
 
-            result = api.reset(root, dry_run=dry_run, yes=yes)
-            broker.set_data(asdict(result))
+            if not aborted:
+                result = api.reset(root, dry_run=dry_run, yes=yes)
+                broker.set_data(asdict(result))
 
-            if not json_mode:
-                if dry_run:
-                    if not result.paths:
-                        click.echo("No CONTEXT.md files found.")
+                if not json_mode:
+                    if dry_run:
+                        if not result.paths:
+                            click.echo("No CONTEXT.md files found.")
+                        else:
+                            click.echo(f"{len(result.paths)} CONTEXT.md file(s) would be deleted:")
+                            for path_item in result.paths:
+                                click.echo(f"  {path_item}")
                     else:
-                        click.echo(f"{len(result.paths)} CONTEXT.md file(s) would be deleted:")
-                        for path_item in result.paths:
-                            click.echo(f"  {path_item}")
-                else:
-                    click.echo(f"Removed {result.manifests_removed} CONTEXT.md file(s).")
+                        click.echo(f"Removed {result.manifests_removed} CONTEXT.md file(s).")
     _exit_for_broker(broker, json_mode=json_mode)
 
 
@@ -1558,48 +1627,55 @@ def reset(ctx: click.Context, path: str, yes: bool, dry_run: bool) -> None:
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
 @click.option("--dry-run", is_flag=True, help="List CONTEXT.md files that would be deleted without removing them.")
+@_subcommand_output_option
 @click.pass_context
-def clean(ctx: click.Context, path: str, yes: bool, dry_run: bool) -> None:
+def clean(
+    ctx: click.Context,
+    path: str,
+    yes: bool,
+    dry_run: bool,
+    sub_output_mode: Optional[str] = None,
+) -> None:
     """Remove all CONTEXT.md files from the directory tree."""
-    json_mode = _json_mode(ctx)
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
     _echo_legacy_warning("clean", "reset", json_mode=json_mode)
     with OutputBroker(command="reset", json_mode=json_mode) as broker:
         root = Path(path).resolve()
-        manifests = sorted(root.rglob("CONTEXT.md"))
+        manifests = api._iter_tree_manifests(root)
 
         if not manifests:
             click.echo("No CONTEXT.md files found.")
             broker.set_data({"manifests_removed": 0, "paths": []})
-            return
-
-        rel_paths = [m.relative_to(root).as_posix() for m in manifests]
-        if dry_run:
-            click.echo(f"{len(manifests)} CONTEXT.md file(s) would be deleted:")
-            for rel in rel_paths:
-                click.echo(f"  {rel}")
-            broker.set_data({"manifests_removed": 0, "paths": rel_paths})
-            return
-
-        if json_mode and not yes:
-            broker.add_error("unknown_error", "--yes flag required in non-interactive mode",
-                             hint="Use: ctx reset . --yes --output json")
-            broker.set_data({"manifests_removed": 0, "paths": []})
-            return
-        if not yes:
-            confirmed = click.confirm(
-                f"Found {len(manifests)} CONTEXT.md file(s). Delete all?", default=False
-            )
-            if not confirmed:
-                click.echo("Aborted.")
+        else:
+            rel_paths = [m.relative_to(root).as_posix() for m in manifests]
+            if dry_run:
+                click.echo(f"{len(manifests)} CONTEXT.md file(s) would be deleted:")
+                for rel in rel_paths:
+                    click.echo(f"  {rel}")
+                broker.set_data({"manifests_removed": 0, "paths": rel_paths})
+            elif json_mode and not yes:
+                broker.add_error(
+                    "unknown_error",
+                    "--yes flag required in non-interactive mode",
+                    hint="Use: ctx reset . --yes --output json",
+                )
                 broker.set_data({"manifests_removed": 0, "paths": []})
-                return
-
-        with CtxLock(root, command="reset"):
-            for manifest_path in manifests:
-                manifest_path.unlink()
-
-        click.echo(f"Removed {len(manifests)} CONTEXT.md file(s).")
-        broker.set_data({"manifests_removed": len(manifests), "paths": rel_paths})
+            else:
+                aborted = False
+                if not yes:
+                    confirmed = click.confirm(
+                        f"Found {len(manifests)} CONTEXT.md file(s). Delete all?", default=False
+                    )
+                    if not confirmed:
+                        click.echo("Aborted.")
+                        broker.set_data({"manifests_removed": 0, "paths": []})
+                        aborted = True
+                if not aborted:
+                    with CtxLock(root, command="reset"):
+                        for manifest_path in manifests:
+                            manifest_path.unlink()
+                    click.echo(f"Removed {len(manifests)} CONTEXT.md file(s).")
+                    broker.set_data({"manifests_removed": len(manifests), "paths": rel_paths})
     _exit_for_broker(broker, json_mode=json_mode)
 
 

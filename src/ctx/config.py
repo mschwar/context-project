@@ -19,7 +19,7 @@ Built-in defaults:
     max_tokens_per_run: None  (hard token guardrail)
     max_usd_per_run: None  (hard USD guardrail)
     files_per_call: None  (send all files in a single LLM call — smaller values increase API call count)
-    max_concurrent_dirs: None  (auto: 1 for cloud providers, 4 for local)
+    max_concurrent_dirs: None  (auto: 1 for cloud and local single-GPU safety)
     extensions: None  (all text files)
     base_url: None  (provider default — override for custom endpoints)
 """
@@ -113,7 +113,7 @@ class Config:
     max_tokens_per_run: Optional[int] = None  # None = unlimited hard token guardrail
     max_usd_per_run: Optional[float] = None  # None = unlimited hard USD guardrail
     files_per_call: Optional[int] = None  # None = send all files in one call
-    max_concurrent_dirs: Optional[int] = None  # None = auto (1 for cloud, 4 for local)
+    max_concurrent_dirs: Optional[int] = None  # None = auto (1 for cloud and local single-GPU safety)
     extensions: Optional[list[str]] = None  # None = all text files
     cache_path: Optional[str] = None  # None = default .ctx-cache/llm_cache.json; "" = disable
     max_cache_entries: int = 10_000  # trim disk cache when it exceeds this many entries
@@ -154,6 +154,14 @@ def _parse_optional_float(value: str) -> float | None:
     return None if value.lower() == "none" else float(value)
 
 
+def normalize_models_probe_url(base_url: str) -> str:
+    """Return the /v1/models endpoint URL without duplicating a trailing /v1."""
+    trimmed = base_url.rstrip("/")
+    if trimmed.endswith("/v1"):
+        return f"{trimmed}/models"
+    return f"{trimmed}/v1/models"
+
+
 def detect_provider(
     _probe_callback: "Callable[[str], None] | None" = None,
 ) -> tuple[str, str | None] | None:
@@ -177,11 +185,17 @@ def detect_provider(
         if _probe_callback:
             _probe_callback(provider)
         try:
-            with urllib.request.urlopen(f"{base_url}/v1/models", timeout=2) as resp:
+            with urllib.request.urlopen(normalize_models_probe_url(base_url), timeout=2) as resp:
                 data = json.loads(resp.read())
             model: str | None = None
             if isinstance(data.get("data"), list) and data["data"]:
-                model = data["data"][0].get("id")
+                model_ids = [
+                    item["id"].strip()
+                    for item in data["data"]
+                    if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"].strip()
+                ]
+                non_embed = [mid for mid in model_ids if "embed" not in mid.lower()]
+                model = non_embed[0] if non_embed else (model_ids[0] if model_ids else None)
             return (provider, model)
         except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError):
             pass
@@ -210,7 +224,7 @@ def probe_provider_connectivity(
         req.add_header("x-api-key", api_key)
         req.add_header("anthropic-version", ANTHROPIC_API_VERSION)
     elif provider == "openai":
-        url = (base_url or OPENAI_DEFAULT_PROBE_BASE_URL) + "/v1/models"
+        url = normalize_models_probe_url(base_url or OPENAI_DEFAULT_PROBE_BASE_URL)
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {api_key}")
     else:

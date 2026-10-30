@@ -1,44 +1,46 @@
 ---
-generated: '2026-03-18T22:47:10Z'
-generator: ctx/0.8.0
-model: claude-haiku-4-5-20251001
-content_hash: sha256:0df7911305cbdeead11863616e5ad816cd6f01ee534b6d2316f8340cea291d63
-files: 18
+generated: '2026-10-30T14:57:38Z'
+generator: ctx/1.1.0
+model: qwen2.5:7b-instruct
+content_hash: sha256:31e034ef49bee2527e883a1a1b793b8382f517efd27d6f1621c958a5b8ae51fb
+files: 23
 dirs: 1
-tokens_total: 19104
+tokens_total: 28571
 ---
-# C:/Users/Matty/Documents/context-project/src/ctx
+# /central/repos/active/context-project/src/ctx
 
-Core implementation of ctx, a filesystem-native context layer that generates and maintains CONTEXT.md manifests for AI agents through LLM-powered directory summarization.
+Unified API and CLI entry points for managing and generating CONTEXT.md files, integrating various utilities and services.
 
 ## Files
-- **.ctxignore.default** — Default ignore patterns for ctx tool, excluding version control, dependencies, IDE files, and temporary artifacts.
-- **__init__.py** — Package initialization defining ctx as a filesystem-native context layer for AI agents.
-- **__main__.py** — Entry point for running ctx as a Python module via `python -m ctx`.
-- **api.py** — Unified API layer providing refresh, check, export, and reset operations for context manifest management.
-- **cli.py** — Click CLI entry point exposing ctx commands (init, update, status, check, watch, setup, export, reset) with progress tracking and error handling.
-- **config.py** — Configuration loading from environment variables and .ctxconfig YAML files with provider detection, connectivity probing, and cost estimation.
-- **generator.py** — Core generation engine that walks directory trees bottom-up, detects file types, calls LLM for summaries, and writes CONTEXT.md manifests.
-- **git.py** — Git utility functions for detecting repository state and retrieving lists of changed files since last commit.
-- **hasher.py** — Computes SHA-256 hashes of files and directories for staleness detection with symlink loop handling.
-- **ignore.py** — Ignore-pattern matching using .ctxignore files with gitignore-style glob patterns.
-- **language_detector.py** — Detects programming language from file extensions and project configuration files.
-- **llm.py** — LLM client protocol with Anthropic and OpenAI implementations for summarizing files and directories with retry logic and response parsing.
-- **lock.py** — Cross-platform file-based PID lock mechanism for coordinating concurrent ctx write operations.
-- **manifest.py** — Reads, writes, and parses CONTEXT.md manifest files with YAML frontmatter and directory metadata.
-- **mcp_server.py** — MCP stdio server implementing ctx tools for generating, checking, exporting, and resetting CONTEXT.md manifests.
-- **output.py** — Structured output broker that captures command results and emits JSON envelopes with status, metadata, and error classification.
-- **server.py** — FastAPI HTTP server providing endpoints to read and serve CONTEXT.md manifests from project directories.
-- **watcher.py** — File watcher for ctx watch command that monitors directory changes and triggers incremental manifest regeneration.
+- **.ctxignore.default** — Default ignore patterns for ctx projects.
+- **__init__.py** — Version number for the ctx filesystem-native context layer library.
+- **__main__.py** — Entry point for the CLI application.
+- **api.py** — Unified API layer for ctx canonical commands including refresh, check, and export operations.
+- **cli.py** — Click entry point for ctx CLI, handling various commands and operations.
+- **config.py** — Configuration handling and provider detection for the context project.
+- **generator.py** — Core generation engine for producing CONTEXT.md files by walking directory trees and generating summaries.
+- **git.py** — Retrieves changed files in a Git repository, handling unborn heads and staged/unstaged changes.
+- **hasher.py** — Computes SHA-256 hashes for files and directories, detecting staleness and handling symlinks.
+- **ignore.py** — Loads and merges ignore patterns from default and user-defined .ctxignore files for path matching.
+- **init.py** — Bootstrap .ctx/ infrastructure, install hooks, and manage git repo exports.
+- **language_detector.py** — Detects the primary programming language of a file or directory based on extensions and configuration files.
+- **llm.py** — LLM client interface with Anthropic and OpenAI implementations, providing file and directory summarization.
+- **lock.py** — Cross-platform PID lock implementation for ctx write operations managing lock files and PID validation.
+- **manifest.py** — Reads and parses CONTEXT.md manifest files into structured data models.
+- **mcp_server.py** — Defines error classes and resource definitions for the MCP stdio server, including tool operations and protocol handling.
+- **output.py** — Structured output broker for ctx CLI commands managing JSON envelope creation and error handling.
+- **preflight.py** — Preflight checks for LLM provider, model configuration, and connectivity.
+- **sdk.py** — Provides typed access to .ctx/ metadata and export tiers without importing LLM clients.
+- **server.py** — Serves CONTEXT.md files from project directories via HTTP API.
+- **skeleton.py** — Determines structural and dependency signatures for source files and directories.
+- **stats_board.py** — Persistent run-stats ledger for ctx including per-repo and global stats management.
+- **watcher.py** — Monitors directory changes and triggers manifest regeneration with debounced handling.
 
 ## Subdirectories
 - **lang_parsers/** — Language-specific parsers that extract public APIs and structural elements from source files across multiple programming languages.
 
 ## Notes
-- The module integrates multiple subsystems: manifest I/O (manifest.py), LLM clients (llm.py), file hashing (hasher.py), ignore patterns (ignore.py), and git integration (git.py) to support incremental updates and staleness detection.
-- Three user-facing interfaces are provided: CLI (cli.py), HTTP server (server.py), and MCP stdio server (mcp_server.py), all backed by a unified API layer (api.py).
-- The generator.py engine orchestrates bottom-up directory traversal, language detection, and LLM calls to produce manifests; language-specific parsing is delegated to the lang_parsers subdirectory.
-- Configuration is loaded from environment variables and .ctxconfig YAML files (config.py) with provider detection and cost estimation; .ctxignore.default provides default exclusion patterns.
-- Concurrency is managed via file-based PID locks (lock.py) to prevent simultaneous writes; the watcher.py module enables incremental regeneration on file changes.
+- Cross-module relationships: `lang_parsers` subdirectory provides language-specific parsing capabilities used by `generator.py` and `skeleton.py`.
+- Architectural notes: `__main__.py` and `cli.py` handle CLI interactions, while `api.py` and `generator.py` manage API and file generation respectively.
 
 <!-- Generated by ctx (https://pypi.org/project/ctx-tool/) -->

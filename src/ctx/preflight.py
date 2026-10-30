@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import yaml
+
 from ctx.config import (
     DEFAULT_BASE_URLS,
     LOCAL_PROVIDERS,
@@ -18,6 +20,7 @@ from ctx.config import (
     _iter_config_dirs,
     detect_provider,
     load_config,
+    normalize_models_probe_url,
     probe_provider_connectivity,
 )
 
@@ -44,13 +47,31 @@ def _probe_local_models(base_url: str) -> tuple[bool, str | None]:
     Returns (ok, error_or_None).
     """
     try:
-        with urllib.request.urlopen(f"{base_url}/v1/models", timeout=5) as resp:
+        with urllib.request.urlopen(normalize_models_probe_url(base_url), timeout=5) as resp:
             data = json.loads(resp.read())
         if isinstance(data.get("data"), list) and data["data"]:
             return True, None
         return False, "no models loaded"
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
         return False, str(exc)
+
+
+def _has_explicit_model_config(target: Path) -> bool:
+    if os.getenv("CTX_MODEL", "").strip():
+        return True
+    start = target.resolve() if target.exists() else target
+    if not start.is_dir():
+        start = start.parent
+    for d in _iter_config_dirs(start):
+        cfg_path = d / ".ctxconfig"
+        if not cfg_path.exists():
+            continue
+        try:
+            data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return False
+        return isinstance(data, dict) and bool(str(data.get("model") or "").strip())
+    return False
 
 
 def probe_model_quality(config) -> tuple[bool, str | None]:
@@ -126,6 +147,8 @@ def run_preflight(path: str = ".") -> PreflightResult:
     config_failed_fatal = False
     try:
         config = load_config(target, provider=provider_name, require_api_key=True)
+        if detected_model and config.provider == provider_name and not _has_explicit_model_config(target):
+            config.model = detected_model
         config_detail = f"loaded from {target.resolve()}"
         # Check for .ctxconfig file specifically
         for d in _iter_config_dirs(target.resolve()):
@@ -237,11 +260,16 @@ def run_preflight(path: str = ".") -> PreflightResult:
                     ),
                 ))
             else:
+                fix_hint = (
+                    f"verify base_url ({base_url}) is reachable and exposes an OpenAI-compatible /v1/models endpoint."
+                    if base_url
+                    else "check your internet connection."
+                )
                 checks.append(PreflightCheck(
                     name="connectivity",
                     status="fail",
                     detail=f"cannot reach {resolved_provider} API — {err_str}.",
-                    fix="check your internet connection.",
+                    fix=fix_hint,
                 ))
 
     if not conn_ok:
