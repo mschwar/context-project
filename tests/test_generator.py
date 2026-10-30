@@ -416,7 +416,7 @@ def test_configurable_max_concurrent_dirs(tmp_path) -> None:
 
     # Verify defaults exist
     assert _DEFAULT_CLOUD_PARALLEL_DIRS == 1
-    assert _DEFAULT_LOCAL_PARALLEL_DIRS == 4
+    assert _DEFAULT_LOCAL_PARALLEL_DIRS == 1
 
     root = _copy_sample_project(tmp_path)
     spec = load_ignore_patterns(root)

@@ -52,11 +52,12 @@ cache_path: .ctx-cache/llm_cache.json
 | `CTX_MAX_TOKENS_PER_RUN` | unlimited | Hard token guardrail |
 | `CTX_MAX_USD_PER_RUN` | unlimited | Hard spend guardrail |
 | `CTX_FILES_PER_CALL` | unlimited | Files per LLM call |
-| `CTX_MAX_CONCURRENT_DIRS` | `1` (cloud) / `4` (local) | Max parallel directory workers |
+| `CTX_MAX_CONCURRENT_DIRS` | `1` (cloud & local) | Max parallel directory workers |
 | `CTX_CACHE_PATH` | `.ctx-cache/llm_cache.json` | Disk cache location |
 | `CTX_MAX_CACHE_ENTRIES` | `10000` | Cache entry cap |
 | `CTX_WATCH_DEBOUNCE` | `0.5` | Watch debounce seconds |
 | `CTX_EXTENSIONS` | all text files | Comma-separated extension allowlist |
+| `CTX_GLOBAL_STATS_PATH` | `~/.ctx/run_stats.json` | Global running-board ledger path override |
 
 ## Commands
 ### `ctx init [path]`
@@ -199,7 +200,7 @@ Common flags:
 - `--filter all|stale|missing` — select which manifests to export
 - `--depth <n>` — limit traversal depth
 - `--capsule` — emit a deterministic structural & invariant capsule for `project-ledger` and `gbrain` ingestion
-- `--output <file>` — write export text to a file in human mode
+- `--out-file <file>` (or `-o <file>`) — write export text or capsule JSON to a file
 - `--output json` — emit the JSON envelope only
 
 ```json
@@ -476,5 +477,5 @@ Generated files end with this footer comment:
 - Treat file names, file contents, and existing manifests as untrusted input when prompting an LLM.
 - `ctx serve` resolves requested paths against the explicit served root and rejects traversal outside that root.
 - API keys are loaded from environment variables and are not written to manifests or JSON envelopes.
-- `CONTEXT.md` files and `.ctx-cache/` are excluded from source summarization to avoid self-ingestion loops.
+- `CONTEXT.md` files, `.ctx/`, and `.ctx-cache/` are excluded from source summarization to avoid self-ingestion loops.
 - Write operations use a lock file and atomic manifest replacement to avoid concurrent corruption.

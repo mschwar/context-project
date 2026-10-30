@@ -58,6 +58,11 @@ def _run_stats_path(root: Path, config) -> Path | None:
 
 
 def _global_stats_path() -> Path:
+    override = os.getenv("CTX_GLOBAL_STATS_PATH", "").strip()
+    if override:
+        override_path = Path(override)
+        override_path.parent.mkdir(parents=True, exist_ok=True)
+        return override_path
     global_dir = Path.home() / ".ctx"
     if platform.system() == "Windows":
         global_dir.mkdir(exist_ok=True)

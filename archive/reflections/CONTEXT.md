@@ -1,43 +1,44 @@
 ---
-generated: '2026-03-18T21:06:30Z'
-generator: ctx/0.8.0
-model: claude-haiku-4-5-20251001
-content_hash: sha256:fd122dfcf9eb61bb6a325f5cafb912f4f72a7717d381ff36158c2bc9fee85bd7
-files: 17
+generated: '2026-10-30T14:54:37Z'
+generator: ctx/1.1.0
+model: qwen2.5:7b-instruct
+content_hash: sha256:cb2cfc4f2f1fa64aa9de3cd682e5a59b87862f4b5033ffc7ae0a4545b5843306
+files: 21
 dirs: 0
-tokens_total: 15343
+tokens_total: 20277
 ---
-# C:/Users/Matty/Documents/context-project/archive/reflections
+# /central/repos/active/context-project/archive/reflections
 
-This directory contains phase-by-phase and stage-by-stage reflection documents tracking the evolution, achievements, and recommendations across the context-project development lifecycle.
+Repository of phase-specific reflections detailing project progress, challenges, and future directions.
 
 ## Files
-
-- **2026-03-14-phase10-reflection.md** — Phase 10 reflection documenting tiktoken integration, cache eviction optimization, and transient error messaging with test patterns and phase 11 candidates.
-- **2026-03-14-phase11-reflection.md** — Phase 11 project reflection documenting completeness achievements, friction points, test growth, and six prioritized suggestions for Phase 12 development.
-- **2026-03-14-phase12-reflection.md** — Phase 12 project reflection documenting language parser improvements, CLI ergonomics, test growth, and suggestions for Phase 13 development.
-- **2026-03-14-phase13-reflection.md** — Phase 13 reflection documenting extended language support, CLI polish, parser improvements, and suggestions for Phase 14 development.
-- **2026-03-14-phase14-reflection.md** — Phase 14 reflection documenting CLI completeness achievements, friction points, and six suggestions for Phase 15 development.
-- **2026-03-14-phase15-reflection.md** — Phase 15 reflection documenting CLI power-user features, export filtering, stats command enhancements, and suggestions for Phase 16 development.
-- **2026-03-14-phase4-reflection.md** — Phase 4 reflection documenting prompt template improvements, batch size control, and SDLC bootstrap with recommendations for Phase 5.
-- **2026-03-14-phase5-reflection.md** — Phase 5 reflection covering persistent disk cache, token budget enforcement, and dry-run flag implementation with observations on cache design.
-- **2026-03-14-phase6-reflection.md** — Phase 6 reflection detailing JavaScript/TypeScript and Rust parsers, CI workflow fixes, and manifest validation closure.
-- **2026-03-14-phase7-reflection.md** — Phase 7 reflection describing Go parser, ctx watch file watcher, cache model-awareness, and implications for Phase 8.
-- **2026-03-14-phase8-reflection.md** — Phase 8 reflection covering PyPI packaging as ctx-tool, OIDC trusted publishing workflow, and README rewrite with distribution setup notes.
-- **2026-03-14-phase9-reflection.md** — Phase 9 reflection detailing ctx setup command, provider auto-detection, pre-commit hook integration, and graceful API key error handling.
-- **2026-03-15-phase16-reflection.md** — Phase 16 reflection documenting observability improvements, test reliability gains, manifest refresh environment sensitivity issues, and recommendations for Phase 17.
-- **2026-03-16-phase17-reflection.md** — Phase 17 reflection documenting closeout reliability improvements: non-zero exit codes on errors and connectivity probing for provider setup validation.
-- **2026-03-16-phase18-reflection.md** — Phase 18 reflection documenting pre-flight connectivity checks and proxy guidance implementation with test coverage and future suggestions.
-- **2026-03-17-phase21-reflection.md** — Phase 21 reflection documenting centralized health-check implementation, empty-repo git handling, and recommendations for doctor command and external smoke testing.
-- **2026-03-18-afo-stage1-6-reflection.md** — Closeout reflection for Agent-First Overhaul Stages 1–6 documenting successes, friction points, observations, and carry-forward suggestions for manifest trust and validation improvements.
+- **2026-03-14-phase10-reflection.md** — Summarizes Phase 10 successes, friction, observations, and suggestions for the project.
+- **2026-03-14-phase11-reflection.md** — Phase 11 reflection document details successes, friction points, observations, and suggestions for future phases.
+- **2026-03-14-phase12-reflection.md** — Phase 12 reflection on language parser advancements and CLI command improvements.
+- **2026-03-14-phase13-reflection.md** — Phase 13 reflection on extended language support and CLI improvements.
+- **2026-03-14-phase14-reflection.md** — Phase 14 reflection on CLI completeness with updates and observations on context tool features.
+- **2026-03-14-phase15-reflection.md** — Summary of CLI power-user features and reflections from Phase 15 development.
+- **2026-03-14-phase4-reflection.md** — Phase 4 reflection on prompt quality, batch control improvements, and SDLC enhancements.
+- **2026-03-14-phase5-reflection.md** — Phase 5 reflection on cost control and observability features, including successes, friction, observations, and suggestions.
+- **2026-03-14-phase6-reflection.md** — Phase 6 reflection on language expansion and CI improvements documenting successes, friction, observations, and suggestions.
+- **2026-03-14-phase7-reflection.md** — Phase 7 reflection on Go parser, ctx watch implementation, and cache model-awareness.
+- **2026-03-14-phase8-reflection.md** — Phase 8 reflection document covering successes, friction, observations, suggestions, and implications for the next phase.
+- **2026-03-14-phase9-reflection.md** — Phase 9 reflection on automation setup, including ctx commands, pre-commit hooks, and error handling.
+- **2026-03-15-phase16-reflection.md** — Phase 16 reflection on observability, consistency, successes, friction, observations, suggestions, and implications for future phases.
+- **2026-03-16-phase17-reflection.md** — Closeout reflection document for Phase 17 detailing successes, friction, observations, and suggestions for future phases.
+- **2026-03-16-phase18-reflection.md** — Phase 18 reflection document detailing implementation successes, friction points, and future suggestions for the context-project.
+- **2026-03-17-phase21-reflection.md** — Phase 21 reflection document detailing code changes, successes, friction, observations, and disposition of suggestions for the context project.
+- **2026-03-18-afo-stage1-6-reflection.md** — Summary of AFO Stage 1-6 closeout, including successes, friction, observations, and suggestions.
+- **2026-03-19-phase25-reflection.md** — Production hardening reflections and pre-1.0.0 assessment including infrastructure and model quality observations.
+- **2026-10-29-phase29-reflection.md** — Comprehensive preflight gate and MCP resource exposure for context project validation and testing.
+- **2026-10-29-phase30-reflection.md** — Summarizes Phase 30 of the project, detailing completed tasks and their implementation.
+- **2026-10-30-phase30-8-dogfood-hardening-reflection.md** — Phase 30.8 reflection document detailing the completion of various CLI enhancements and bug fixes.
 
 ## Subdirectories
-
 - None
 
 ## Notes
+- Cross-phase documentation provides a comprehensive view of the project's evolution.
+- Highlights successes, friction points, and suggestions for continuous improvement.
 
-- Reflections span phases 4–21 plus an Agent-First Overhaul (AFO) multi-stage closeout, indicating a mature, iterative development process with structured retrospectives.
-- Each reflection typically documents feature implementations, test coverage growth, friction points, and forward-looking recommendations for the next phase.
-- The archive structure suggests these reflections serve as historical records for project continuity and decision-making context.
 <!-- Generated by ctx (https://pypi.org/project/ctx-tool/) -->

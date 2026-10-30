@@ -38,6 +38,7 @@ def _isolate_process_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[No
         "CTX_WATCH_DEBOUNCE",
         "CTX_EXTENSIONS",
         "CTX_OUTPUT",
+        "CTX_GLOBAL_STATS_PATH",
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
     ):
@@ -47,6 +48,7 @@ def _isolate_process_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[No
     temp_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("TEMP", os.fspath(temp_root))
     monkeypatch.setenv("TMP", os.fspath(temp_root))
+    monkeypatch.setenv("CTX_GLOBAL_STATS_PATH", os.fspath(temp_root / "global_run_stats.json"))
 
     repo_root = Path(__file__).resolve().parents[1].resolve()
     test_work_root = (repo_root / ".tmp" / "test-work").resolve()
