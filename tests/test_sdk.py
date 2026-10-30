@@ -101,3 +101,23 @@ def test_sdk_get_export_rejects_invalid_depth(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Unsupported export depth tier"):
         project.get_export(2)
+
+
+def test_sdk_get_context_and_is_stale_for_tier2_repo(tmp_path: Path) -> None:
+    import subprocess
+    from ctx.init import init_project
+
+    repo = tmp_path / "tier2_repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", str(repo)], capture_output=True, check=True)
+    (repo / "app.py").write_text("def run() -> None:\n    pass\n", encoding="utf-8")
+    init_project(repo, tier2=True)
+
+    proj = CtxProject.load(repo, walk_parents=False)
+    assert "Architecture & Authority Map (CONTEXT-0)" in proj.get_context(depth=0)
+    assert proj.is_stale() is False
+
+    # Adding a new public symbol makes tier2 stale
+    (repo / "app.py").write_text("def run() -> None:\n    pass\n\ndef extra() -> None:\n    pass\n", encoding="utf-8")
+    assert proj.is_stale() is True
+

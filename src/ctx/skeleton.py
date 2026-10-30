@@ -310,7 +310,8 @@ def _detect_config_entrypoints(root: Path) -> list[str]:
                         break
                     if "=" in stripped and not stripped.startswith("#"):
                         k, v = stripped.split("=", 1)
-                        entrypoints.append(f"cli:{k.strip()} -> {v.strip().strip('\"\'')}")
+                        cleaned_val = v.strip().strip("\"'")
+                        entrypoints.append(f"cli:{k.strip()} -> {cleaned_val}")
         except (OSError, UnicodeDecodeError):
             pass
 

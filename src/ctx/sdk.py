@@ -107,6 +107,29 @@ class CtxProject:
             raise FileNotFoundError(f"Export tier file not found: {target_file}")
         return target_file.read_text(encoding="utf-8")
 
+    def get_context(self, depth: int | None = None) -> str:
+        """Alias for get_export(depth) returning the pre-compiled export tier."""
+        return self.get_export(depth)
+
+    def is_stale(self) -> bool:
+        """Return True if Tier 2 structural/boundary hashes changed or exports are missing."""
+        for tier_name in ("CONTEXT.md", "CONTEXT-1.md", "CONTEXT-0.md"):
+            if not (self.ctx_dir / tier_name).is_file():
+                return True
+        meta = self.metadata
+        if meta.mode == "tier2" and meta.structural_hash and meta.boundary_doc_hash:
+            from ctx.skeleton import extract_skeleton, should_invoke_llm
+
+            skeleton = extract_skeleton(self.root)
+            return should_invoke_llm(
+                {
+                    "structural_hash": meta.structural_hash,
+                    "boundary_doc_hash": meta.boundary_doc_hash,
+                },
+                skeleton,
+            )
+        return False
+
     @property
     def context_full(self) -> str:
         return self.get_export(None)
