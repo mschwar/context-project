@@ -53,7 +53,9 @@ CTX_HOOK_END = "# <<< ctx-hook-end"
 CTX_DIR = ".ctx"
 METADATA_FILE = "metadata.json"
 HOOK_LOG_FILE = "hook_log.json"
-PID_FILE = ".ctx-hook.pid"
+PID_FILE = ".ctx/hook.pid"
+LEGACY_PID_FILE = ".ctx-hook.pid"
+MAX_HOOK_LOG_ENTRIES = 200
 
 # ── Depth-tiered export config ──────────────────────────────────────
 EXPORT_TIERS = [
@@ -77,9 +79,9 @@ def init_project(
     """
     root = root.resolve()
 
-    # 1. Validate: is this a git repo?
+    # 1. Validate: is this a git repo (including git worktrees/submodules where .git is a file)?
     git_dir = root / ".git"
-    if not git_dir.is_dir():
+    if not git_dir.exists():
         raise InitError(f"Not a git repository: {root}")
 
     # 2. Already initialized?
@@ -160,10 +162,11 @@ def uninit_project(root: Path) -> dict:
     # 3. Remove .ctx/ from root .gitignore
     _remove_from_gitignore(root, CTX_DIR + "/")
 
-    # 4. Remove PID file if present
-    pid_file = root / PID_FILE
-    if pid_file.exists():
-        pid_file.unlink(missing_ok=True)
+    # 4. Remove PID files if present (current + legacy)
+    for rel_pid in (PID_FILE, LEGACY_PID_FILE):
+        pid_file = root / rel_pid
+        if pid_file.exists():
+            pid_file.unlink(missing_ok=True)
 
     return {
         "root": str(root),
@@ -302,13 +305,44 @@ fi
 {CTX_HOOK_END}"""
 
 
+def _resolve_hooks_dir(root: Path) -> Path:
+    """Resolve the active git hooks directory, supporting worktrees and core.hooksPath."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-path", "hooks"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            candidate = Path(result.stdout.strip())
+            return candidate if candidate.is_absolute() else (root / candidate).resolve()
+    except (subprocess.SubprocessError, OSError):
+        pass
+
+    git_entry = root / ".git"
+    if git_entry.is_file():
+        try:
+            first_line = git_entry.read_text(encoding="utf-8").splitlines()[0].strip()
+            if first_line.lower().startswith("gitdir:"):
+                raw_gitdir = Path(first_line.split(":", 1)[1].strip())
+                resolved_gitdir = raw_gitdir if raw_gitdir.is_absolute() else (root / raw_gitdir).resolve()
+                return resolved_gitdir / "hooks"
+        except (OSError, IndexError):
+            pass
+
+    return git_entry / "hooks"
+
+
 def _install_hooks(root: Path) -> list[str]:
     """Install ctx hook blocks into git hook files.
 
     Returns list of hook names that were installed.
     """
-    hooks_dir = root / ".git" / "hooks"
-    hooks_dir.mkdir(exist_ok=True)
+    hooks_dir = _resolve_hooks_dir(root)
+    hooks_dir.mkdir(parents=True, exist_ok=True)
     installed = []
     hook_block = _generate_hook_script(root)
 
@@ -352,7 +386,7 @@ def _chain_hook(hook_path: Path, existing: str, hook_block: str) -> None:
 
 def _remove_hooks(root: Path) -> list[str]:
     """Remove ctx blocks from git hooks. Returns names of modified hooks."""
-    hooks_dir = root / ".git" / "hooks"
+    hooks_dir = _resolve_hooks_dir(root)
     removed = []
 
     for hook_name in HOOK_NAMES:
@@ -434,17 +468,38 @@ def _rmtree(path: Path) -> None:
 # ── PID debounce ────────────────────────────────────────────────────
 
 def _acquire_pid(root: Path) -> bool:
-    """Try to claim the PID file. Returns True if acquired."""
+    """Atomically claim the hook PID file inside .ctx/. Returns True if acquired."""
     pid_path = root / PID_FILE
-    if pid_path.exists():
+    try:
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+
+    for _attempt in range(2):
         try:
-            stored_pid = int(pid_path.read_text(encoding="utf-8").strip())
-            if _pid_alive(stored_pid):
-                return False  # Another hook is running
-        except (ValueError, OSError):
-            pass  # Stale or corrupt PID file, proceed
-    pid_path.write_text(str(os.getpid()), encoding="utf-8")
-    return True
+            fd = os.open(str(pid_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            try:
+                stored_pid = int(pid_path.read_text(encoding="utf-8").strip())
+                if _pid_alive(stored_pid):
+                    return False  # Another hook is running
+            except (ValueError, OSError):
+                pass  # Stale or corrupt PID file, remove and retry atomically
+            try:
+                pid_path.unlink(missing_ok=True)
+            except OSError:
+                return False
+            continue
+        except OSError:
+            return False
+
+        try:
+            os.write(fd, str(os.getpid()).encode("utf-8"))
+        finally:
+            os.close(fd)
+        return True
+
+    return False
 
 
 def _release_pid(root: Path) -> None:
@@ -483,13 +538,15 @@ def _pid_alive(pid: int) -> bool:
 # ── Hook telemetry ──────────────────────────────────────────────────
 
 def _append_hook_log(ctx_dir: Path, entry: dict) -> None:
-    """Append an entry to hook_log.json."""
+    """Append an entry to hook_log.json with bounded retention."""
     log_path = ctx_dir / HOOK_LOG_FILE
     try:
         data = load_json_safe(log_path, {"runs": []})
         if "runs" not in data or not isinstance(data["runs"], list):
             data = {"runs": []}
         data["runs"].append(entry)
+        if len(data["runs"]) > MAX_HOOK_LOG_ENTRIES:
+            data["runs"] = data["runs"][-MAX_HOOK_LOG_ENTRIES:]
         save_json_atomic(log_path, data)
     except Exception as exc:
         # Never let telemetry failure crash the hook

@@ -386,6 +386,7 @@ def test_root_gitignore_no_duplicates(tmp_path) -> None:
 def test_pid_debounce_skips_when_running(tmp_path) -> None:
     repo = _make_git_repo(tmp_path / "repo")
     pid_path = repo / PID_FILE
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Write our own PID to simulate a running hook
     pid_path.write_text(str(os.getpid()), encoding="utf-8")
@@ -486,6 +487,7 @@ def test_init_force_preserves_chained_hooks(tmp_path) -> None:
 def test_stale_pid_allows_hook(tmp_path) -> None:
     repo = _make_git_repo(tmp_path / "repo")
     pid_path = repo / PID_FILE
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Write a PID that definitely doesn't exist
     pid_path.write_text("99999999", encoding="utf-8")
@@ -550,4 +552,45 @@ def test_run_hook_tier2_updates_only_on_structural_or_boundary_change(tmp_path) 
     (repo / "hello.py").write_text("def exported_entrypoint() -> int:\n    return 42\n", encoding="utf-8")
     run_hook(repo, "post-commit")
     assert "Architecture & Authority Map (CONTEXT-0)" in c0_path.read_text(encoding="utf-8")
+
+
+def test_init_supports_git_worktree_and_core_hooks_path_and_prunes_hook_log(tmp_path) -> None:
+    """ctx init must work in git worktrees (.git file), honor core.hooksPath, and cap hook_log.json."""
+    import subprocess
+    from ctx.init import MAX_HOOK_LOG_ENTRIES, _append_hook_log
+
+    base_repo = _make_git_repo(tmp_path / "base_repo")
+    worktree_dir = tmp_path / "wt_branch"
+    subprocess.run(
+        ["git", "-C", str(base_repo), "worktree", "add", "-b", "wt-test", str(worktree_dir)],
+        capture_output=True,
+        check=True,
+    )
+    assert (worktree_dir / ".git").is_file()
+
+    # Configure custom core.hooksPath (like Husky / .githooks)
+    custom_hooks = worktree_dir / ".custom-hooks"
+    subprocess.run(
+        ["git", "-C", str(worktree_dir), "config", "core.hooksPath", ".custom-hooks"],
+        capture_output=True,
+        check=True,
+    )
+
+    res = init_project(worktree_dir, tier2=True)
+    assert len(res["hooks_installed"]) == 3
+    for hook_name in HOOK_NAMES:
+        assert (custom_hooks / hook_name).is_file()
+        assert CTX_HOOK_START in (custom_hooks / hook_name).read_text(encoding="utf-8")
+
+    # Verify hook_log.json retention cap
+    ctx_dir = worktree_dir / CTX_DIR
+    for idx in range(MAX_HOOK_LOG_ENTRIES + 15):
+        _append_hook_log(ctx_dir, {"seq": idx, "success": True})
+    log_data = json.loads((ctx_dir / HOOK_LOG_FILE).read_text(encoding="utf-8"))
+    assert len(log_data["runs"]) == MAX_HOOK_LOG_ENTRIES
+    assert log_data["runs"][0]["seq"] == 15
+
+    uninit_project(worktree_dir)
+    for hook_name in HOOK_NAMES:
+        assert not (custom_hooks / hook_name).exists()
 
