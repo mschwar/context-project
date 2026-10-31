@@ -333,7 +333,7 @@ def test_estimate_cost_specific_models_and_output_tokens() -> None:
     assert estimate_cost(1_000_000, "openai", "gpt-4.1-nano") == pytest.approx(0.10)
     assert estimate_cost(1_000_000, "openai", "gpt-4.1-mini") == pytest.approx(0.40)
     assert estimate_cost(1_000_000, "openai", "gpt-4.1") == pytest.approx(2.00)
-    # Split input/output pricing
+    # Split input/output pricing (Claude Haiku 4.5 official rates: $1.00/MTok in, $5.00/MTok out)
     split_cost = estimate_cost(
         2_000_000,
         "anthropic",
@@ -341,4 +341,4 @@ def test_estimate_cost_specific_models_and_output_tokens() -> None:
         input_tokens=1_000_000,
         output_tokens=1_000_000,
     )
-    assert split_cost == pytest.approx(0.80 + 4.00)
+    assert split_cost == pytest.approx(1.00 + 5.00)

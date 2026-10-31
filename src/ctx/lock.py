@@ -5,12 +5,15 @@ from __future__ import annotations
 import os
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
 
 STALE_TIMEOUT_SECONDS = 900
 HEARTBEAT_INTERVAL_SECONDS = 15.0
+_INIT_GRACE_SECONDS = 2.0
+_RECLAIM_STALE_SECONDS = 5.0
 
 
 @dataclass
@@ -20,6 +23,7 @@ class LockInfo:
     pid: int
     timestamp: float
     command: str
+    token: str | None = None
 
 
 class LockHeldError(Exception):
@@ -33,7 +37,7 @@ class LockHeldError(Exception):
 
 
 class CtxLock:
-    """Cross-platform file lock based on a PID file with active heartbeat refresh."""
+    """Cross-platform exclusive file lock based on O_CREAT|O_EXCL PID file with active heartbeat."""
 
     def __init__(
         self,
@@ -45,9 +49,29 @@ class CtxLock:
         self._root = root
         self._command = command
         self._lock_path = root / ".ctx-cache" / "lock"
+        self._reclaim_path = root / ".ctx-cache" / ".lock.reclaim"
         self._heartbeat_interval = heartbeat_interval
         self._heartbeat_stop: threading.Event | None = None
         self._heartbeat_thread: threading.Thread | None = None
+        self._state_lock = threading.Lock()
+        self._held = False
+        self._token = f"{os.getpid()}:{uuid.uuid4().hex}"
+
+    def _format_payload(self) -> str:
+        now = time.time()
+        return (
+            f"pid={os.getpid()}\n"
+            f"timestamp={now}\n"
+            f"command={self._command}\n"
+            f"token={self._token}\n"
+        )
+
+    def _owns_lock(self, info: LockInfo | None) -> bool:
+        if info is None:
+            return False
+        if info.token is not None:
+            return info.token == self._token
+        return info.pid == os.getpid()
 
     def _read_lock(self) -> LockInfo | None:
         try:
@@ -67,18 +91,34 @@ class CtxLock:
                 pid=int(values["pid"]),
                 timestamp=float(values["timestamp"]),
                 command=values["command"],
+                token=values.get("token") or None,
             )
         except (KeyError, TypeError, ValueError):
             return None
 
-    def _write_lock(self) -> None:
-        info = LockInfo(pid=os.getpid(), timestamp=time.time(), command=self._command)
-        content = (
-            f"pid={info.pid}\n"
-            f"timestamp={info.timestamp}\n"
-            f"command={info.command}\n"
-        )
-        tmp_path = self._lock_path.parent / f".lock.tmp.{info.pid}.{threading.get_ident()}"
+    def _try_create_exclusive(self) -> bool:
+        """Create the lock file exclusively with O_CREAT | O_EXCL. Returns True on success."""
+        try:
+            fd = os.open(str(self._lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            return False
+        try:
+            os.write(fd, self._format_payload().encode("utf-8"))
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            self._lock_path.unlink(missing_ok=True)
+            raise
+        else:
+            os.close(fd)
+        return True
+
+    def _refresh_owned_lock(self) -> None:
+        """Atomically refresh timestamp on a lock already exclusively owned by this instance."""
+        content = self._format_payload()
+        tmp_path = self._lock_path.parent / f".lock.tmp.{os.getpid()}.{threading.get_ident()}"
         try:
             tmp_path.write_text(content, encoding="utf-8")
             os.replace(tmp_path, self._lock_path)
@@ -91,13 +131,17 @@ class CtxLock:
 
         def _beat() -> None:
             while not stop_event.wait(self._heartbeat_interval):
-                existing = self._read_lock()
-                if existing is None or existing.pid != os.getpid():
-                    return
-                try:
-                    self._write_lock()
-                except OSError:
-                    return
+                with self._state_lock:
+                    if not self._held:
+                        return
+                    existing = self._read_lock()
+                    if not self._owns_lock(existing):
+                        self._held = False
+                        return
+                    try:
+                        self._refresh_owned_lock()
+                    except OSError:
+                        return
 
         thread = threading.Thread(target=_beat, name="ctx-lock-heartbeat", daemon=True)
         self._heartbeat_thread = thread
@@ -140,36 +184,107 @@ class CtxLock:
             return True
         return time.time() - info.timestamp > STALE_TIMEOUT_SECONDS
 
+    def _acquire_reclaim_guard(self) -> int | None:
+        """Acquire exclusive stale-lock reclamation guard, clearing abandoned guards."""
+        for _ in range(2):
+            try:
+                return os.open(
+                    str(self._reclaim_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644
+                )
+            except FileExistsError:
+                try:
+                    age = time.time() - self._reclaim_path.stat().st_mtime
+                except OSError:
+                    continue
+                if age > _RECLAIM_STALE_SECONDS:
+                    try:
+                        self._reclaim_path.unlink(missing_ok=True)
+                    except OSError:
+                        return None
+                    continue
+                return None
+            except OSError:
+                return None
+        return None
+
     def acquire(self) -> None:
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if self._lock_path.exists():
+        for _attempt in range(6):
+            if self._try_create_exclusive():
+                with self._state_lock:
+                    self._held = True
+                self._start_heartbeat()
+                return
+
+            # Lock file exists: inspect holder. Allow brief grace period if another
+            # process just created the O_EXCL file and is still writing its payload.
             existing = self._read_lock()
             if existing is None:
                 try:
-                    self._lock_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
-            elif self._is_stale(existing):
-                self._lock_path.unlink(missing_ok=True)
-            else:
+                    mtime = self._lock_path.stat().st_mtime
+                except FileNotFoundError:
+                    continue
+                except OSError as exc:
+                    raise LockHeldError(
+                        LockInfo(pid=0, timestamp=time.time(), command="unknown")
+                    ) from exc
+
+                if time.time() - mtime < _INIT_GRACE_SECONDS:
+                    time.sleep(0.02)
+                    existing = self._read_lock()
+                    if existing is None and self._lock_path.exists():
+                        raise LockHeldError(
+                            LockInfo(pid=0, timestamp=mtime, command="initializing")
+                        )
+
+            if existing is not None and not self._is_stale(existing):
                 raise LockHeldError(existing)
 
-        self._write_lock()
+            # Existing lock is stale or corrupt (> grace window): serialize reclamation
+            # via an exclusive guard file so concurrent reclaimers never unlink a fresh lock.
+            guard_fd = self._acquire_reclaim_guard()
+            if guard_fd is None:
+                time.sleep(0.02)
+                continue
+            try:
+                os.close(guard_fd)
+                recheck = self._read_lock()
+                if recheck is not None and not self._is_stale(recheck):
+                    raise LockHeldError(recheck)
+                if recheck is None:
+                    try:
+                        if time.time() - self._lock_path.stat().st_mtime < _INIT_GRACE_SECONDS:
+                            raise LockHeldError(
+                                LockInfo(pid=0, timestamp=time.time(), command="initializing")
+                            )
+                    except FileNotFoundError:
+                        pass
+                self._lock_path.unlink(missing_ok=True)
+                if self._try_create_exclusive():
+                    with self._state_lock:
+                        self._held = True
+                    self._start_heartbeat()
+                    return
+            finally:
+                self._reclaim_path.unlink(missing_ok=True)
 
-        actual = self._read_lock()
-        if actual is None or actual.pid != os.getpid():
-            raise LockHeldError(actual or LockInfo(pid=0, timestamp=0.0, command="unknown"))
-        self._start_heartbeat()
+        existing = self._read_lock()
+        raise LockHeldError(
+            existing or LockInfo(pid=0, timestamp=time.time(), command="contended")
+        )
 
     def release(self) -> None:
         self._stop_heartbeat()
-        try:
-            existing = self._read_lock()
-            if existing is None or existing.pid == os.getpid():
-                self._lock_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        with self._state_lock:
+            was_held = self._held
+            self._held = False
+            try:
+                existing = self._read_lock()
+                if self._owns_lock(existing) or (was_held and existing is None):
+                    self._lock_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def __enter__(self) -> "CtxLock":
         self.acquire()

@@ -19,6 +19,7 @@ from ctx.config import (
     MissingApiKeyError,
     _iter_config_dirs,
     detect_provider,
+    infer_provider_from_base_url,
     load_config,
     normalize_models_probe_url,
     probe_provider_connectivity,
@@ -106,12 +107,7 @@ def probe_model_quality(config) -> tuple[bool, str | None]:
 
 
 def _infer_provider_from_base_url(base_url: str) -> str:
-    lowered = base_url.lower()
-    if ":11434" in lowered or "ollama" in lowered:
-        return "ollama"
-    if ":1234" in lowered or "lmstudio" in lowered:
-        return "lmstudio"
-    return "openai"
+    return infer_provider_from_base_url(base_url)
 
 
 def _resolve_explicit_provider(target: Path) -> tuple[str | None, str | None]:
@@ -195,9 +191,14 @@ def run_preflight(path: str = ".") -> PreflightResult:
     config = None
     config_failed_fatal = False
     try:
+        provider_override = (
+            provider_name
+            if (explicit_provider is None or (explicit_via and "base_url" in explicit_via.lower()))
+            else None
+        )
         config = load_config(
             target,
-            provider=None if explicit_provider is not None else provider_name,
+            provider=provider_override,
             require_api_key=True,
         )
         if detected_model and config.provider == provider_name and not _has_explicit_model_config(target):

@@ -112,14 +112,31 @@ class CtxProject:
         return self.get_export(depth)
 
     def is_stale(self) -> bool:
-        """Return True if Tier 1 manifests or Tier 2 structural/boundary hashes are stale or missing."""
-        for tier_name in ("CONTEXT.md", "CONTEXT-1.md", "CONTEXT-0.md"):
-            if not (self.ctx_dir / tier_name).is_file():
+        """Return True if Tier 1 manifests/exports or Tier 2 structural/boundary maps are stale or missing."""
+        tier_specs: tuple[tuple[str, int | None], ...] = (
+            ("CONTEXT.md", None),
+            ("CONTEXT-1.md", 1),
+            ("CONTEXT-0.md", 0),
+        )
+        for tier_name, _ in tier_specs:
+            tier_path = self.ctx_dir / tier_name
+            try:
+                if not tier_path.is_file() or tier_path.stat().st_size == 0:
+                    return True
+            except OSError:
                 return True
+
         meta = self.metadata
         if meta.mode == "tier2":
             if not meta.structural_hash or not meta.boundary_doc_hash:
                 return True
+            for tier_name, _ in tier_specs:
+                try:
+                    content = (self.ctx_dir / tier_name).read_text(encoding="utf-8")
+                except OSError:
+                    return True
+                if meta.structural_hash not in content or meta.boundary_doc_hash not in content:
+                    return True
             try:
                 from ctx.skeleton import extract_skeleton, should_invoke_llm
             except ImportError:
@@ -135,9 +152,9 @@ class CtxProject:
             )
 
         try:
+            from ctx.api import export_context
             from ctx.generator import inspect_directory_health
             from ctx.ignore import load_ignore_patterns
-            from ctx.manifest import read_manifest
         except ImportError:
             return False
 
@@ -146,11 +163,15 @@ class CtxProject:
         if not health or any(entry.status != "fresh" or entry.error is not None for entry in health):
             return True
 
-        root_manifest = read_manifest(self.root)
-        if root_manifest is None:
-            return True
-        context_0 = (self.ctx_dir / "CONTEXT-0.md").read_text(encoding="utf-8")
-        return root_manifest.frontmatter.content_hash not in context_0
+        for tier_name, tier_depth in tier_specs:
+            try:
+                actual_export = (self.ctx_dir / tier_name).read_text(encoding="utf-8")
+            except OSError:
+                return True
+            expected_export = export_context(self.root, depth=tier_depth).content
+            if actual_export != expected_export:
+                return True
+        return False
 
     @property
     def context_full(self) -> str:

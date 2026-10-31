@@ -96,15 +96,19 @@ _GO_QUOTED_PKG_RE = re.compile(r'"([^"]+)"')
 _JAVA_IMPORT_RE = re.compile(r"^import\s+(?:static\s+)?([a-zA-Z0-9_.*]+)\s*;", re.MULTILINE)
 _KOTLIN_IMPORT_RE = re.compile(r"^import\s+([a-zA-Z0-9_.*]+)", re.MULTILINE)
 _CSHARP_USING_RE = re.compile(
-    r"^using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?([A-Za-z_][A-Za-z0-9_.]*)\s*;",
+    r"^\s*(?:global\s+)?using\s+(?!var\b)(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?([A-Za-z_][A-Za-z0-9_.]*)\s*;",
     re.MULTILINE,
 )
 _RUBY_REQUIRE_RE = re.compile(
-    r"""^\s*(?:require|require_relative)\s*\(?\s*['"]([^'"]+)['"]""",
+    r"""^\s*(require_relative|require)\s*\(?\s*['"]([^'"]+)['"]""",
     re.MULTILINE,
 )
-_PHP_IMPORT_RE = re.compile(
-    r"""^(?:use\s+([A-Za-z0-9_\\]+)\s*;|\s*(?:require|require_once|include|include_once)\s*\(?\s*['"]([^'"]+)['"])""",
+_PHP_USE_RE = re.compile(
+    r"^\s*use\s+(?:(?:function|const)\s+)?\\?([A-Za-z_][A-Za-z0-9_\\]*)(?:\s*\\\{([^}]+)\})?(?:\s+as\s+[A-Za-z_]\w*)?\s*;",
+    re.MULTILINE,
+)
+_PHP_INCLUDE_RE = re.compile(
+    r"""^\s*(?:require|require_once|include|include_once)\s*\(?\s*['"]([^'"]+)['"]""",
     re.MULTILINE,
 )
 _SWIFT_IMPORT_RE = re.compile(
@@ -130,7 +134,7 @@ _NODE_STDLIB = frozenset({
 })
 _RUST_STDLIB = frozenset({"std", "core", "alloc", "proc_macro", "test"})
 _OTHER_STDLIB_PREFIXES = (
-    "java.", "javax.", "kotlin.", "kotlinx.coroutines",
+    "java.", "javax.", "kotlin.",
 )
 _OTHER_STDLIB_EXACT = frozenset({
     "System", "Foundation", "Swift", "SwiftUI", "UIKit", "Combine", "Dispatch", "Logger",
@@ -296,10 +300,26 @@ def _extract_imports_for_file(path: Path, language: str | None) -> list[str]:
             imports.add(match.group(1))
     elif language == "Ruby":
         for match in _RUBY_REQUIRE_RE.finditer(content):
-            imports.add(match.group(1))
+            req_kind, target = match.group(1), match.group(2)
+            if not target:
+                continue
+            if req_kind == "require_relative" and not target.startswith("."):
+                imports.add(f"./{target}")
+            else:
+                imports.add(target)
     elif language == "PHP":
-        for match in _PHP_IMPORT_RE.finditer(content):
-            target = match.group(1) or match.group(2)
+        for match in _PHP_USE_RE.finditer(content):
+            base_ns, grouped = match.group(1), match.group(2)
+            if grouped:
+                ns_prefix = base_ns.rstrip("\\")
+                for member in grouped.split(","):
+                    cleaned = re.sub(r"\s+as\s+[A-Za-z_]\w*$", "", member.strip()).strip("\\ ")
+                    if cleaned:
+                        imports.add(f"{ns_prefix}\\{cleaned}")
+            elif base_ns:
+                imports.add(base_ns)
+        for match in _PHP_INCLUDE_RE.finditer(content):
+            target = match.group(1)
             if target:
                 imports.add(target)
     elif language == "Swift":
@@ -382,11 +402,11 @@ def _classify_boundary_doc(rel_posix: str) -> str | None:
     return None
 
 
-def _detect_config_entrypoints(root: Path) -> list[str]:
+def _detect_config_entrypoints(root: Path, effective_exts: set[str] | None = None) -> list[str]:
     entrypoints: list[str] = []
 
     pyproject = root / "pyproject.toml"
-    if pyproject.is_file():
+    if pyproject.is_file() and file_matches_extensions(pyproject, effective_exts):
         try:
             text = pyproject.read_text(encoding="utf-8")
             match = _PYPROJECT_SCRIPT_SECTION_RE.search(text)
@@ -404,32 +424,44 @@ def _detect_config_entrypoints(root: Path) -> list[str]:
             pass
 
     pkg_json = root / "package.json"
-    if pkg_json.is_file():
+    if pkg_json.is_file() and file_matches_extensions(pkg_json, effective_exts):
         try:
             pkg = json.loads(pkg_json.read_text(encoding="utf-8"))
             if isinstance(pkg, dict):
                 main_val = pkg.get("main")
                 if isinstance(main_val, str) and main_val.strip():
                     target = main_val.strip()
-                    if (root / target.lstrip("./")).is_file():
+                    target_path = root / target.lstrip("./")
+                    if target_path.is_file() and file_matches_extensions(target_path, effective_exts):
                         entrypoints.append(f"npm:main -> {target}")
                 bin_val = pkg.get("bin")
                 if isinstance(bin_val, str) and bin_val.strip():
                     target = bin_val.strip()
-                    if (root / target.lstrip("./")).is_file():
+                    target_path = root / target.lstrip("./")
+                    if target_path.is_file() and file_matches_extensions(target_path, effective_exts):
                         entrypoints.append(f"npm:bin -> {target}")
                 elif isinstance(bin_val, dict):
                     for k, v in sorted(bin_val.items()):
-                        if isinstance(v, str) and (root / v.lstrip("./")).is_file():
-                            entrypoints.append(f"npm:bin:{k} -> {v}")
+                        if isinstance(v, str):
+                            target_path = root / v.lstrip("./")
+                            if target_path.is_file() and file_matches_extensions(target_path, effective_exts):
+                                entrypoints.append(f"npm:bin:{k} -> {v}")
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             pass
 
     return entrypoints
 
 
+def _strip_jsonc(raw: str) -> str:
+    """Strip // line comments, /* */ block comments, and trailing commas from JSONC text."""
+    # Remove comments outside quoted strings
+    token_re = re.compile(r'"(?:\\.|[^"\\])*"|//[^\r\n]*|/\*[\s\S]*?\*/')
+    without_comments = token_re.sub(lambda m: m.group(0) if m.group(0).startswith('"') else "", raw)
+    return re.sub(r",\s*([}\]])", r"\1", without_comments)
+
+
 def _detect_repo_module_prefixes(root: Path) -> tuple[set[str], list[str]]:
-    """Detect internal module root names and multi-segment prefixes (e.g. go.mod, Cargo.toml)."""
+    """Detect internal module root names and multi-segment prefixes (go.mod, Cargo.toml, tsconfig/jsconfig)."""
     roots: set[str] = {"crate", "super", "self"}
     prefixes: list[str] = []
 
@@ -455,7 +487,36 @@ def _detect_repo_module_prefixes(root: Path) -> tuple[set[str], list[str]]:
         except (OSError, UnicodeDecodeError):
             pass
 
-    return roots, prefixes
+    for ts_cfg_name in ("tsconfig.json", "jsconfig.json"):
+        ts_cfg = root / ts_cfg_name
+        if not ts_cfg.is_file():
+            continue
+        try:
+            parsed = json.loads(_strip_jsonc(ts_cfg.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        compiler_opts = parsed.get("compilerOptions")
+        if not isinstance(compiler_opts, dict):
+            continue
+        paths_map = compiler_opts.get("paths")
+        if not isinstance(paths_map, dict):
+            continue
+        for raw_alias in sorted(paths_map.keys()):
+            if not isinstance(raw_alias, str):
+                continue
+            alias = raw_alias.strip()
+            if not alias or alias == "*":
+                continue
+            if alias.endswith("/*"):
+                base_alias = alias[:-2].rstrip("/")
+                if base_alias:
+                    prefixes.append(base_alias)
+            elif "*" not in alias:
+                prefixes.append(alias.rstrip("/"))
+
+    return roots, sorted(dict.fromkeys(prefixes))
 
 
 def _classify_dependency(
@@ -563,7 +624,7 @@ def extract_skeleton(
     file_skeletons: list[FileSkeleton] = []
     boundary_docs: list[BoundaryDoc] = []
     lang_counts: Counter[str] = Counter()
-    entrypoints: list[str] = _detect_config_entrypoints(root)
+    entrypoints: list[str] = _detect_config_entrypoints(root, effective_exts)
 
     # Track internal module names for dependency classification
     internal_module_roots, internal_prefixes = _detect_repo_module_prefixes(root)
@@ -590,6 +651,9 @@ def extract_skeleton(
             if not entry.is_file():
                 continue
 
+            if not file_matches_extensions(entry, effective_exts):
+                continue
+
             rel_posix = entry.relative_to(root).as_posix()
             rel_parts = entry.relative_to(root).parts
 
@@ -606,9 +670,6 @@ def extract_skeleton(
                         content_hash=chash,
                     )
                 )
-
-            if not file_matches_extensions(entry, effective_exts) and doc_kind is None:
-                continue
 
             if (
                 entry.name in _ENTRYPOINT_FILENAMES
@@ -684,8 +745,12 @@ def extract_skeleton(
             )
         )
 
-    # Compute deterministic structural_hash (paths + symbols + imports + entrypoints)
+    # Compute deterministic structural_hash (module prefixes/roots + paths + symbols + imports + entrypoints)
     struct_hasher = hashlib.sha256()
+    if internal_module_roots:
+        struct_hasher.update(f"roots:{','.join(sorted(internal_module_roots))}\n".encode("utf-8"))
+    if internal_prefixes:
+        struct_hasher.update(f"prefixes:{','.join(sorted(internal_prefixes))}\n".encode("utf-8"))
     for ep in entrypoints:
         struct_hasher.update(f"ep:{ep}\n".encode("utf-8"))
     for f in file_skeletons:

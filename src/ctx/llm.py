@@ -822,6 +822,61 @@ def _tokens_sidecar_path(cache_path: Path) -> Path:
     return cache_path.with_name(f"{cache_path.stem}.tokens.json")
 
 
+def _apportion_exact(total: int, weights: list[int]) -> list[int]:
+    """Apportion *total* across *weights* using largest-remainder so sum(shares) == total."""
+    if total <= 0 or not weights:
+        return [0] * len(weights)
+    weight_sum = sum(weights)
+    if weight_sum <= 0:
+        weights = [1] * len(weights)
+        weight_sum = len(weights)
+    raw = [(total * w) / weight_sum for w in weights]
+    floors = [int(val) for val in raw]
+    remainder = total - sum(floors)
+    if remainder > 0:
+        order = sorted(range(len(weights)), key=lambda idx: (raw[idx] - floors[idx], -idx), reverse=True)
+        for idx in order[:remainder]:
+            floors[idx] += 1
+    return floors
+
+
+def _attribute_batch_tokens(
+    fetched_files: list[dict],
+    results: list[LLMResult],
+) -> list[tuple[int, int]]:
+    """Return exact (input_tokens, output_tokens) attribution for each fetched file."""
+    n = len(results)
+    if n == 0:
+        return []
+
+    non_zero_indices = [idx for idx, r in enumerate(results) if (r.input_tokens + r.output_tokens) > 0]
+    if not non_zero_indices:
+        return [(0, 0)] * n
+
+    attributed: list[tuple[int, int]] = [(0, 0)] * n
+    for pos, start_idx in enumerate(non_zero_indices):
+        end_idx = non_zero_indices[pos + 1] if (pos + 1) < len(non_zero_indices) else n
+        span_len = end_idx - start_idx
+        span_in = results[start_idx].input_tokens
+        span_out = results[start_idx].output_tokens
+        if span_len == 1:
+            attributed[start_idx] = (span_in, span_out)
+            continue
+        in_weights = [
+            max(1, len(json.dumps(fetched_files[idx], sort_keys=True)))
+            for idx in range(start_idx, end_idx)
+        ]
+        out_weights = [
+            max(1, len(results[idx].text))
+            for idx in range(start_idx, end_idx)
+        ]
+        in_shares = _apportion_exact(span_in, in_weights)
+        out_shares = _apportion_exact(span_out, out_weights)
+        for offset in range(span_len):
+            attributed[start_idx + offset] = (in_shares[offset], out_shares[offset])
+    return attributed
+
+
 class CachingLLMClient:
     """Wraps an LLMClient and caches file and directory summaries by content hash.
 
@@ -833,19 +888,19 @@ class CachingLLMClient:
 
     def __init__(self, client: LLMClient, cache_path: Optional[Path] = None, max_cache_entries: int = 10_000) -> None:
         self._client = client
-        # Maps content hash → Future[str]. A Future that is not yet done means
-        # another thread is currently fetching that content — callers block on
-        # .result() rather than launching a duplicate LLM call.
-        self._cache: dict[str, Future[str]] = {}
+        # Maps content hash → Future[tuple[str, int, int]] ((text, in_tokens, out_tokens)).
+        self._cache: dict[str, Future[tuple[str, int, int]]] = {}
         self._lock = threading.Lock()
         self._cache_path = cache_path
         self._max_cache_entries = max_cache_entries
         self._disk_lock = threading.Lock()
         self._disk_cache: dict[str, str] = {}
-        self._token_counts: dict[str, int] = {}
+        self._token_counts: dict[str, tuple[int, int]] = {}
         self.cache_hits: int = 0
         self.cache_misses: int = 0
         self.tokens_saved: int = 0
+        self.input_tokens_saved: int = 0
+        self.output_tokens_saved: int = 0
         if cache_path is not None and cache_path.exists():
             try:
                 data = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -861,25 +916,40 @@ class CachingLLMClient:
                 try:
                     parsed_tokens = json.loads(tokens_path.read_text(encoding="utf-8"))
                     if isinstance(parsed_tokens, dict):
-                        self._token_counts = {
-                            k: int(v)
-                            for k, v in parsed_tokens.items()
-                            if isinstance(k, str) and isinstance(v, (int, float))
-                        }
+                        for k, v in parsed_tokens.items():
+                            if not isinstance(k, str):
+                                continue
+                            if isinstance(v, dict):
+                                in_t = int(v.get("in", 0) or 0)
+                                out_t = int(v.get("out", 0) or 0)
+                                self._token_counts[k] = (in_t, out_t)
+                            elif isinstance(v, (int, float)):
+                                self._token_counts[k] = (int(v), 0)
                 except (json.JSONDecodeError, OSError, ValueError, TypeError):
                     pass
             with self._lock:
                 for key, summary in self._disk_cache.items():
-                    fut: Future[str] = Future()
-                    fut.set_result(summary)
+                    in_t, out_t = self._token_counts.get(key, (0, 0))
+                    fut: Future[tuple[str, int, int]] = Future()
+                    fut.set_result((summary, in_t, out_t))
                     self._cache[key] = fut
+
+    def _custom_prompts_for(self, keys_subset: tuple[str, ...]) -> dict[str, str]:
+        raw = getattr(self._client, "prompt_templates", None)
+        if not isinstance(raw, dict) or not raw:
+            return {}
+        return {
+            k: str(v)
+            for k, v in raw.items()
+            if k in keys_subset and v is not None and str(v) != DEFAULT_PROMPT_TEMPLATES.get(k)
+        }
 
     def _write_batch_to_disk(
         self,
         new_entries: dict[str, str],
-        new_tokens: Optional[dict[str, int]] = None,
+        new_tokens: Optional[dict[str, tuple[int, int]]] = None,
     ) -> None:
-        """Write multiple new cache entries (and optional token metadata) to disk atomically."""
+        """Write multiple new cache entries (and optional token metadata) to disk."""
         if self._cache_path is None or not new_entries:
             return
         with self._disk_lock:
@@ -897,8 +967,12 @@ class CachingLLMClient:
                     encoding="utf-8",
                 )
                 if self._token_counts:
+                    serialized_tokens = {
+                        k: {"in": in_t, "out": out_t}
+                        for k, (in_t, out_t) in self._token_counts.items()
+                    }
                     _tokens_sidecar_path(self._cache_path).write_text(
-                        json.dumps(self._token_counts, indent=2, sort_keys=True),
+                        json.dumps(serialized_tokens, indent=2, sort_keys=True),
                         encoding="utf-8",
                     )
             except OSError as exc:
@@ -922,53 +996,53 @@ class CachingLLMClient:
         if not files:
             return []
 
-        # Generate keys from file content + model name so that switching models
-        # always produces cache misses rather than serving stale summaries.
         model_bytes = self.model.encode()
+        custom_file_prompts = self._custom_prompts_for(
+            ("file_summary", "file_summary_system", "single_file_summary", "single_file_system")
+        )
+        prompt_suffix = (
+            b":prompts:" + json.dumps(custom_file_prompts, sort_keys=True).encode()
+            if custom_file_prompts
+            else b""
+        )
         keys = [
-            hashlib.sha256(model_bytes + b":" + json.dumps(f, sort_keys=True).encode()).hexdigest()
+            hashlib.sha256(
+                model_bytes + b":" + json.dumps(f, sort_keys=True).encode() + prompt_suffix
+            ).hexdigest()
             for f in files
         ]
 
-        # Under the lock, claim each uncached key by inserting a new (unresolved) Future.
-        # Any thread that races in and finds that Future will block on .result() below
-        # instead of issuing a duplicate LLM call.
-        file_futures: list[Future[str]] = []
-        to_fetch: list[int] = []  # indices in `files` that this thread will fetch
+        file_futures: list[Future[tuple[str, int, int]]] = []
+        to_fetch: list[int] = []
+        hit_indices: set[int] = set()
 
         with self._lock:
             for i, _ in enumerate(files):
                 if keys[i] in self._cache:
                     file_futures.append(self._cache[keys[i]])
                     self.cache_hits += 1
-                    self.tokens_saved += self._token_counts.get(keys[i], 0)
+                    hit_indices.add(i)
                 else:
-                    fut: Future[str] = Future()
+                    fut: Future[tuple[str, int, int]] = Future()
                     self._cache[keys[i]] = fut
                     file_futures.append(fut)
                     to_fetch.append(i)
                     self.cache_misses += 1
 
-        # Fetch outside the lock; resolve our Futures when done.
-        # Preserve the original LLMResult (with token counts) for entries we fetched.
         original_results: dict[int, LLMResult] = {}
         if to_fetch:
             try:
-                new_results = self._client.summarize_files(dir_path, [files[i] for i in to_fetch])
-                total_batch_tokens = sum(r.input_tokens + r.output_tokens for r in new_results)
-                per_file_tokens = (
-                    max(1, round(total_batch_tokens / len(new_results)))
-                    if total_batch_tokens > 0 and new_results
-                    else 0
-                )
+                fetched_files = [files[i] for i in to_fetch]
+                new_results = self._client.summarize_files(dir_path, fetched_files)
+                attributed_pairs = _attribute_batch_tokens(fetched_files, new_results)
                 new_disk_entries: dict[str, str] = {}
-                new_token_entries: dict[str, int] = {}
-                for i, result in zip(to_fetch, new_results):
-                    file_futures[i].set_result(result.text)
+                new_token_entries: dict[str, tuple[int, int]] = {}
+                for i, result, (attr_in, attr_out) in zip(to_fetch, new_results, attributed_pairs):
+                    file_futures[i].set_result((result.text, attr_in, attr_out))
                     original_results[i] = result
                     new_disk_entries[keys[i]] = result.text
-                    if per_file_tokens > 0:
-                        new_token_entries[keys[i]] = per_file_tokens
+                    if (attr_in + attr_out) > 0:
+                        new_token_entries[keys[i]] = (attr_in, attr_out)
                 if new_token_entries:
                     with self._lock:
                         self._token_counts.update(new_token_entries)
@@ -979,13 +1053,26 @@ class CachingLLMClient:
                         file_futures[i].set_exception(exc)
                 raise
 
-        # .result() returns immediately for resolved Futures; blocks for in-flight ones.
-        # Entries we fetched return the original LLMResult (preserving token counts).
-        # Cache hits return LLMResult with zero tokens (no LLM was called).
-        return [
-            original_results[i] if i in original_results else LLMResult(text=file_futures[i].result())
-            for i in range(len(files))
-        ]
+        resolved_outputs: list[LLMResult] = []
+        saved_in_delta = 0
+        saved_out_delta = 0
+        for i in range(len(files)):
+            if i in original_results:
+                resolved_outputs.append(original_results[i])
+            else:
+                text, saved_in, saved_out = file_futures[i].result()
+                if i in hit_indices:
+                    saved_in_delta += saved_in
+                    saved_out_delta += saved_out
+                resolved_outputs.append(LLMResult(text=text))
+
+        if saved_in_delta or saved_out_delta:
+            with self._lock:
+                self.input_tokens_saved += saved_in_delta
+                self.output_tokens_saved += saved_out_delta
+                self.tokens_saved += saved_in_delta + saved_out_delta
+
+        return resolved_outputs
 
     def summarize_directory(
         self,
@@ -995,7 +1082,7 @@ class CachingLLMClient:
         *,
         content_hash: str = "",
     ) -> LLMResult:
-        dir_payload = {
+        dir_payload: dict[str, object] = {
             "dir": dir_path.name or dir_path.as_posix(),
             "content_hash": content_hash,
             "files": [
@@ -1007,6 +1094,10 @@ class CachingLLMClient:
                 for s in subdir_summaries
             ],
         }
+        custom_dir_prompts = self._custom_prompts_for(("directory_summary", "directory_summary_system"))
+        if custom_dir_prompts:
+            dir_payload["prompts"] = custom_dir_prompts
+
         key = hashlib.sha256(
             self.model.encode() + b":dir:" + json.dumps(dir_payload, sort_keys=True).encode()
         ).hexdigest()
@@ -1016,7 +1107,6 @@ class CachingLLMClient:
             if key in self._cache:
                 fut = self._cache[key]
                 self.cache_hits += 1
-                self.tokens_saved += self._token_counts.get(key, 0)
             else:
                 fut = Future()
                 self._cache[key] = fut
@@ -1024,16 +1114,25 @@ class CachingLLMClient:
                 need_fetch = True
 
         if not need_fetch:
-            return LLMResult(text=fut.result())
+            text, saved_in, saved_out = fut.result()
+            if saved_in or saved_out:
+                with self._lock:
+                    self.input_tokens_saved += saved_in
+                    self.output_tokens_saved += saved_out
+                    self.tokens_saved += saved_in + saved_out
+            return LLMResult(text=text)
 
         try:
             result = self._client.summarize_directory(dir_path, file_summaries, subdir_summaries)
-            tok = result.input_tokens + result.output_tokens
-            if tok > 0:
+            in_t, out_t = result.input_tokens, result.output_tokens
+            if (in_t + out_t) > 0:
                 with self._lock:
-                    self._token_counts[key] = tok
-            fut.set_result(result.text)
-            self._write_batch_to_disk({key: result.text}, {key: tok} if tok > 0 else None)
+                    self._token_counts[key] = (in_t, out_t)
+            fut.set_result((result.text, in_t, out_t))
+            self._write_batch_to_disk(
+                {key: result.text},
+                {key: (in_t, out_t)} if (in_t + out_t) > 0 else None,
+            )
             return result
         except Exception as exc:
             if not fut.done():

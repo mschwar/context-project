@@ -2078,17 +2078,17 @@ def test_estimate_cost_anthropic_models() -> None:
     sonnet_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-sonnet-4-20260301")
     assert 2.5 < sonnet_cost < 3.5
 
-    # Claude Haiku 4.5 pricing (~$0.80/MTok)
+    # Claude Haiku 4.5 pricing ($1.00/MTok input)
     haiku_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-haiku-4-5-20251001")
-    assert 0.7 < haiku_cost < 0.9
+    assert 0.9 < haiku_cost < 1.1
 
     # Claude 3 Haiku (legacy) pricing (~$0.25/MTok)
     haiku3_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-3-haiku-20240307")
     assert 0.2 < haiku3_cost < 0.3
 
-    # Default pricing for unknown anthropic model (~$0.80/MTok)
+    # Default pricing for unknown anthropic model ($1.00/MTok)
     default_cost = cli_module._estimate_cost(1_000_000, "anthropic", "claude-unknown")
-    assert 0.7 < default_cost < 0.9
+    assert 0.9 < default_cost < 1.1
 
 
 def test_estimate_cost_openai_models() -> None:

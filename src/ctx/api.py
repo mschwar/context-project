@@ -17,6 +17,7 @@ from ctx.config import (
     MissingApiKeyError,
     PROVIDER_DETECTED_VIA,
     Config,
+    _iter_config_dirs,
     detect_provider,
     estimate_cost,
     load_config,
@@ -71,6 +72,10 @@ class RefreshResult:
     cache_hits: int = 0
     cache_misses: int = 0
     tokens_saved: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    input_tokens_saved: int = 0
+    output_tokens_saved: int = 0
 
 
 @dataclass
@@ -155,7 +160,7 @@ def _find_config_path(target_path: Path) -> Path | None:
     """Return the nearest .ctxconfig for a path, if any."""
 
     start_dir = target_path if target_path.is_dir() else target_path.parent
-    for directory in (start_dir, *start_dir.parents):
+    for directory in _iter_config_dirs(start_dir):
         config_path = directory / ".ctxconfig"
         if config_path.exists():
             return config_path
@@ -177,9 +182,9 @@ def _has_manifests(root: Path) -> bool:
 
 
 def _is_tier2_repo(root: Path) -> bool:
-    """Return True when root is initialized in Tier 2 (.ctx/ only, no root CONTEXT.md)."""
+    """Return True when root is initialized in Tier 2 (.ctx/ mode: tier2)."""
     meta_path = root / ".ctx" / "metadata.json"
-    if not meta_path.is_file() or (root / "CONTEXT.md").is_file():
+    if not meta_path.is_file():
         return False
     from ctx.stats_board import load_json_safe
 
@@ -193,6 +198,7 @@ def _refresh_tier2(
     force: bool = False,
     dry_run: bool = False,
     max_depth: int | None = None,
+    touch_last_refresh: bool = False,
 ) -> RefreshResult:
     """Refresh deterministic Tier 2 (.ctx/) architectural maps without requiring LLM credentials."""
     from datetime import datetime, timezone
@@ -205,21 +211,22 @@ def _refresh_tier2(
         render_context_full,
         should_invoke_llm,
     )
-    from ctx.stats_board import load_json_safe, save_json_atomic
+    from ctx.stats_board import load_json_safe, save_json_atomic, write_text_atomic
 
     ctx_dir = root / ".ctx"
     meta_path = ctx_dir / "metadata.json"
-    meta = load_json_safe(meta_path, {})
-    if not isinstance(meta, dict):
-        meta = {}
-
-    skeleton = extract_skeleton(root, max_depth=max_depth)
     expected_exports = ("CONTEXT.md", "CONTEXT-1.md", "CONTEXT-0.md")
-    exports_missing = any(not (ctx_dir / name).is_file() for name in expected_exports)
-    needs_update = force or exports_missing or should_invoke_llm(meta, skeleton)
-    subsystem_count = max(1, len(skeleton.subsystems))
 
     if dry_run:
+        meta = load_json_safe(meta_path, {})
+        if not isinstance(meta, dict):
+            meta = {}
+        skeleton = extract_skeleton(root, max_depth=max_depth)
+        exports_missing = any(
+            not (ctx_dir / name).is_file() or (ctx_dir / name).stat().st_size == 0
+            for name in expected_exports
+        )
+        needs_update = force or exports_missing or should_invoke_llm(meta, skeleton)
         stale_dirs = ["."] if needs_update else []
         return RefreshResult(
             dirs_processed=0,
@@ -234,7 +241,21 @@ def _refresh_tier2(
         )
 
     with CtxLock(root, command="refresh"):
+        meta = load_json_safe(meta_path, {})
+        if not isinstance(meta, dict):
+            meta = {}
+        skeleton = extract_skeleton(root, max_depth=max_depth)
+        exports_missing = any(
+            not (ctx_dir / name).is_file() or (ctx_dir / name).stat().st_size == 0
+            for name in expected_exports
+        )
+        needs_update = force or exports_missing or should_invoke_llm(meta, skeleton)
+        subsystem_count = max(1, len(skeleton.subsystems))
+
         if not needs_update:
+            if touch_last_refresh and meta_path.is_file():
+                meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
+                save_json_atomic(meta_path, meta)
             return RefreshResult(
                 dirs_processed=0,
                 dirs_skipped=subsystem_count,
@@ -248,9 +269,9 @@ def _refresh_tier2(
             )
 
         ctx_dir.mkdir(parents=True, exist_ok=True)
-        (ctx_dir / "CONTEXT-0.md").write_text(render_context_0(skeleton), encoding="utf-8")
-        (ctx_dir / "CONTEXT-1.md").write_text(render_context_1(skeleton), encoding="utf-8")
-        (ctx_dir / "CONTEXT.md").write_text(render_context_full(skeleton), encoding="utf-8")
+        write_text_atomic(ctx_dir / "CONTEXT-0.md", render_context_0(skeleton))
+        write_text_atomic(ctx_dir / "CONTEXT-1.md", render_context_1(skeleton))
+        write_text_atomic(ctx_dir / "CONTEXT.md", render_context_full(skeleton))
         meta["mode"] = "tier2"
         meta["structural_hash"] = skeleton.structural_hash
         meta["boundary_doc_hash"] = skeleton.boundary_doc_hash
@@ -287,6 +308,25 @@ def _apply_token_guardrail(config: Config) -> None:
         config.token_budget = config.max_tokens_per_run
 
 
+def _estimate_usage_cost(
+    tokens_used: int,
+    input_tokens: int,
+    output_tokens: int,
+    provider: str,
+    model: str,
+) -> float:
+    if input_tokens > 0 or output_tokens > 0:
+        remainder = max(0, tokens_used - (input_tokens + output_tokens))
+        return estimate_cost(
+            tokens_used,
+            provider,
+            model,
+            input_tokens=input_tokens + remainder,
+            output_tokens=output_tokens,
+        )
+    return estimate_cost(tokens_used, provider, model)
+
+
 def _budget_guardrail_message(config: Config, stats: GenerateStats) -> str | None:
     """Return a hard-budget error message when a Stage 3 guardrail is hit."""
 
@@ -296,13 +336,39 @@ def _budget_guardrail_message(config: Config, stats: GenerateStats) -> str | Non
             f"(limit {config.max_tokens_per_run:,})."
         )
     if config.max_usd_per_run is not None:
-        est_cost = estimate_cost(stats.tokens_used, config.provider, config.resolved_model())
+        est_cost = _estimate_usage_cost(
+            stats.tokens_used,
+            stats.input_tokens,
+            stats.output_tokens,
+            config.provider,
+            config.resolved_model(),
+        )
         if est_cost >= config.max_usd_per_run:
             return (
                 f"USD budget guardrail reached: ${est_cost:.4f} estimated spend "
                 f"(limit ${config.max_usd_per_run:.4f})."
             )
     return None
+
+
+def _sync_tier1_ctx_exports(root: Path) -> None:
+    """Atomically synchronize .ctx/ exports and metadata while holding CtxLock."""
+    meta_path = root / ".ctx" / "metadata.json"
+    if not meta_path.is_file() or _is_tier2_repo(root):
+        return
+    try:
+        from datetime import datetime, timezone
+
+        from ctx.init import _populate_ctx_dir
+        from ctx.stats_board import load_json_safe, save_json_atomic
+
+        _populate_ctx_dir(root, root / ".ctx")
+        meta = load_json_safe(meta_path, {})
+        if isinstance(meta, dict):
+            meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
+            save_json_atomic(meta_path, meta)
+    except Exception as exc:
+        logger.warning("Tier 1 .ctx/ export sync failed: %s", exc)
 
 
 def refresh(
@@ -330,7 +396,13 @@ def refresh(
     if dry_run and watch:
         raise ValueError("--dry-run and --watch cannot be used together.")
 
-    if _is_tier2_repo(root) and not setup and not watch:
+    if _is_tier2_repo(root):
+        if setup or watch:
+            unsupported = "--setup" if setup else "--watch"
+            raise ValueError(
+                f"{unsupported} is not supported in Tier 2 (.ctx/-only) repositories. "
+                "Run 'ctx init --force' to switch to Tier 1 per-directory manifests."
+            )
         return _refresh_tier2(root, force=force, dry_run=dry_run, max_depth=max_depth)
 
     setup_provider: str | None = None
@@ -449,6 +521,7 @@ def refresh(
     cumulative_stats = GenerateStats()
 
     while True:
+        should_continue_cycles = False
         with CtxLock(root, command="refresh"):
             stats: GenerateStats
             if strategy == "full" and cumulative_stats.dirs_processed == 0:
@@ -458,38 +531,49 @@ def refresh(
             else:
                 stats = update_tree(root, config, client, spec, progress=progress)
 
-        cumulative_stats.dirs_processed += stats.dirs_processed
-        cumulative_stats.dirs_skipped += stats.dirs_skipped
-        cumulative_stats.files_processed += stats.files_processed
-        cumulative_stats.files_binary += stats.files_binary
-        cumulative_stats.tokens_used += stats.tokens_used
-        # Replace (not extend) errors each pass so that directories which
-        # were retried and succeeded no longer appear as errors.
-        cumulative_stats.errors = list(stats.errors)
-        cumulative_stats.budget_exhausted = stats.budget_exhausted
-        cumulative_stats.local_batch_fallbacks = max(
-            cumulative_stats.local_batch_fallbacks,
-            stats.local_batch_fallbacks,
-        )
-        cumulative_stats.cache_hits += stats.cache_hits
-        cumulative_stats.cache_misses += stats.cache_misses
-        cumulative_stats.tokens_saved += stats.tokens_saved
+            cumulative_stats.dirs_processed += stats.dirs_processed
+            cumulative_stats.dirs_skipped += stats.dirs_skipped
+            cumulative_stats.files_processed += stats.files_processed
+            cumulative_stats.files_binary += stats.files_binary
+            cumulative_stats.tokens_used += stats.tokens_used
+            cumulative_stats.input_tokens += stats.input_tokens
+            cumulative_stats.output_tokens += stats.output_tokens
+            # Replace (not extend) errors each pass so that directories which
+            # were retried and succeeded no longer appear as errors.
+            cumulative_stats.errors = list(stats.errors)
+            cumulative_stats.budget_exhausted = stats.budget_exhausted
+            cumulative_stats.local_batch_fallbacks = max(
+                cumulative_stats.local_batch_fallbacks,
+                stats.local_batch_fallbacks,
+            )
+            cumulative_stats.cache_hits += stats.cache_hits
+            cumulative_stats.cache_misses += stats.cache_misses
+            cumulative_stats.tokens_saved += stats.tokens_saved
+            cumulative_stats.input_tokens_saved += stats.input_tokens_saved
+            cumulative_stats.output_tokens_saved += stats.output_tokens_saved
 
-        if not until_complete:
+            if (
+                until_complete
+                and stats.dirs_processed > 0
+                and (stats.budget_exhausted or bool(stats.errors))
+            ):
+                should_continue_cycles = True
+                if config.max_usd_per_run is not None:
+                    est_cost = _estimate_usage_cost(
+                        cumulative_stats.tokens_used,
+                        cumulative_stats.input_tokens,
+                        cumulative_stats.output_tokens,
+                        config.provider,
+                        config.resolved_model(),
+                    )
+                    if est_cost >= config.max_usd_per_run:
+                        should_continue_cycles = False
+
+            if not should_continue_cycles and not dry_run:
+                _sync_tier1_ctx_exports(root)
+
+        if not should_continue_cycles:
             break
-        # No forward progress this pass — stop to avoid infinite loops.
-        if stats.dirs_processed == 0:
-            break
-        # Clean completion: no budget limit hit and no errors.
-        if not stats.budget_exhausted and not stats.errors:
-            break
-        # Honor hard USD ceiling across cycles.  (The token budget is
-        # per-pass by design — _apply_token_guardrail folds it into the
-        # generator budget so each pass stops independently.)
-        if config.max_usd_per_run is not None:
-            est_cost = estimate_cost(cumulative_stats.tokens_used, config.provider, config.resolved_model())
-            if est_cost >= config.max_usd_per_run:
-                break
 
         reason = "budget" if stats.budget_exhausted else "errors"
         logger.info(
@@ -516,6 +600,12 @@ def refresh(
     else:
         cache_hits, cache_misses = 0, 0
     tokens_saved = cumulative_stats.tokens_saved or int(getattr(client, "tokens_saved", 0) or 0)
+    input_tokens_saved = cumulative_stats.input_tokens_saved or int(
+        getattr(client, "input_tokens_saved", 0) or 0
+    )
+    output_tokens_saved = cumulative_stats.output_tokens_saved or int(
+        getattr(client, "output_tokens_saved", 0) or 0
+    )
 
     result = RefreshResult(
         dirs_processed=cumulative_stats.dirs_processed,
@@ -525,7 +615,13 @@ def refresh(
         errors=errors,
         budget_exhausted=cumulative_stats.budget_exhausted or budget_guardrail is not None,
         strategy=strategy,
-        est_cost_usd=estimate_cost(cumulative_stats.tokens_used, config.provider, config.resolved_model()),
+        est_cost_usd=_estimate_usage_cost(
+            cumulative_stats.tokens_used,
+            cumulative_stats.input_tokens,
+            cumulative_stats.output_tokens,
+            config.provider,
+            config.resolved_model(),
+        ),
         stale_directories=[],
         budget_guardrail=budget_guardrail,
         config_written=config_written,
@@ -539,25 +635,13 @@ def refresh(
         cache_hits=cache_hits,
         cache_misses=cache_misses,
         tokens_saved=tokens_saved,
+        input_tokens=cumulative_stats.input_tokens,
+        output_tokens=cumulative_stats.output_tokens,
+        input_tokens_saved=input_tokens_saved,
+        output_tokens_saved=output_tokens_saved,
     )
 
     if not dry_run:
-        meta_path = root / ".ctx" / "metadata.json"
-        if meta_path.is_file() and not _is_tier2_repo(root):
-            try:
-                from datetime import datetime, timezone
-
-                from ctx.init import _populate_ctx_dir
-                from ctx.stats_board import load_json_safe, save_json_atomic
-
-                _populate_ctx_dir(root, root / ".ctx")
-                meta = load_json_safe(meta_path, {})
-                if isinstance(meta, dict):
-                    meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
-                    save_json_atomic(meta_path, meta)
-            except Exception as exc:
-                logger.warning("Tier 1 .ctx/ export sync failed: %s", exc)
-
         try:
             from ctx.stats_board import record_run
             record_run(root, result, config)
@@ -1000,6 +1084,26 @@ def reset(
     return ResetResult(manifests_removed=len(manifests), paths=paths)
 
 
+def _file_within_capsule_depth(rel_path: str, depth: int | None) -> bool:
+    if depth is None:
+        return True
+    dir_parts = Path(rel_path).parts[:-1]
+    if not dir_parts:
+        return True
+    if depth == 0:
+        return False
+    effective_depth = 1 if (dir_parts[0] == "src" and len(dir_parts) == 2) else len(dir_parts)
+    return effective_depth <= depth
+
+
+def _entrypoint_within_capsule_depth(ep: str, depth: int | None) -> bool:
+    if depth is None:
+        return True
+    if ep.startswith("file:"):
+        return _file_within_capsule_depth(ep[len("file:") :], depth)
+    return True
+
+
 def build_fleet_capsule(
     root: Path,
     *,
@@ -1021,6 +1125,13 @@ def build_fleet_capsule(
     skeleton = extract_skeleton(resolved_root)
     repo_id = f"sha256:{hashlib.sha256(str(resolved_root).encode('utf-8')).hexdigest()}"
 
+    kept_boundary_docs = [
+        doc for doc in skeleton.boundary_docs if _file_within_capsule_depth(doc.relative_path, depth)
+    ]
+    kept_entrypoints = [
+        ep for ep in skeleton.entrypoints if _entrypoint_within_capsule_depth(ep, depth)
+    ]
+
     authority_boundaries = [
         {
             "path": doc.relative_path,
@@ -1029,7 +1140,7 @@ def build_fleet_capsule(
             "summary": doc.summary_line,
             "content_hash": doc.content_hash,
         }
-        for doc in skeleton.boundary_docs
+        for doc in kept_boundary_docs
     ]
 
     kept_subsystem_objs = []
@@ -1053,7 +1164,12 @@ def build_fleet_capsule(
             }
         )
 
-    render_skeleton = replace(skeleton, subsystems=kept_subsystem_objs)
+    render_skeleton = replace(
+        skeleton,
+        subsystems=kept_subsystem_objs,
+        boundary_docs=kept_boundary_docs,
+        entrypoints=kept_entrypoints,
+    )
     capsule_md = render_context_0(render_skeleton)
     if depth is None or depth >= 1:
         c1_body = strip_tier2_chrome(render_context_1(render_skeleton), strip_footer=False)
@@ -1072,7 +1188,7 @@ def build_fleet_capsule(
         boundary_doc_hash=skeleton.boundary_doc_hash,
         total_files=skeleton.total_files,
         languages=dict(skeleton.languages),
-        entrypoints=list(skeleton.entrypoints),
+        entrypoints=kept_entrypoints,
         authority_boundaries=authority_boundaries,
         subsystems=filtered_subsystems,
         capsule_markdown=capsule_md,

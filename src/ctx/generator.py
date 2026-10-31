@@ -24,7 +24,7 @@ from typing import Callable, Literal, Optional
 
 import pathspec
 
-from ctx.config import LOCAL_PROVIDERS, Config, resolve_configured_extensions
+from ctx.config import LOCAL_PROVIDERS, Config, resolve_configured_extensions, resolve_project_anchor
 from ctx.hasher import file_matches_extensions, hash_directory, is_stale, normalize_extensions
 from ctx.ignore import should_ignore
 from ctx.llm import CachingLLMClient, LLMClient, FileSummary, SubdirSummary
@@ -56,11 +56,15 @@ class GenerateStats:
     files_processed: int = 0
     files_binary: int = 0
     tokens_used: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
     budget_exhausted: bool = False
     local_batch_fallbacks: int = 0
     cache_hits: int = 0
     cache_misses: int = 0
     tokens_saved: int = 0
+    input_tokens_saved: int = 0
+    output_tokens_saved: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -104,13 +108,20 @@ def _get_tiktoken_encoder() -> object:
     return _TIKTOKEN_ENCODER
 
 
+def _encode_ordinary_tokens(encoder: object, text: str) -> list[int]:
+    encode_ordinary = getattr(encoder, "encode_ordinary", None)
+    if callable(encode_ordinary):
+        return encode_ordinary(text)  # type: ignore[return-value]
+    return encoder.encode(text, disallowed_special=())  # type: ignore[union-attr]
+
+
 def _estimate_tokens(text: str) -> int:
     if not text:
         return 0
     encoder = _get_tiktoken_encoder()
     if encoder is False:
         return max(1, math.ceil(len(text) / 4))
-    return len(encoder.encode(text))  # type: ignore[union-attr]
+    return len(_encode_ordinary_tokens(encoder, text))
 
 
 def _truncate_to_tokens(text: str, max_tokens: int) -> tuple[str, int]:
@@ -122,7 +133,7 @@ def _truncate_to_tokens(text: str, max_tokens: int) -> tuple[str, int]:
         char_cap = max_tokens * 4
         truncated = text[:char_cap]
         return truncated, max(1, math.ceil(len(truncated) / 4)) if truncated else 0
-    tokens = encoder.encode(text)  # type: ignore[union-attr]
+    tokens = _encode_ordinary_tokens(encoder, text)
     if len(tokens) <= max_tokens:
         return text, len(tokens)
     truncated_tokens = tokens[:max_tokens]
@@ -321,7 +332,8 @@ def validate_manifest_body(
         )
 
     heading, purpose, sections = _parse_manifest_sections(manifest.body)
-    expected_heading = _relative_path_str(path, root)
+    anchor_root = resolve_project_anchor(root)
+    expected_heading = _relative_path_str(path.resolve(), anchor_root.resolve())
     if heading != expected_heading:
         issues.append(f"Manifest heading should be '# {expected_heading}'.")
     if purpose is None:
@@ -539,7 +551,7 @@ def _generate_directory_manifest(
     config: Config,
     client: LLMClient,
     spec: pathspec.PathSpec,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int, int]:
     files, directories = _list_directory_entries(path, spec, root, extensions=config.extensions)
 
     ordered_entries: list[FileSummary | dict] = []
@@ -599,6 +611,7 @@ def _generate_directory_manifest(
     else:
         directory_result = client.summarize_directory(path, file_summaries, subdir_summaries)
     purpose, notes = _extract_directory_purpose_and_notes(directory_result.text, path)
+    anchor_root = resolve_project_anchor(root)
     write_manifest(
         path,
         model=_manifest_model(config, client),
@@ -606,12 +619,15 @@ def _generate_directory_manifest(
         files=len(files),
         dirs=len(directories),
         tokens_total=tokens_total,
-        body=_render_manifest_body(path, file_summaries, subdir_summaries, purpose, notes, root=root),
+        body=_render_manifest_body(
+            path.resolve(), file_summaries, subdir_summaries, purpose, notes, root=anchor_root.resolve()
+        ),
     )
 
-    total_tokens_used = sum(result.input_tokens + result.output_tokens for result in text_results)
-    total_tokens_used += directory_result.input_tokens + directory_result.output_tokens
-    return len(files), binary_count, total_tokens_used
+    dir_input_tokens = sum(result.input_tokens for result in text_results) + directory_result.input_tokens
+    dir_output_tokens = sum(result.output_tokens for result in text_results) + directory_result.output_tokens
+    total_tokens_used = dir_input_tokens + dir_output_tokens
+    return len(files), binary_count, total_tokens_used, dir_input_tokens, dir_output_tokens
 
 
 def _process_one_directory(
@@ -622,27 +638,27 @@ def _process_one_directory(
     spec: pathspec.PathSpec,
     incremental: bool,
     budget_stop: threading.Event | None = None,
-) -> tuple[int, int, int, str | None]:
+) -> tuple[int, int, int, int, int, str | None]:
     """Worker function for parallel execution within a depth level.
 
-    Returns (file_count, binary_count, tokens_used, error):
+    Returns (file_count, binary_count, tokens_used, input_tokens, output_tokens, error):
       - error is None on success
       - error is "skip" when the directory is fresh, was skipped, or budget stopped
       - error is an error string when an exception occurred
     """
     try:
         if budget_stop is not None and budget_stop.is_set():
-            return 0, 0, 0, "skip"
+            return 0, 0, 0, 0, 0, "skip"
         if not _should_regenerate_directory(
             directory, root, spec, incremental=incremental, extensions=config.extensions
         ):
-            return 0, 0, 0, "skip"
-        file_count, binary_count, tokens_used = _generate_directory_manifest(
+            return 0, 0, 0, 0, 0, "skip"
+        file_count, binary_count, tokens_used, input_tokens, output_tokens = _generate_directory_manifest(
             directory, root, config, client, spec
         )
-        return file_count, binary_count, tokens_used, None
+        return file_count, binary_count, tokens_used, input_tokens, output_tokens, None
     except Exception as exc:
-        return 0, 0, 0, str(exc)
+        return 0, 0, 0, 0, 0, str(exc)
 
 
 def _expand_smart_target_directories(
@@ -746,7 +762,7 @@ def _run_generation(
             }
             for future in as_completed(futures):
                 directory = futures[future]
-                file_count, binary_count, tokens_used, error = future.result()
+                file_count, binary_count, tokens_used, dir_in_tokens, dir_out_tokens, error = future.result()
                 with stats_lock:
                     dirs_done += 1
                     local_done = dirs_done
@@ -759,6 +775,8 @@ def _run_generation(
                         stats.files_processed += file_count
                         stats.files_binary += binary_count
                         stats.tokens_used += tokens_used
+                        stats.input_tokens += dir_in_tokens
+                        stats.output_tokens += dir_out_tokens
                     if progress is not None:
                         progress(directory, local_done, total_dirs, stats.tokens_used)
                     # Mid-level budget check — signal remaining workers to skip.
@@ -774,6 +792,8 @@ def _run_generation(
     if hasattr(client, "hit_miss_counts"):
         stats.cache_hits, stats.cache_misses = client.hit_miss_counts
     stats.tokens_saved = int(getattr(client, "tokens_saved", 0) or 0)
+    stats.input_tokens_saved = int(getattr(client, "input_tokens_saved", 0) or 0)
+    stats.output_tokens_saved = int(getattr(client, "output_tokens_saved", 0) or 0)
     return stats
 
 

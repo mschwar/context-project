@@ -75,14 +75,14 @@ PRICING_DATA: dict[str, dict] = {
         "models": [
             ("claude-opus-4", 15.0),
             ("claude-sonnet-4", 3.0),
-            ("claude-haiku-4-5", 0.80),
+            ("claude-haiku-4-5", 1.00),
             ("claude-3-5-sonnet", 3.0),
             ("claude-3-5-haiku", 0.80),
             ("claude-3-opus", 15.0),
             ("claude-3-sonnet", 3.0),
             ("claude-3-haiku", 0.25),
         ],
-        "default": 0.80,
+        "default": 1.00,
     },
     "openai": {
         "models": [
@@ -111,14 +111,14 @@ OUTPUT_PRICING_DATA: dict[str, dict] = {
         "models": [
             ("claude-opus-4", 75.0),
             ("claude-sonnet-4", 15.0),
-            ("claude-haiku-4-5", 4.0),
+            ("claude-haiku-4-5", 5.0),
             ("claude-3-5-sonnet", 15.0),
             ("claude-3-5-haiku", 4.0),
             ("claude-3-opus", 75.0),
             ("claude-3-sonnet", 15.0),
             ("claude-3-haiku", 1.25),
         ],
-        "default": 4.0,
+        "default": 5.0,
     },
     "openai": {
         "models": [
@@ -299,9 +299,56 @@ def write_default_config(path: Path, provider: str, model: str | None = None, ba
     (path / ".ctxconfig").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def infer_provider_from_base_url(base_url: str) -> str:
+    """Infer an OpenAI-compatible or local provider name from an endpoint URL."""
+    lowered = base_url.lower()
+    if ":11434" in lowered or "ollama" in lowered:
+        return "ollama"
+    if ":1234" in lowered or "lmstudio" in lowered:
+        return "lmstudio"
+    return "openai"
+
+
 def _iter_config_dirs(start_dir: Path) -> list[Path]:
     """Return directories from *start_dir* upward for .ctxconfig lookup."""
     return [start_dir, *start_dir.parents]
+
+
+def resolve_project_anchor(target_path: Path) -> Path:
+    """Resolve the canonical project root anchor for *target_path*.
+
+    Ensures subtree invocations (e.g. `ctx refresh src` or `ctx check src --verify`)
+    produce and verify the same repo-relative manifest headings as root invocations.
+    """
+    resolved = target_path.resolve()
+    start_dir = resolved if resolved.is_dir() else resolved.parent
+    candidates = _iter_config_dirs(start_dir)
+    try:
+        home_dir = Path.home().resolve()
+    except OSError:
+        home_dir = None
+
+    for directory in candidates:
+        if directory.name in {".tmp", "test-work"}:
+            break
+        if (directory / ".git").exists() or (directory / ".ctx").is_dir():
+            return directory
+
+    for directory in candidates:
+        if directory.name in {".tmp", "test-work"}:
+            break
+        if directory != home_dir and (directory / ".ctxconfig").is_file():
+            return directory
+
+    anchor = start_dir
+    for directory in candidates[1:]:
+        if directory.name in {".tmp", "test-work"}:
+            break
+        if (directory / "CONTEXT.md").is_file():
+            anchor = directory
+        else:
+            break
+    return anchor
 
 
 def resolve_configured_extensions(target_path: Path) -> Optional[list[str]]:
@@ -491,9 +538,10 @@ def load_config(
         config.cache_path = cache_path
 
     if not provider_explicit:
-        # Support env-only setups where the operator exported an API key but
-        # did not also set CTX_PROVIDER or write a .ctxconfig file yet.
-        if os.getenv("ANTHROPIC_API_KEY", "").strip():
+        # Infer provider from configured base_url before falling back to ambient API keys.
+        if config.base_url:
+            config.provider = infer_provider_from_base_url(config.base_url)
+        elif os.getenv("ANTHROPIC_API_KEY", "").strip():
             config.provider = "anthropic"
         elif os.getenv("OPENAI_API_KEY", "").strip():
             config.provider = "openai"

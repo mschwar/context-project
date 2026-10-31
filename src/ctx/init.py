@@ -41,7 +41,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ctx import __version__
-from ctx.stats_board import load_json_safe, save_json_atomic
+from ctx.lock import CtxLock
+from ctx.stats_board import load_json_safe, save_json_atomic, write_text_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -103,25 +104,32 @@ def init_project(
             render_context_full,
         )
 
-        skeleton = extract_skeleton(root)
-        (ctx_dir / "CONTEXT-0.md").write_text(render_context_0(skeleton), encoding="utf-8")
-        (ctx_dir / "CONTEXT-1.md").write_text(render_context_1(skeleton), encoding="utf-8")
-        (ctx_dir / "CONTEXT.md").write_text(render_context_full(skeleton), encoding="utf-8")
-        metadata["mode"] = "tier2"
-        metadata["structural_hash"] = skeleton.structural_hash
-        metadata["boundary_doc_hash"] = skeleton.boundary_doc_hash
-        manifests_refreshed = len(skeleton.subsystems)
+        with CtxLock(root, command="init"):
+            skeleton = extract_skeleton(root)
+            write_text_atomic(ctx_dir / "CONTEXT-0.md", render_context_0(skeleton))
+            write_text_atomic(ctx_dir / "CONTEXT-1.md", render_context_1(skeleton))
+            write_text_atomic(ctx_dir / "CONTEXT.md", render_context_full(skeleton))
+            metadata["mode"] = "tier2"
+            metadata["structural_hash"] = skeleton.structural_hash
+            metadata["boundary_doc_hash"] = skeleton.boundary_doc_hash
+            save_json_atomic(ctx_dir / METADATA_FILE, metadata)
+            manifests_refreshed = len(skeleton.subsystems)
     else:
+        # Persist standard mode BEFORE refresh so `ctx init --force` on a Tier 2 repo
+        # transitions cleanly to Tier 1 manifest generation instead of dispatching Tier 2.
+        metadata["mode"] = "standard"
+        save_json_atomic(ctx_dir / METADATA_FILE, metadata)
+
         # 3. Generate initial manifests via api.refresh
         from ctx.api import refresh
         refresh_result = refresh(root, force=force)
 
-        # 4. Create .ctx/ export layer
-        _populate_ctx_dir(root, ctx_dir)
+        # 4. Create .ctx/ export layer + persist final metadata atomically under CtxLock
+        with CtxLock(root, command="init"):
+            _populate_ctx_dir(root, ctx_dir)
+            metadata["last_refresh"] = datetime.now(timezone.utc).isoformat()
+            save_json_atomic(ctx_dir / METADATA_FILE, metadata)
         manifests_refreshed = refresh_result.dirs_processed
-
-    # 5. Write metadata.json
-    save_json_atomic(ctx_dir / METADATA_FILE, metadata)
 
     # 6. Install git hooks
     hooks_installed = _install_hooks(root)
@@ -151,8 +159,11 @@ def uninit_project(root: Path) -> dict:
     if not ctx_dir.is_dir():
         raise InitError(f"Not initialized: {ctx_dir} does not exist.")
 
-    # 1. Remove ctx blocks from hooks
-    hooks_removed = _remove_hooks(root)
+    # 1. Remove ctx blocks from hooks unless another initialized worktree shares this hooks dir
+    if _other_worktrees_share_hooks(root):
+        hooks_removed: list[str] = []
+    else:
+        hooks_removed = _remove_hooks(root)
 
     # 2. Remove .ctx/ directory
     _rmtree(ctx_dir)
@@ -196,40 +207,21 @@ def run_hook(root: Path, trigger: str) -> None:
         meta = load_json_safe(meta_path, {}) if meta_path.exists() else {}
 
         if isinstance(meta, dict) and meta.get("mode") == "tier2":
-            from ctx.skeleton import (
-                extract_skeleton,
-                render_context_0,
-                render_context_1,
-                render_context_full,
-                should_invoke_llm,
-            )
+            from ctx.api import _refresh_tier2
 
-            skeleton = extract_skeleton(root)
-            exports_missing = any(
-                not (ctx_dir / filename).is_file() for filename, _ in EXPORT_TIERS
-            )
-            if should_invoke_llm(meta, skeleton) or exports_missing:
-                ctx_dir.mkdir(exist_ok=True)
-                (ctx_dir / "CONTEXT-0.md").write_text(render_context_0(skeleton), encoding="utf-8")
-                (ctx_dir / "CONTEXT-1.md").write_text(render_context_1(skeleton), encoding="utf-8")
-                (ctx_dir / "CONTEXT.md").write_text(render_context_full(skeleton), encoding="utf-8")
-                meta["structural_hash"] = skeleton.structural_hash
-                meta["boundary_doc_hash"] = skeleton.boundary_doc_hash
-            if meta_path.exists():
-                meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
-                save_json_atomic(meta_path, meta)
+            _refresh_tier2(root, touch_last_refresh=True)
         else:
             # Quiet refresh
             from ctx.api import refresh
             refresh(root)
 
-            # Re-export at all depth tiers
-            _populate_ctx_dir(root, ctx_dir)
-
-            # Update last_refresh in metadata
-            if meta_path.exists() and isinstance(meta, dict):
-                meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
-                save_json_atomic(meta_path, meta)
+            # Re-export at all depth tiers and update metadata under CtxLock
+            with CtxLock(root, command="hook"):
+                _populate_ctx_dir(root, ctx_dir)
+                latest_meta = load_json_safe(meta_path, {}) if meta_path.exists() else {}
+                if meta_path.exists() and isinstance(latest_meta, dict):
+                    latest_meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
+                    save_json_atomic(meta_path, latest_meta)
 
     except Exception as exc:
         success = False
@@ -258,12 +250,13 @@ class InitError(Exception):
 # ── Internal helpers ────────────────────────────────────────────────
 
 def _populate_ctx_dir(root: Path, ctx_dir: Path) -> None:
-    """Write depth-tiered exports into .ctx/."""
+    """Write depth-tiered exports atomically into .ctx/."""
     from ctx.api import export_context
 
+    ctx_dir.mkdir(parents=True, exist_ok=True)
     for filename, depth in EXPORT_TIERS:
         result = export_context(root, depth=depth)
-        (ctx_dir / filename).write_text(result.content, encoding="utf-8")
+        write_text_atomic(ctx_dir / filename, result.content)
 
 
 def _build_metadata(root: Path) -> dict:
@@ -285,22 +278,54 @@ def _build_metadata(root: Path) -> dict:
 def _generate_hook_script(root: Path) -> str:
     """Generate the shell script block that ctx hooks run.
 
-    Uses the current Python interpreter path with python3 fallback.
-    Runs in background (&) and detaches from the git process.
+    Resolves the active checkout/worktree root dynamically via `git rev-parse --show-toplevel`
+    so linked git worktrees sharing a common hooks directory refresh their own `.ctx/`
+    and skip uninitialized checkouts cleanly.
     """
     python_path = sys.executable.replace("\\", "/")
-    root_str = str(root).replace("\\", "/")
 
     return f"""\
 {CTX_HOOK_START}
 # Installed by ctx init ({__version__}) — do not edit this block manually.
 # To remove: run ctx uninit, or delete lines between ctx-hook-start/end markers.
+_CTX_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if [ -d "$_CTX_ROOT/.ctx" ]; then
 _CTX_PYTHON="{python_path}"
 if [ ! -x "$_CTX_PYTHON" ]; then
   _CTX_PYTHON="python3"
 fi
-"$_CTX_PYTHON" -m ctx _hook --trigger "$0" --root "{root_str}" &
+"$_CTX_PYTHON" -m ctx _hook --trigger "$0" --root "$_CTX_ROOT" &
+fi
 {CTX_HOOK_END}"""
+
+
+def _other_worktrees_share_hooks(root: Path) -> bool:
+    """Return True if another initialized git worktree shares the same hooks directory."""
+    try:
+        my_hooks = _resolve_hooks_dir(root).resolve()
+        proc = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if proc.returncode != 0:
+            return False
+        resolved_root = root.resolve()
+        for line in proc.stdout.splitlines():
+            if not line.startswith("worktree "):
+                continue
+            wt_path = Path(line[len("worktree ") :].strip()).resolve()
+            if wt_path == resolved_root:
+                continue
+            if (wt_path / CTX_DIR / METADATA_FILE).is_file():
+                if _resolve_hooks_dir(wt_path).resolve() == my_hooks:
+                    return True
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return False
 
 
 def _resolve_hooks_dir(root: Path) -> Path:
@@ -465,39 +490,96 @@ def _rmtree(path: Path) -> None:
 
 # ── PID debounce ────────────────────────────────────────────────────
 
+_HOOK_PID_INIT_GRACE_SECONDS = 2.0
+_HOOK_PID_RECLAIM_STALE_SECONDS = 5.0
+
+
+def _try_create_pid_exclusive(pid_path: Path) -> bool:
+    try:
+        fd = os.open(str(pid_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        return False
+    try:
+        os.write(fd, str(os.getpid()).encode("utf-8"))
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        pid_path.unlink(missing_ok=True)
+        raise
+    else:
+        os.close(fd)
+    return True
+
+
+def _pid_file_is_active_or_initializing(pid_path: Path) -> bool:
+    """Return True when pid_path belongs to a live PID or was just created (< grace window)."""
+    try:
+        st = pid_path.stat()
+        raw = pid_path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+
+    try:
+        stored_pid = int(raw)
+        return _pid_alive(stored_pid)
+    except ValueError:
+        # Empty or partially written PID file: treat as active if recently created!
+        return (_time.time() - st.st_mtime) < _HOOK_PID_INIT_GRACE_SECONDS
+
+
 def _acquire_pid(root: Path) -> bool:
-    """Atomically claim the hook PID file inside .ctx/. Returns True if acquired."""
+    """Atomically claim the hook PID file inside .ctx/ without publication or reclaim races."""
     pid_path = root / PID_FILE
+    reclaim_path = pid_path.parent / "hook.pid.reclaim"
     try:
         pid_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError:
         return False
 
-    for _attempt in range(2):
+    try:
+        if _try_create_pid_exclusive(pid_path):
+            return True
+    except OSError:
+        return False
+
+    if _pid_file_is_active_or_initializing(pid_path):
+        return False
+
+    # Existing PID file is stale (dead PID) or abandoned (> grace window):
+    # serialize reclamation via an exclusive guard file so concurrent hooks debounce cleanly.
+    guard_fd: int | None = None
+    for _ in range(2):
         try:
-            fd = os.open(str(pid_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            guard_fd = os.open(str(reclaim_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            break
         except FileExistsError:
             try:
-                stored_pid = int(pid_path.read_text(encoding="utf-8").strip())
-                if _pid_alive(stored_pid):
-                    return False  # Another hook is running
-            except (ValueError, OSError):
-                pass  # Stale or corrupt PID file, remove and retry atomically
-            try:
-                pid_path.unlink(missing_ok=True)
+                if (_time.time() - reclaim_path.stat().st_mtime) > _HOOK_PID_RECLAIM_STALE_SECONDS:
+                    reclaim_path.unlink(missing_ok=True)
+                    continue
             except OSError:
-                return False
-            continue
+                pass
+            return False
         except OSError:
             return False
 
-        try:
-            os.write(fd, str(os.getpid()).encode("utf-8"))
-        finally:
-            os.close(fd)
-        return True
+    if guard_fd is None:
+        return False
 
-    return False
+    try:
+        os.close(guard_fd)
+        if _pid_file_is_active_or_initializing(pid_path):
+            return False
+        pid_path.unlink(missing_ok=True)
+        return _try_create_pid_exclusive(pid_path)
+    except OSError:
+        return False
+    finally:
+        reclaim_path.unlink(missing_ok=True)
 
 
 def _release_pid(root: Path) -> None:

@@ -37,7 +37,7 @@ CTX_OUTPUT=json python -m ctx check . --verify --check-exit
 ```
 
 ## Agentic Rules of Engagement
-- **Respect `.gitignore` and `.ctxignore`:** `ctx` merges `.ctxignore.default`, the repo's `.gitignore`, and `.ctxignore` overrides so manifests never leak gitignored workspace state.
+- **Respect `.gitignore` and `.ctxignore`:** `ctx` merges `.ctxignore.default`, ancestor/root/nested `.gitignore` rules, and `.ctxignore` overrides so standard gitignored workspace state is excluded from manifests (with explicit `!pattern` opt-ins supported in `.ctxignore`).
 - **Atomic Commits:** Prefer small, focused commits following Conventional Commits (enforced via `.husky/commit-msg` commitlint).
 - **Deterministic Hashing & Portable Headings:** Hashes and `# <relative-path>` headings must remain identical across Linux, macOS, Windows, and isolated git worktrees.
 - **One Gate Per PR:** For roadmap work, keep each branch scoped to one named gate unless `AGENTS.md` or an explicit audit remediation gate specifies otherwise.

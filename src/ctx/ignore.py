@@ -10,11 +10,28 @@ Pattern resolution:
 
 from __future__ import annotations
 
+import os
 from importlib.resources import files
 from pathlib import Path
 from typing import Optional
 
 import pathspec
+
+from ctx.config import resolve_project_anchor
+
+_NESTED_WALK_PRUNE_DIRS = frozenset({
+    ".git",
+    ".ctx",
+    ".ctx-cache",
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tmp",
+})
 
 
 def _pattern_lines(text: str) -> list[str]:
@@ -46,28 +63,109 @@ def _load_default_patterns(default_patterns_path: Optional[Path]) -> list[str]:
     return []
 
 
+def _split_pattern(raw_pattern: str) -> tuple[str, str, bool]:
+    neg = ""
+    body = raw_pattern
+    if body.startswith("\\!"):
+        body = body[1:]
+    elif body.startswith("!"):
+        neg = "!"
+        body = body[1:]
+    is_dir = body.endswith("/")
+    core = body.rstrip("/")
+    return neg, core, is_dir
+
+
+def _rebase_ancestor_patterns(patterns: list[str], sub_prefix: str) -> list[str]:
+    rebased: list[str] = []
+    for pat in patterns:
+        neg, core, is_dir = _split_pattern(pat)
+        if not core:
+            continue
+        suffix = "/" if is_dir else ""
+        if core.startswith("**/") or "/" not in core:
+            rebased.append(pat)
+            continue
+        anchored = core.lstrip("/")
+        if anchored.startswith(f"{sub_prefix}/"):
+            remainder = anchored[len(sub_prefix) + 1 :]
+            if remainder:
+                rebased.append(f"{neg}/{remainder}{suffix}")
+    return rebased
+
+
+def _rebase_nested_patterns(patterns: list[str], nested_rel: str) -> list[str]:
+    rebased: list[str] = []
+    for pat in patterns:
+        neg, core, is_dir = _split_pattern(pat)
+        if not core:
+            continue
+        suffix = "/" if is_dir else ""
+        if "/" not in core:
+            rebased.append(f"{neg}/{nested_rel}/{core}{suffix}")
+            rebased.append(f"{neg}/{nested_rel}/**/{core}{suffix}")
+        else:
+            anchored = core.lstrip("/")
+            if anchored:
+                rebased.append(f"{neg}/{nested_rel}/{anchored}{suffix}")
+    return rebased
+
+
+def _collect_nested_gitignore_patterns(target_root: Path) -> list[str]:
+    lines: list[str] = []
+    if not target_root.is_dir():
+        return lines
+    for dirpath, dirnames, filenames in os.walk(target_root):
+        dirnames[:] = sorted(d for d in dirnames if d not in _NESTED_WALK_PRUNE_DIRS)
+        current = Path(dirpath)
+        if current == target_root:
+            continue
+        if ".gitignore" in filenames:
+            gi_path = current / ".gitignore"
+            try:
+                raw_lines = _pattern_lines(gi_path.read_text(encoding="utf-8", errors="replace"))
+                rel_posix = current.relative_to(target_root).as_posix()
+                lines.extend(_rebase_nested_patterns(raw_lines, rel_posix))
+            except OSError:
+                pass
+    return lines
+
+
 def load_ignore_patterns(
     target_root: Path,
     default_patterns_path: Optional[Path] = None,
 ) -> pathspec.PathSpec:
-    """Load and merge ignore patterns from default + user .ctxignore files.
-
-    Args:
-        target_root: Root directory being processed. Look for .ctxignore here.
-        default_patterns_path: Path to .ctxignore.default. If None, use the one
-            shipped alongside this package or the first repo-level fallback found.
-
-    Returns:
-        A compiled PathSpec object. Use `spec.match_file(relative_path)` to test.
-
-    Implementation:
-        1. Read .ctxignore.default (ship sensible defaults — see file).
-        2. Read target_root / ".ctxignore" if it exists.
-        3. Combine all pattern lines, filter blanks and comments.
-        4. Return pathspec.PathSpec.from_lines("gitignore", combined_lines).
-    """
+    """Load and merge ignore patterns from default, .gitignore (ancestor/root/nested), and .ctxignore."""
     pattern_lines = _load_default_patterns(default_patterns_path)
+    resolved_target = target_root.resolve() if target_root.exists() else target_root
+    anchor = resolve_project_anchor(resolved_target) if resolved_target.exists() else resolved_target
 
+    ancestor_dirs: list[Path] = []
+    if anchor != resolved_target and resolved_target.is_relative_to(anchor):
+        cur = resolved_target.parent
+        while True:
+            ancestor_dirs.append(cur)
+            if cur == anchor:
+                break
+            cur = cur.parent
+        ancestor_dirs.reverse()
+
+    # 1. Ancestor .gitignore rules rebased onto target_root (for subtree commands)
+    for anc in ancestor_dirs:
+        anc_gi = anc / ".gitignore"
+        if anc_gi.is_file():
+            try:
+                sub_prefix = resolved_target.relative_to(anc).as_posix()
+                pattern_lines.extend(
+                    _rebase_ancestor_patterns(
+                        _pattern_lines(anc_gi.read_text(encoding="utf-8", errors="replace")),
+                        sub_prefix,
+                    )
+                )
+            except OSError:
+                pass
+
+    # 2. Target root .gitignore
     gitignore_path = target_root / ".gitignore"
     if gitignore_path.is_file():
         try:
@@ -76,6 +174,24 @@ def load_ignore_patterns(
             )
         except OSError:
             pass
+
+    # 3. Nested .gitignore files beneath target_root
+    pattern_lines.extend(_collect_nested_gitignore_patterns(target_root))
+
+    # 4. Ancestor and target .ctxignore overrides (applied last so !negations win)
+    for anc in ancestor_dirs:
+        anc_ci = anc / ".ctxignore"
+        if anc_ci.is_file():
+            try:
+                sub_prefix = resolved_target.relative_to(anc).as_posix()
+                pattern_lines.extend(
+                    _rebase_ancestor_patterns(
+                        _pattern_lines(anc_ci.read_text(encoding="utf-8")),
+                        sub_prefix,
+                    )
+                )
+            except OSError:
+                pass
 
     user_patterns_path = target_root / ".ctxignore"
     if user_patterns_path.exists():
