@@ -114,6 +114,58 @@ class LockHeldError(Exception):
         )
 
 
+class LockSupersededError(RuntimeError):
+    """Raised when a CtxLock owner lost ownership after exceeding STALE_TIMEOUT_SECONDS."""
+
+
+_ACTIVE_LOCKS: dict[Path, list["CtxLock"]] = {}
+_ACTIVE_LOCKS_LOCK = threading.Lock()
+
+
+def _register_active_lock(lock: "CtxLock") -> None:
+    with _ACTIVE_LOCKS_LOCK:
+        bucket = _ACTIVE_LOCKS.setdefault(lock._resolved_root, [])
+        if lock not in bucket:
+            bucket.append(lock)
+
+
+def _unregister_active_lock(lock: "CtxLock") -> None:
+    with _ACTIVE_LOCKS_LOCK:
+        bucket = _ACTIVE_LOCKS.get(lock._resolved_root)
+        if not bucket:
+            return
+        try:
+            bucket.remove(lock)
+        except ValueError:
+            pass
+        if not bucket:
+            _ACTIVE_LOCKS.pop(lock._resolved_root, None)
+
+
+def assert_lock_ownership_for_path(target_path: Path) -> None:
+    """Verify live ownership for any active CtxLock in this process covering *target_path*.
+
+    Raises LockSupersededError before any filesystem mutation if an active lock covering
+    *target_path* had its guard inode rotated after exceeding STALE_TIMEOUT_SECONDS.
+    """
+    with _ACTIVE_LOCKS_LOCK:
+        if not _ACTIVE_LOCKS:
+            return
+        snapshot = [(lock_root, list(locks)) for lock_root, locks in _ACTIVE_LOCKS.items()]
+
+    resolved_target = target_path.resolve()
+    matched_covering_lock = False
+    for lock_root, locks in snapshot:
+        if resolved_target == lock_root or resolved_target.is_relative_to(lock_root):
+            matched_covering_lock = True
+            for active_lock in locks:
+                active_lock.verify_ownership()
+    if not matched_covering_lock:
+        for _, locks in snapshot:
+            for active_lock in locks:
+                active_lock.verify_ownership()
+
+
 class CtxLock:
     """Cross-platform exclusive file lock backed by OS kernel locking plus atomic metadata heartbeat."""
 
@@ -125,6 +177,7 @@ class CtxLock:
         heartbeat_interval: float = HEARTBEAT_INTERVAL_SECONDS,
     ) -> None:
         self._root = root
+        self._resolved_root = root.resolve()
         self._command = command
         self._lock_path = root / ".ctx-cache" / "lock"
         self._guard_path = root / ".ctx-cache" / ".lock.guard"
@@ -284,6 +337,7 @@ class CtxLock:
                     self._os_fd = direct_fd
                     self._held = True
                     self._refresh_owned_lock()
+                _register_active_lock(self)
                 return direct_fd
 
             recheck = self._read_lock()
@@ -301,6 +355,7 @@ class CtxLock:
                 self._os_fd = new_os_fd
                 self._held = True
                 self._refresh_owned_lock()
+            _register_active_lock(self)
             return new_os_fd
         except LockHeldError:
             if new_os_fd is not None and not self._held:
@@ -308,6 +363,7 @@ class CtxLock:
             tmp_guard.unlink(missing_ok=True)
             raise
         except Exception:
+            _unregister_active_lock(self)
             with self._state_lock:
                 self._held = False
                 self._os_fd = None
@@ -317,6 +373,22 @@ class CtxLock:
             raise
         finally:
             release_os_lock(reclaim_fd)
+
+    def verify_ownership(self) -> None:
+        """Verify this lock instance still owns the active kernel guard and metadata token."""
+        with self._state_lock:
+            still_owned = (
+                self._held
+                and self._os_fd is not None
+                and _same_guard_inode(self._os_fd, self._guard_path)
+                and self._owns_lock(self._read_lock())
+            )
+            if not still_owned:
+                self._held = False
+                raise LockSupersededError(
+                    f"CtxLock on {self._root} (command: {self._command}, token: {self._token}) "
+                    "was superseded after stale timeout; aborting write."
+                )
 
     def acquire(self) -> None:
         with self._state_lock:
@@ -333,7 +405,11 @@ class CtxLock:
             if self._is_frozen_guard_holder(existing):
                 assert existing is not None
                 self._reclaim_frozen_owner(existing)
-                self._start_heartbeat()
+                try:
+                    self._start_heartbeat()
+                except BaseException:
+                    self.release()
+                    raise
                 return
             raise LockHeldError(
                 existing or LockInfo(pid=0, timestamp=time.time(), command="active")
@@ -349,34 +425,43 @@ class CtxLock:
                 self._os_fd = os_fd
                 self._held = True
                 self._refresh_owned_lock()
+            _register_active_lock(self)
         except LockHeldError:
             raise
         except Exception:
+            _unregister_active_lock(self)
             with self._state_lock:
                 self._held = False
                 self._os_fd = None
             release_os_lock(os_fd)
             raise
 
-        self._start_heartbeat()
+        try:
+            self._start_heartbeat()
+        except BaseException:
+            self.release()
+            raise
 
     def release(self) -> None:
         self._stop_heartbeat()
-        with self._state_lock:
-            was_held = self._held
-            os_fd = self._os_fd
-            self._held = False
-            self._os_fd = None
-            try:
-                if was_held and os_fd is not None and _same_guard_inode(os_fd, self._guard_path):
-                    existing = self._read_lock()
-                    if existing is None or self._owns_lock(existing):
-                        self._lock_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            finally:
-                if os_fd is not None:
-                    release_os_lock(os_fd)
+        try:
+            with self._state_lock:
+                was_held = self._held
+                os_fd = self._os_fd
+                self._held = False
+                self._os_fd = None
+                try:
+                    if was_held and os_fd is not None and _same_guard_inode(os_fd, self._guard_path):
+                        existing = self._read_lock()
+                        if existing is None or self._owns_lock(existing):
+                            self._lock_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                finally:
+                    if os_fd is not None:
+                        release_os_lock(os_fd)
+        finally:
+            _unregister_active_lock(self)
 
     def __enter__(self) -> "CtxLock":
         self.acquire()

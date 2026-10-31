@@ -82,11 +82,15 @@ def load_json_safe(path: Path, default: dict) -> dict:
 
 
 def save_json_atomic(path: Path, data: dict) -> None:
+    from ctx.lock import assert_lock_ownership_for_path
+
+    assert_lock_ownership_for_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
+        assert_lock_ownership_for_path(path)
         os.replace(tmp, path)
     except Exception:
         try:
@@ -98,11 +102,15 @@ def save_json_atomic(path: Path, data: dict) -> None:
 
 def write_text_atomic(path: Path, content: str) -> None:
     """Write UTF-8 text atomically via a same-directory temp file and os.replace."""
+    from ctx.lock import assert_lock_ownership_for_path
+
+    assert_lock_ownership_for_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.tmp-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
+        assert_lock_ownership_for_path(path)
         os.replace(tmp, path)
     except Exception:
         try:

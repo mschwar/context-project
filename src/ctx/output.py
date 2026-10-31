@@ -15,7 +15,7 @@ from ctx import __version__
 from ctx.api import BudgetExhaustedError, ConfirmationRequiredError
 from ctx.config import MissingApiKeyError
 from ctx.llm import TRANSIENT_ERROR_PREFIX
-from ctx.lock import LockHeldError
+from ctx.lock import LockHeldError, LockSupersededError
 
 
 def _determine_status(data: dict, errors: list[dict[str, str | None]]) -> str:
@@ -33,7 +33,7 @@ def _classify_exception(exc: BaseException) -> tuple[str, str, str | None]:
         # refresh/check surfaces use this when a hard run budget stopped work
         # and the next action is to shrink scope or raise the guardrail.
         return ("budget_exhausted", str(exc), "Raise the budget guardrail or reduce scope.")
-    if isinstance(exc, LockHeldError):
+    if isinstance(exc, (LockHeldError, LockSupersededError)):
         return ("lock_held", str(exc), "Wait and retry, or check for stuck processes.")
     if isinstance(exc, MissingApiKeyError):
         return ("provider_not_configured", str(exc), "Run ctx refresh --setup")

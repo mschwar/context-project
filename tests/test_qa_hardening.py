@@ -1459,3 +1459,426 @@ def test_composite_action_checkout_detection_handles_git_dirs_worktrees_and_expl
     assert _eval_checkout(empty_ws, "false").stdout == "should_checkout=false"
     assert _eval_checkout(repo, "true").stdout == "should_checkout=true"
     assert _eval_checkout(repo, "invalid-mode").returncode != 0
+
+
+def test_r1_superseded_frozen_writer_cannot_publish_or_rollback_manifests_or_exports(
+    tmp_path: Path,
+) -> None:
+    """A frozen writer whose CtxLock was reclaimed must abort with LockSupersededError and modify 0 bytes."""
+    import subprocess
+    import sys
+
+    repo = _init_git_repo(tmp_path / "repo")
+    (repo / "sub").mkdir()
+    (repo / "sub" / "worker.py").write_text("def run() -> int:\n    return 1\n", encoding="utf-8")
+
+    src_dir = str(Path(__file__).resolve().parents[1] / "src")
+    env = dict(os.environ)
+    env["PYTHONPATH"] = src_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+
+    frozen_ready = tmp_path / "r1_frozen_ready"
+    frozen_wake = tmp_path / "r1_frozen_wake"
+    reclaimer_ready = tmp_path / "r1_reclaimer_ready"
+    reclaimer_release = tmp_path / "r1_reclaimer_release"
+
+    frozen_writer_script = (
+        "import os, sys, time\n"
+        "from pathlib import Path\n"
+        "from unittest.mock import patch\n"
+        "from ctx.config import Config\n"
+        "from ctx.ignore import load_ignore_patterns\n"
+        "from ctx.init import init_project\n"
+        "from ctx.llm import LLMResult\n"
+        "from ctx.lock import LockSupersededError, STALE_TIMEOUT_SECONDS, _ACTIVE_LOCKS\n"
+        "repo, ready, wake = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])\n"
+        "class _FreezingClient:\n"
+        "    model = 'frozen-model'\n"
+        "    def summarize_files(self, d, files):\n"
+        "        return [LLMResult(text=f'STALE_FROZEN_{f[\"name\"]}') for f in files]\n"
+        "    def summarize_directory(self, d, files, subdirs):\n"
+        "        if d.resolve() == repo.resolve():\n"
+        "            locks = _ACTIVE_LOCKS[repo.resolve()]\n"
+        "            active = locks[0]\n"
+        "            active._stop_heartbeat()\n"
+        "            stale_ts = time.time() - STALE_TIMEOUT_SECONDS - 120.0\n"
+        "            lock_file = repo / '.ctx-cache' / 'lock'\n"
+        "            guard_file = repo / '.ctx-cache' / '.lock.guard'\n"
+        "            lock_file.write_text(\n"
+        "                f'pid={os.getpid()}\\ntimestamp={stale_ts}\\ncommand=refresh\\ntoken={active._token}\\n'\n"
+        "            )\n"
+        "            os.utime(guard_file, (stale_ts, stale_ts))\n"
+        "            ready.write_text('1')\n"
+        "            while not wake.exists():\n"
+        "                time.sleep(0.01)\n"
+        "        return LLMResult(text=f'# {d.name}\\n\\nSTALE_FROZEN_DIR_PURPOSE.')\n"
+        "cfg = Config(provider='ollama', model='frozen-model', api_key='none', cache_path='')\n"
+        "with patch('ctx.api._build_generation_runtime', return_value=(cfg, load_ignore_patterns(repo), _FreezingClient())):\n"
+        "    try:\n"
+        "        init_project(repo, force=True, tier2=False)\n"
+        "        print('UNEXPECTED_SUCCESS')\n"
+        "    except LockSupersededError:\n"
+        "        print('SUPERSEDED_ABORTED')\n"
+    )
+
+    reclaimer_script = (
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "from unittest.mock import patch\n"
+        "from ctx.config import Config\n"
+        "from ctx.generator import generate_tree\n"
+        "from ctx.ignore import load_ignore_patterns\n"
+        "from ctx.init import _populate_ctx_dir\n"
+        "from ctx.llm import LLMResult\n"
+        "from ctx.lock import CtxLock\n"
+        "from ctx.stats_board import save_json_atomic, write_text_atomic\n"
+        "repo, ready, release_flag = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])\n"
+        "class _ReplacementClient:\n"
+        "    model = 'replacement-model'\n"
+        "    def summarize_files(self, d, files):\n"
+        "        return [LLMResult(text=f'REPLACEMENT_CANONICAL_{f[\"name\"]}') for f in files]\n"
+        "    def summarize_directory(self, d, files, subdirs):\n"
+        "        return LLMResult(text=f'# {d.name}\\n\\nREPLACEMENT_CANONICAL_PURPOSE.')\n"
+        "cfg = Config(provider='ollama', model='replacement-model', api_key='none', cache_path='')\n"
+        "spec = load_ignore_patterns(repo)\n"
+        "with CtxLock(repo, command='replacement-refresh'):\n"
+        "    write_text_atomic(repo / '.gitignore', '.ctx/\\n')\n"
+        "    spec = load_ignore_patterns(repo)\n"
+        "    generate_tree(repo, cfg, _ReplacementClient(), spec)\n"
+        "    ctx_dir = repo / '.ctx'\n"
+        "    ctx_dir.mkdir(exist_ok=True)\n"
+        "    write_text_atomic(ctx_dir / '.gitignore', '*\\n')\n"
+        "    _populate_ctx_dir(repo, ctx_dir)\n"
+        "    save_json_atomic(ctx_dir / 'metadata.json', {'schema_version': 1, 'mode': 'standard', 'owner': 'replacement'})\n"
+        "    ready.write_text('1')\n"
+        "    while not release_flag.exists():\n"
+        "        time.sleep(0.01)\n"
+        "print('REPLACEMENT_DONE')\n"
+    )
+
+    frozen_proc = subprocess.Popen(
+        [sys.executable, "-c", frozen_writer_script, str(repo), str(frozen_ready), str(frozen_wake)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    reclaimer_proc: subprocess.Popen[str] | None = None
+    try:
+        deadline = time.time() + 10.0
+        while not frozen_ready.exists() and time.time() < deadline:
+            time.sleep(0.01)
+        assert frozen_ready.exists()
+        assert frozen_proc.poll() is None
+
+        reclaimer_proc = subprocess.Popen(
+            [sys.executable, "-c", reclaimer_script, str(repo), str(reclaimer_ready), str(reclaimer_release)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        while not reclaimer_ready.exists() and time.time() < deadline:
+            time.sleep(0.01)
+        assert reclaimer_ready.exists(), reclaimer_proc.stderr.read() if reclaimer_proc.poll() is not None else ""
+        assert reclaimer_proc.poll() is None
+
+        # Snapshot every manifest, export, metadata, gitignore, and lock file while replacement owner is active
+        tracked_paths = [
+            repo / "CONTEXT.md",
+            repo / "sub" / "CONTEXT.md",
+            repo / ".gitignore",
+            repo / CTX_DIR / "CONTEXT.md",
+            repo / CTX_DIR / "CONTEXT-1.md",
+            repo / CTX_DIR / "CONTEXT-0.md",
+            repo / CTX_DIR / "metadata.json",
+            repo / ".ctx-cache" / "lock",
+        ]
+        expected_bytes = {p: p.read_bytes() for p in tracked_paths}
+        assert b"REPLACEMENT_CANONICAL" in expected_bytes[repo / "CONTEXT.md"]
+        assert b"REPLACEMENT_CANONICAL" in expected_bytes[repo / "sub" / "CONTEXT.md"]
+        assert b"REPLACEMENT_CANONICAL" in expected_bytes[repo / CTX_DIR / "CONTEXT-0.md"]
+
+        # Resume the frozen writer while the replacement owner remains active!
+        frozen_wake.write_text("1", encoding="utf-8")
+        frozen_out, frozen_err = frozen_proc.communicate(timeout=10.0)
+        assert "SUPERSEDED_ABORTED" in frozen_out, f"stdout={frozen_out!r} stderr={frozen_err!r}"
+        assert "UNEXPECTED_SUCCESS" not in frozen_out
+
+        # Not a single byte of manifests, exports, metadata, gitignore, or lock may be modified or rolled back!
+        for path, before_bytes in expected_bytes.items():
+            assert path.is_file(), f"Superseded writer unlinked {path}"
+            assert path.read_bytes() == before_bytes, f"Superseded writer modified {path}"
+
+        reclaimer_release.write_text("1", encoding="utf-8")
+        rec_out, rec_err = reclaimer_proc.communicate(timeout=10.0)
+        assert "REPLACEMENT_DONE" in rec_out, f"stdout={rec_out!r} stderr={rec_err!r}"
+    finally:
+        for proc in (frozen_proc, reclaimer_proc):
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+
+
+def test_r2_failed_or_contended_transition_never_clobbers_concurrent_committed_state(
+    tmp_path: Path,
+) -> None:
+    """Failed provider setup or LockHeldError in init_project must never restore stale snapshots over concurrent work."""
+    repo = _init_git_repo(tmp_path / "repo")
+    init_project(repo, tier2=True)
+
+    s0_c0 = (repo / CTX_DIR / "CONTEXT-0.md").read_bytes()
+    entered_runtime = threading.Event()
+    fail_runtime = threading.Event()
+
+    def _pausing_failing_runtime(*args: object, **kwargs: object) -> tuple[object, object, object]:
+        entered_runtime.set()
+        fail_runtime.wait(timeout=5.0)
+        raise RuntimeError("Pre-flight check failed: simulated provider outage")
+
+    err_holder: list[BaseException] = []
+
+    with patch("ctx.api._build_generation_runtime", side_effect=_pausing_failing_runtime):
+        def _run_init_a() -> None:
+            try:
+                init_project(repo, force=True, tier2=False)
+            except BaseException as exc:
+                err_holder.append(exc)
+
+        t_a = threading.Thread(target=_run_init_a)
+        t_a.start()
+        assert entered_runtime.wait(timeout=5.0)
+
+        # While A is paused in provider setup, Writer B adds a public function and commits Tier 2 refresh S1!
+        (repo / "hello.py").write_text("def published_s1_api() -> str:\n    return 'S1'\n", encoding="utf-8")
+        b_res = api_module.refresh(repo)
+        assert b_res.strategy == "tier2"
+        s1_c0 = (repo / CTX_DIR / "CONTEXT-0.md").read_bytes()
+        s1_c1 = (repo / CTX_DIR / "CONTEXT-1.md").read_bytes()
+        s1_full = (repo / CTX_DIR / "CONTEXT.md").read_bytes()
+        s1_meta = (repo / CTX_DIR / "metadata.json").read_bytes()
+        s1_gitignore = (repo / ".gitignore").read_bytes()
+        assert s1_c0 != s0_c0
+        assert b"published_s1_api" in s1_full
+
+        # Now let A's provider setup fail: A must NOT restore S0 over B's S1!
+        fail_runtime.set()
+        t_a.join(timeout=5.0)
+
+    assert len(err_holder) == 1
+    assert isinstance(err_holder[0], RuntimeError)
+    assert (repo / CTX_DIR / "CONTEXT-0.md").read_bytes() == s1_c0
+    assert (repo / CTX_DIR / "CONTEXT-1.md").read_bytes() == s1_c1
+    assert (repo / CTX_DIR / "CONTEXT.md").read_bytes() == s1_full
+    assert (repo / CTX_DIR / "metadata.json").read_bytes() == s1_meta
+    assert (repo / ".gitignore").read_bytes() == s1_gitignore
+
+    # Also verify LockHeldError while Writer B actively holds CtxLock never triggers rollback
+    cfg = Config(provider="ollama", model="fake-qa-model", api_key="not-needed", cache_path="")
+    with CtxLock(repo, command="active-writer"):
+        (repo / CTX_DIR / "CONTEXT-0.md").write_bytes(s1_c0 + b"\n<!-- active-writer-s2 -->\n")
+        s2_c0 = (repo / CTX_DIR / "CONTEXT-0.md").read_bytes()
+        with patch(
+            "ctx.api._build_generation_runtime",
+            return_value=(cfg, load_ignore_patterns(repo), _SimpleFakeClient()),
+        ):
+            with pytest.raises(LockHeldError):
+                init_project(repo, force=True, tier2=False)
+        assert (repo / CTX_DIR / "CONTEXT-0.md").read_bytes() == s2_c0
+        assert (repo / CTX_DIR / "metadata.json").read_bytes() == s1_meta
+
+
+def test_r3_mode_revalidation_on_until_complete_cycles_and_tier2_fallback(
+    tmp_path: Path,
+) -> None:
+    """Mode must be revalidated on every CtxLock acquisition across --until-complete passes and Tier 2 fallbacks."""
+    # 1. --until-complete mid-cooldown transition from Tier 1 -> Tier 2
+    repo = _init_git_repo(tmp_path / "repo_uc")
+    (repo / "sub1").mkdir()
+    (repo / "sub1" / "a.py").write_text("def a() -> int:\n    return 1\n", encoding="utf-8")
+    (repo / "sub2").mkdir()
+    (repo / "sub2" / "b.py").write_text("def b() -> int:\n    return 2\n", encoding="utf-8")
+
+    class _TokenCountingClient:
+        model = "budget-model"
+
+        def summarize_files(self, d: Path, files: list[dict]) -> list[LLMResult]:
+            return [LLMResult(text=f"Summary of {f['name']}.", input_tokens=40, output_tokens=20) for f in files]
+
+        def summarize_directory(self, d: Path, files: list, subdirs: list) -> LLMResult:
+            return LLMResult(text=f"# {d.name}\n\nDirectory purpose.\n", input_tokens=30, output_tokens=10)
+
+    cfg = Config(
+        provider="ollama",
+        model="budget-model",
+        api_key="none",
+        cache_path="",
+        token_budget=50,
+        max_concurrent_dirs=1,
+        resume_cooldown_seconds=0.01,
+    )
+
+    transitioned_during_cooldown = False
+
+    def _cooldown_hook(_seconds: float) -> None:
+        nonlocal transitioned_during_cooldown
+        if not transitioned_during_cooldown:
+            transitioned_during_cooldown = True
+            # Another invocation resets leaf manifests and transitions repo to Tier 2 while lock is released!
+            api_module.reset(repo, yes=True)
+            init_project(repo, force=True, tier2=True)
+
+    with (
+        patch("ctx.api._build_generation_runtime", return_value=(cfg, load_ignore_patterns(repo), _TokenCountingClient())),
+        patch("ctx.api._time.sleep", side_effect=_cooldown_hook),
+    ):
+        uc_res = api_module.refresh(repo, until_complete=True)
+
+    assert transitioned_during_cooldown is True
+    assert uc_res.strategy == "tier2"
+    assert json.loads((repo / CTX_DIR / "metadata.json").read_text(encoding="utf-8"))["mode"] == "tier2"
+    assert not (repo / "CONTEXT.md").exists()
+    assert not (repo / "sub1" / "CONTEXT.md").exists()
+    assert not (repo / "sub2" / "CONTEXT.md").exists()
+
+    # 2. _refresh_tier2 fallback racing with a transition BACK to Tier 2 during _build_generation_runtime
+    repo2 = _init_git_repo(tmp_path / "repo_fb")
+    (repo2 / "pkg").mkdir()
+    (repo2 / "pkg" / "mod.py").write_text("def mod() -> int:\n    return 3\n", encoding="utf-8")
+    init_project(repo2, tier2=True)
+
+    entered_tier2 = threading.Event()
+    proceed_tier2 = threading.Event()
+    entered_fallback_runtime = threading.Event()
+    proceed_fallback_runtime = threading.Event()
+
+    real_refresh_tier2 = api_module._refresh_tier2
+    first_tier2_call = True
+
+    def _hooked_refresh_tier2(root_arg: Path, **kwargs: object) -> api_module.RefreshResult:
+        nonlocal first_tier2_call
+        if first_tier2_call:
+            first_tier2_call = False
+            entered_tier2.set()
+            proceed_tier2.wait(timeout=5.0)
+        return real_refresh_tier2(root_arg, **kwargs)
+
+    cfg_fb = Config(provider="ollama", model="fake-qa-model", api_key="none", cache_path="")
+
+    def _hooked_runtime(root_arg: Path, **kwargs: object) -> tuple[Config, object, object]:
+        # Only pause the fallback refresh thread (init_project passes _force_tier1=True directly, so filter by thread name)
+        if threading.current_thread().name == "fallback-refresh-thread":
+            entered_fallback_runtime.set()
+            proceed_fallback_runtime.wait(timeout=5.0)
+        return cfg_fb, load_ignore_patterns(root_arg), _SimpleFakeClient()
+
+    fb_out: list[api_module.RefreshResult] = []
+    fb_err: list[BaseException] = []
+
+    with (
+        patch("ctx.api._refresh_tier2", side_effect=_hooked_refresh_tier2),
+        patch("ctx.api._build_generation_runtime", side_effect=_hooked_runtime),
+    ):
+        t_fb = threading.Thread(
+            target=lambda: fb_out.append(api_module.refresh(repo2)),
+            name="fallback-refresh-thread",
+        )
+        t_fb.start()
+        assert entered_tier2.wait(timeout=5.0)
+
+        # Transition Tier 2 -> Tier 1 while t_fb is about to acquire CtxLock in _refresh_tier2
+        init_project(repo2, force=True, tier2=False)
+        assert (repo2 / "CONTEXT.md").is_file()
+
+        # Let t_fb observe mode == 'standard' under CtxLock and fall back to refresh()
+        proceed_tier2.set()
+        assert entered_fallback_runtime.wait(timeout=5.0)
+
+        # While t_fb is building its Tier 1 runtime, reset leaf manifests and transition BACK to Tier 2!
+        api_module.reset(repo2, yes=True)
+        init_project(repo2, force=True, tier2=True)
+        assert not (repo2 / "CONTEXT.md").exists()
+
+        proceed_fallback_runtime.set()
+        t_fb.join(timeout=10.0)
+
+    assert fb_err == []
+    assert len(fb_out) == 1
+    assert fb_out[0].strategy == "tier2"
+    assert json.loads((repo2 / CTX_DIR / "metadata.json").read_text(encoding="utf-8"))["mode"] == "tier2"
+    assert not (repo2 / "CONTEXT.md").exists()
+    assert not (repo2 / "pkg" / "CONTEXT.md").exists()
+
+
+def test_r4_custom_hooks_path_inside_worktree_stays_fresh_and_rolls_back_on_failure(
+    tmp_path: Path,
+) -> None:
+    """Installing hooks into a non-ignored core.hooksPath directory must leave Tier 1 & Tier 2 100% fresh and roll back cleanly."""
+    import ctx.init as init_mod
+
+    repo = _init_git_repo(tmp_path / "repo_hooks")
+    (repo / "src").mkdir()
+    (repo / "src" / "app.py").write_text("def start() -> None:\n    pass\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "core.hooksPath", ".githooks"],
+        capture_output=True,
+        check=True,
+    )
+
+    cfg = Config(provider="ollama", model="fake-qa-model", api_key="none", cache_path="")
+
+    # 1. Failed Tier 1 initialization must roll back newly created .githooks/, leaf manifests, .ctx/, and .gitignore
+    real_write_text = init_mod.write_text_atomic
+
+    def _fail_on_c0(path: Path, content: str) -> None:
+        if path.name == "CONTEXT-0.md":
+            raise OSError("simulated export failure after hooks installed")
+        real_write_text(path, content)
+
+    with (
+        patch("ctx.api._build_generation_runtime", return_value=(cfg, load_ignore_patterns(repo), _SimpleFakeClient())),
+        patch("ctx.init.write_text_atomic", side_effect=_fail_on_c0),
+    ):
+        with pytest.raises(OSError, match="simulated export failure after hooks installed"):
+            init_project(repo, tier2=False)
+
+    assert not (repo / ".githooks").exists()
+    assert not (repo / "CONTEXT.md").exists()
+    assert not (repo / CTX_DIR).exists()
+    assert not (repo / ".gitignore").exists()
+
+    # 2. Tier 2 init with core.hooksPath=.githooks must include .githooks in hashes and report 0 staleness
+    init_project(repo, tier2=True)
+    for hook_name in ("post-commit", "post-checkout", "post-merge"):
+        assert (repo / ".githooks" / hook_name).is_file()
+    proj_t2 = CtxProject.load(repo, walk_parents=False)
+    assert proj_t2 is not None
+    assert proj_t2.is_stale() is False
+    t2_check = api_module.check(repo, verify=True)
+    assert t2_check.summary["stale"] == 0
+    assert t2_check.summary["invalid"] == 0
+
+    # 3. Tier 1 init --force with core.hooksPath=.githooks must generate .githooks/CONTEXT.md and pass --verify
+    with patch(
+        "ctx.api._build_generation_runtime",
+        return_value=(cfg, load_ignore_patterns(repo), _SimpleFakeClient()),
+    ):
+        init_project(repo, force=True, tier2=False)
+
+    assert (repo / ".githooks" / "CONTEXT.md").is_file()
+    githooks_manifest = (repo / ".githooks" / "CONTEXT.md").read_text(encoding="utf-8")
+    assert "**post-commit**" in githooks_manifest
+    assert "**post-checkout**" in githooks_manifest
+    assert "**post-merge**" in githooks_manifest
+    root_manifest = (repo / "CONTEXT.md").read_text(encoding="utf-8")
+    assert "**.githooks/**" in root_manifest
+
+    t1_check = api_module.check(repo, verify=True)
+    assert t1_check.summary["stale"] == 0
+    assert t1_check.summary["missing"] == 0
+    assert t1_check.summary["invalid"] == 0
+    assert t1_check.summary["invalid_body"] == 0
+
+    proj_t1 = CtxProject.load(repo, walk_parents=False)
+    assert proj_t1 is not None
+    assert proj_t1.is_stale() is False
+

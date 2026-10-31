@@ -647,6 +647,8 @@ def _process_one_directory(
       - error is "skip" when the directory is fresh, was skipped, or budget stopped
       - error is an error string when an exception occurred
     """
+    from ctx.lock import LockSupersededError
+
     try:
         if budget_stop is not None and budget_stop.is_set():
             return 0, 0, 0, 0, 0, "skip"
@@ -658,6 +660,8 @@ def _process_one_directory(
             directory, root, config, client, spec
         )
         return file_count, binary_count, tokens_used, input_tokens, output_tokens, None
+    except LockSupersededError:
+        raise
     except Exception as exc:
         return 0, 0, 0, 0, 0, str(exc)
 
@@ -763,7 +767,12 @@ def _run_generation(
             }
             for future in as_completed(futures):
                 directory = futures[future]
-                file_count, binary_count, tokens_used, dir_in_tokens, dir_out_tokens, error = future.result()
+                try:
+                    file_count, binary_count, tokens_used, dir_in_tokens, dir_out_tokens, error = future.result()
+                except Exception:
+                    budget_stop.set()
+                    executor.shutdown(wait=True, cancel_futures=True)
+                    raise
                 with stats_lock:
                     dirs_done += 1
                     local_done = dirs_done

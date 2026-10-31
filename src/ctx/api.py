@@ -35,7 +35,7 @@ from ctx.generator import (
 from ctx.ignore import load_ignore_patterns
 from ctx.manifest import read_manifest
 from ctx.llm import create_client
-from ctx.lock import CtxLock
+from ctx.lock import CtxLock, LockSupersededError, assert_lock_ownership_for_path
 
 
 ProgressCallback = Callable[[Path, int, int, int], None]
@@ -208,6 +208,96 @@ def _is_tier2_repo(root: Path) -> bool:
     return _resolve_tier2_root(root) is not None
 
 
+def _refresh_tier2_locked(
+    root: Path,
+    *,
+    force: bool = False,
+    max_depth: int | None = None,
+    touch_last_refresh: bool = False,
+) -> RefreshResult | None:
+    """Refresh Tier 2 (.ctx/) maps while the caller already holds CtxLock(root).
+
+    Returns None when .ctx/metadata.json no longer declares mode == 'tier2'.
+    """
+    from datetime import datetime, timezone
+
+    from ctx.init import _restore_dir_snapshot, _snapshot_dir
+    from ctx.skeleton import (
+        extract_skeleton,
+        render_context_0,
+        render_context_1,
+        render_context_full,
+        should_invoke_llm,
+    )
+    from ctx.stats_board import load_json_safe, save_json_atomic, write_text_atomic
+
+    ctx_dir = root / ".ctx"
+    meta_path = ctx_dir / "metadata.json"
+    expected_exports = ("CONTEXT.md", "CONTEXT-1.md", "CONTEXT-0.md")
+
+    meta_exists = meta_path.is_file()
+    meta = load_json_safe(meta_path, {}) if meta_exists else {}
+    if not (meta_exists and isinstance(meta, dict) and meta.get("mode") == "tier2"):
+        return None
+
+    skeleton = extract_skeleton(root, max_depth=max_depth)
+    exports_missing = any(
+        not (ctx_dir / name).is_file() or (ctx_dir / name).stat().st_size == 0
+        for name in expected_exports
+    )
+    needs_update = force or exports_missing or should_invoke_llm(meta, skeleton)
+    subsystem_count = max(1, len(skeleton.subsystems))
+
+    if not needs_update:
+        if touch_last_refresh and meta_path.is_file():
+            meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
+            save_json_atomic(meta_path, meta)
+        return RefreshResult(
+            dirs_processed=0,
+            dirs_skipped=subsystem_count,
+            files_processed=0,
+            tokens_used=0,
+            errors=[],
+            budget_exhausted=False,
+            strategy="tier2",
+            est_cost_usd=0.0,
+            stale_directories=[],
+        )
+
+    prior_snapshot = _snapshot_dir(ctx_dir)
+    try:
+        rendered_c0 = render_context_0(skeleton)
+        rendered_c1 = render_context_1(skeleton)
+        rendered_full = render_context_full(skeleton)
+        assert_lock_ownership_for_path(ctx_dir)
+        ctx_dir.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(ctx_dir / "CONTEXT-0.md", rendered_c0)
+        write_text_atomic(ctx_dir / "CONTEXT-1.md", rendered_c1)
+        write_text_atomic(ctx_dir / "CONTEXT.md", rendered_full)
+        meta["mode"] = "tier2"
+        meta["structural_hash"] = skeleton.structural_hash
+        meta["boundary_doc_hash"] = skeleton.boundary_doc_hash
+        meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
+        save_json_atomic(meta_path, meta)
+    except LockSupersededError:
+        raise
+    except Exception:
+        _restore_dir_snapshot(ctx_dir, prior_snapshot)
+        raise
+
+    return RefreshResult(
+        dirs_processed=subsystem_count,
+        dirs_skipped=0,
+        files_processed=skeleton.total_files,
+        tokens_used=0,
+        errors=[],
+        budget_exhausted=False,
+        strategy="tier2",
+        est_cost_usd=0.0,
+        stale_directories=[],
+    )
+
+
 def _refresh_tier2(
     root: Path,
     *,
@@ -217,20 +307,12 @@ def _refresh_tier2(
     touch_last_refresh: bool = False,
     _allow_fallback: bool = True,
     _from_hook: bool = False,
+    _mode_hops: int = 0,
+    _fallback_kwargs: dict[str, object] | None = None,
 ) -> RefreshResult:
     """Refresh deterministic Tier 2 (.ctx/) architectural maps without requiring LLM credentials."""
-    from datetime import datetime, timezone
-
-    from ctx.init import _restore_dir_snapshot, _snapshot_dir
-    from ctx.lock import CtxLock
-    from ctx.skeleton import (
-        extract_skeleton,
-        render_context_0,
-        render_context_1,
-        render_context_full,
-        should_invoke_llm,
-    )
-    from ctx.stats_board import load_json_safe, save_json_atomic, write_text_atomic
+    from ctx.skeleton import extract_skeleton, should_invoke_llm
+    from ctx.stats_board import load_json_safe
 
     ctx_dir = root / ".ctx"
     meta_path = ctx_dir / "metadata.json"
@@ -259,88 +341,41 @@ def _refresh_tier2(
             stale_directories=stale_dirs,
         )
 
-    fallback_to_tier1 = False
     with CtxLock(root, command="refresh"):
-        meta_exists = meta_path.is_file()
-        meta = load_json_safe(meta_path, {}) if meta_exists else {}
-        if not (meta_exists and isinstance(meta, dict) and meta.get("mode") == "tier2"):
-            # Another operation transitioned this project out of Tier 2 (or uninitialized it)
-            # while we were waiting on CtxLock — never overwrite non-Tier-2 state back to Tier 2.
-            if _from_hook and not meta_exists:
-                return RefreshResult(
-                    dirs_processed=0,
-                    dirs_skipped=0,
-                    files_processed=0,
-                    tokens_used=0,
-                    errors=[],
-                    budget_exhausted=False,
-                    strategy="tier2",
-                    est_cost_usd=0.0,
-                    stale_directories=[],
-                )
-            fallback_to_tier1 = True
-        else:
-            skeleton = extract_skeleton(root, max_depth=max_depth)
-            exports_missing = any(
-                not (ctx_dir / name).is_file() or (ctx_dir / name).stat().st_size == 0
-                for name in expected_exports
-            )
-            needs_update = force or exports_missing or should_invoke_llm(meta, skeleton)
-            subsystem_count = max(1, len(skeleton.subsystems))
-
-            if not needs_update:
-                if touch_last_refresh and meta_path.is_file():
-                    meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
-                    save_json_atomic(meta_path, meta)
-                return RefreshResult(
-                    dirs_processed=0,
-                    dirs_skipped=subsystem_count,
-                    files_processed=0,
-                    tokens_used=0,
-                    errors=[],
-                    budget_exhausted=False,
-                    strategy="tier2",
-                    est_cost_usd=0.0,
-                    stale_directories=[],
-                )
-
-            prior_snapshot = _snapshot_dir(ctx_dir)
-            try:
-                rendered_c0 = render_context_0(skeleton)
-                rendered_c1 = render_context_1(skeleton)
-                rendered_full = render_context_full(skeleton)
-                ctx_dir.mkdir(parents=True, exist_ok=True)
-                write_text_atomic(ctx_dir / "CONTEXT-0.md", rendered_c0)
-                write_text_atomic(ctx_dir / "CONTEXT-1.md", rendered_c1)
-                write_text_atomic(ctx_dir / "CONTEXT.md", rendered_full)
-                meta["mode"] = "tier2"
-                meta["structural_hash"] = skeleton.structural_hash
-                meta["boundary_doc_hash"] = skeleton.boundary_doc_hash
-                meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
-                save_json_atomic(meta_path, meta)
-            except Exception:
-                _restore_dir_snapshot(ctx_dir, prior_snapshot)
-                raise
-
-    if fallback_to_tier1:
-        if _allow_fallback:
-            return refresh(root, force=force, dry_run=dry_run, max_depth=max_depth, _force_tier1=True)
-        return RefreshResult(
-            dirs_processed=0,
-            dirs_skipped=0,
-            files_processed=0,
-            tokens_used=0,
-            errors=[],
-            budget_exhausted=False,
-            strategy="tier2",
-            est_cost_usd=0.0,
-            stale_directories=[],
+        locked_result = _refresh_tier2_locked(
+            root,
+            force=force,
+            max_depth=max_depth,
+            touch_last_refresh=touch_last_refresh,
         )
+        if locked_result is not None:
+            return locked_result
+        if _from_hook and not meta_path.is_file():
+            return RefreshResult(
+                dirs_processed=0,
+                dirs_skipped=0,
+                files_processed=0,
+                tokens_used=0,
+                errors=[],
+                budget_exhausted=False,
+                strategy="tier2",
+                est_cost_usd=0.0,
+                stale_directories=[],
+            )
 
+    if _allow_fallback and _mode_hops < 4:
+        fb_kwargs = dict(_fallback_kwargs or {})
+        fb_kwargs.update(
+            force=force,
+            dry_run=dry_run,
+            max_depth=max_depth,
+            _mode_hops=_mode_hops + 1,
+        )
+        return refresh(root, **fb_kwargs)
     return RefreshResult(
-        dirs_processed=subsystem_count,
+        dirs_processed=0,
         dirs_skipped=0,
-        files_processed=skeleton.total_files,
+        files_processed=0,
         tokens_used=0,
         errors=[],
         budget_exhausted=False,
@@ -429,6 +464,8 @@ def _sync_tier1_ctx_exports(root: Path) -> None:
         if isinstance(meta, dict):
             meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
             save_json_atomic(meta_path, meta)
+    except LockSupersededError:
+        raise
     except Exception as exc:
         logger.warning("Tier 1 .ctx/ export sync failed: %s", exc)
 
@@ -449,7 +486,10 @@ def refresh(
     cache_path: str | None = None,
     progress: ProgressCallback | None = None,
     _force_tier1: bool = False,
+    _on_locked_begin: Callable[[], None] | None = None,
     _on_locked_success: Callable[[], None] | None = None,
+    _on_locked_rollback: Callable[[], None] | None = None,
+    _mode_hops: int = 0,
 ) -> RefreshResult:
     """Run canonical refresh behavior with strategy selection."""
     from ctx.config import resolve_project_anchor
@@ -461,6 +501,16 @@ def refresh(
     if dry_run and watch:
         raise ValueError("--dry-run and --watch cannot be used together.")
 
+    fallback_kwargs: dict[str, object] = {
+        "until_complete": until_complete,
+        "provider": provider,
+        "model": model,
+        "token_budget": token_budget,
+        "base_url": base_url,
+        "cache_path": cache_path,
+        "progress": progress,
+    }
+
     tier2_root = None if _force_tier1 else _resolve_tier2_root(root)
     if tier2_root is not None:
         if setup or watch:
@@ -469,7 +519,15 @@ def refresh(
                 f"{unsupported} is not supported in Tier 2 (.ctx/-only) repositories. "
                 "Run 'ctx init --force' to switch to Tier 1 per-directory manifests."
             )
-        return _refresh_tier2(tier2_root, force=force, dry_run=dry_run, max_depth=max_depth)
+        return _refresh_tier2(
+            tier2_root,
+            force=force,
+            dry_run=dry_run,
+            max_depth=max_depth,
+            _allow_fallback=_mode_hops < 4,
+            _mode_hops=_mode_hops,
+            _fallback_kwargs=fallback_kwargs,
+        )
 
     setup_provider: str | None = None
     setup_model: str | None = None
@@ -585,18 +643,17 @@ def refresh(
     _apply_token_guardrail(config)
 
     cumulative_stats = GenerateStats()
-    lock_root = resolve_project_anchor(root) if root.exists() else root
-    preexisting_manifests: dict[Path, bytes] = (
-        {p: p.read_bytes() for p in _iter_tree_manifests(root)}
-        if _on_locked_success is not None
-        else {}
-    )
+    preexisting_manifests: dict[Path, bytes] = {}
+    tx_started = False
+    manifests_snapshotted = False
 
     def _rollback_manifests() -> None:
         from ctx.init import _write_bytes_atomic
 
+        assert_lock_ownership_for_path(root)
         for manifest_path in _iter_tree_manifests(root):
             if manifest_path not in preexisting_manifests:
+                assert_lock_ownership_for_path(manifest_path)
                 manifest_path.unlink(missing_ok=True)
         for manifest_path, prior_bytes in preexisting_manifests.items():
             _write_bytes_atomic(manifest_path, prior_bytes)
@@ -604,14 +661,47 @@ def refresh(
     switched_to_tier2_root: Path | None = None
     while True:
         should_continue_cycles = False
+        lock_root = resolve_project_anchor(root) if root.exists() else root
         with CtxLock(lock_root, command="refresh"):
-            if not _force_tier1 and cumulative_stats.dirs_processed == 0:
+            if not _force_tier1:
                 locked_tier2_root = _resolve_tier2_root(root)
                 if locked_tier2_root is not None:
-                    switched_to_tier2_root = locked_tier2_root
-                    break
+                    if setup or watch:
+                        unsupported = "--setup" if setup else "--watch"
+                        raise ValueError(
+                            f"{unsupported} is not supported in Tier 2 (.ctx/-only) repositories. "
+                            "Run 'ctx init --force' to switch to Tier 1 per-directory manifests."
+                        )
+                    if locked_tier2_root.resolve() == lock_root.resolve():
+                        inline_tier2 = _refresh_tier2_locked(
+                            locked_tier2_root,
+                            force=force,
+                            max_depth=max_depth,
+                        )
+                        if inline_tier2 is not None:
+                            return inline_tier2
+                    else:
+                        switched_to_tier2_root = locked_tier2_root
+                        break
 
             try:
+                if not tx_started:
+                    tx_started = True
+                    if _on_locked_begin is not None:
+                        _on_locked_begin()
+                        spec = load_ignore_patterns(root)
+                        if not force:
+                            strategy = "full" if not _has_manifests(root) else "incremental"
+                            changed_files = None
+                    elif not force and not _has_manifests(root):
+                        strategy = "full"
+                        changed_files = None
+                    if _on_locked_success is not None or _on_locked_rollback is not None:
+                        preexisting_manifests = {
+                            p: p.read_bytes() for p in _iter_tree_manifests(root)
+                        }
+                        manifests_snapshotted = True
+
                 stats: GenerateStats
                 if strategy == "full" and cumulative_stats.dirs_processed == 0:
                     stats = generate_tree(root, config, client, spec, progress=progress)
@@ -673,9 +763,13 @@ def refresh(
                         _on_locked_success()
                     else:
                         _sync_tier1_ctx_exports(root)
+            except LockSupersededError:
+                raise
             except Exception:
-                if _on_locked_success is not None:
+                if manifests_snapshotted:
                     _rollback_manifests()
+                if _on_locked_rollback is not None:
+                    _on_locked_rollback()
                 raise
 
         if not should_continue_cycles:
@@ -692,18 +786,14 @@ def refresh(
         strategy = "incremental"
 
     if switched_to_tier2_root is not None:
-        if setup or watch:
-            unsupported = "--setup" if setup else "--watch"
-            raise ValueError(
-                f"{unsupported} is not supported in Tier 2 (.ctx/-only) repositories. "
-                "Run 'ctx init --force' to switch to Tier 1 per-directory manifests."
-            )
         return _refresh_tier2(
             switched_to_tier2_root,
             force=force,
             dry_run=dry_run,
             max_depth=max_depth,
-            _allow_fallback=False,
+            _allow_fallback=_mode_hops < 4,
+            _mode_hops=_mode_hops + 1,
+            _fallback_kwargs=fallback_kwargs,
         )
 
     budget_guardrail = _budget_guardrail_message(config, cumulative_stats)
@@ -1193,18 +1283,24 @@ def reset(
     yes: bool = False,
 ) -> ResetResult:
     """Remove CONTEXT.md files from a tree."""
-    manifests = _iter_tree_manifests(root)
-    paths = [_path_relative(manifest, root) for manifest in manifests]
+    from ctx.config import resolve_project_anchor
 
     if dry_run:
+        manifests = _iter_tree_manifests(root)
+        paths = [_path_relative(manifest, root) for manifest in manifests]
         return ResetResult(manifests_removed=0, paths=paths)
 
     if not yes:
         raise ConfirmationRequiredError("--yes flag required in non-interactive mode")
 
-    with CtxLock(root, command="reset"):
+    lock_root = resolve_project_anchor(root) if root.exists() else root
+    with CtxLock(lock_root, command="reset"):
+        manifests = _iter_tree_manifests(root)
+        paths = [_path_relative(manifest, root) for manifest in manifests]
         for manifest in manifests:
-            manifest.unlink()
+            assert_lock_ownership_for_path(manifest)
+            manifest.unlink(missing_ok=True)
+        _sync_tier1_ctx_exports(root)
 
     return ResetResult(manifests_removed=len(manifests), paths=paths)
 

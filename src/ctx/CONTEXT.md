@@ -1,11 +1,11 @@
 ---
-generated: '2026-10-31T23:04:21Z'
+generated: '2026-10-31T23:27:58Z'
 generator: ctx/1.1.0
-model: qwen2.5-coder-7b-instruct
-content_hash: sha256:9fb9fb9b0b3ccdb21fa23c6afd401593ef52b2146d954b1bcd2df5f765f4e9dd
+model: claude-haiku-4-5-20251001
+content_hash: sha256:19dba7d017b9d37309d50100674c96a362c1fab263c2348450cd16d732562d9a
 files: 23
 dirs: 1
-tokens_total: 77526
+tokens_total: 79387
 ---
 # src/ctx
 
