@@ -390,3 +390,69 @@ def test_d10_global_stats_isolated_via_env_var(tmp_path: Path, monkeypatch: pyte
     custom = tmp_path / "custom_global" / "stats.json"
     monkeypatch.setenv("CTX_GLOBAL_STATS_PATH", str(custom))
     assert _global_stats_path() == custom
+
+
+def test_tier2_refresh_updates_ctx_exports_without_llm_keys_or_leaf_manifests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ctx refresh on a Tier 2 repo must never require API keys or litter leaf CONTEXT.md files."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    repo = _make_git_repo(tmp_path / "tier2_refresh_repo")
+    (repo / "src").mkdir()
+    (repo / "src" / "service.py").write_text("def alpha() -> int:\n    return 1\n", encoding="utf-8")
+    init_project(repo, tier2=True)
+
+    # Fresh Tier 2 repo skips work without API keys
+    res_fresh = api.refresh(repo)
+    assert res_fresh.strategy == "tier2"
+    assert res_fresh.dirs_processed == 0
+    assert res_fresh.dirs_skipped >= 1
+    assert not (repo / "CONTEXT.md").exists()
+    assert not (repo / "src" / "CONTEXT.md").exists()
+
+    # Structural change triggers dry-run stale detection and deterministic Tier 2 refresh
+    (repo / "src" / "service.py").write_text(
+        "def alpha() -> int:\n    return 1\n\ndef beta_new_export() -> str:\n    return 'ok'\n",
+        encoding="utf-8",
+    )
+    proj = CtxProject.load(repo, walk_parents=False)
+    assert proj is not None
+    assert proj.is_stale() is True
+
+    dry = api.refresh(repo, dry_run=True)
+    assert dry.strategy == "tier2"
+    assert dry.stale_directories == ["."]
+
+    refreshed = api.refresh(repo)
+    assert refreshed.strategy == "tier2"
+    assert refreshed.dirs_processed >= 1
+    assert not (repo / "CONTEXT.md").exists()
+    assert proj.is_stale() is False
+    assert "beta_new_export" in proj.get_context(depth=1)
+
+
+def test_tier1_sdk_is_stale_detects_modified_source_and_clears_after_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CtxProject.is_stale() must detect staleness in Tier 1 repos and sync .ctx/ on refresh."""
+    monkeypatch.setattr(api, "create_client", lambda _cfg: _RealRefreshFakeClient())
+    monkeypatch.setattr(api, "probe_provider_connectivity", lambda *a, **kw: (True, None))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-placeholder")
+
+    repo = _make_git_repo(tmp_path / "tier1_sdk_repo")
+    (repo / "app.py").write_text("x = 1\n", encoding="utf-8")
+    init_project(repo, tier2=False)
+
+    proj = CtxProject.load(repo, walk_parents=False)
+    assert proj is not None
+    assert proj.is_stale() is False
+
+    # Mutate tracked source file -> Tier 1 SDK must immediately report stale
+    (repo / "app.py").write_text("x = 2\ny = 3\n", encoding="utf-8")
+    assert proj.is_stale() is True
+
+    # Running api.refresh() updates both leaf CONTEXT.md and .ctx/ exports
+    api.refresh(repo)
+    assert proj.is_stale() is False

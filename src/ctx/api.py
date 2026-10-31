@@ -186,6 +186,89 @@ def _is_tier2_repo(root: Path) -> bool:
     return isinstance(data, dict) and data.get("mode") == "tier2"
 
 
+def _refresh_tier2(
+    root: Path,
+    *,
+    force: bool = False,
+    dry_run: bool = False,
+    max_depth: int | None = None,
+) -> RefreshResult:
+    """Refresh deterministic Tier 2 (.ctx/) architectural maps without requiring LLM credentials."""
+    from datetime import datetime, timezone
+
+    from ctx.lock import CtxLock
+    from ctx.skeleton import (
+        extract_skeleton,
+        render_context_0,
+        render_context_1,
+        render_context_full,
+        should_invoke_llm,
+    )
+    from ctx.stats_board import load_json_safe, save_json_atomic
+
+    ctx_dir = root / ".ctx"
+    meta_path = ctx_dir / "metadata.json"
+    meta = load_json_safe(meta_path, {})
+    if not isinstance(meta, dict):
+        meta = {}
+
+    skeleton = extract_skeleton(root, max_depth=max_depth)
+    expected_exports = ("CONTEXT.md", "CONTEXT-1.md", "CONTEXT-0.md")
+    exports_missing = any(not (ctx_dir / name).is_file() for name in expected_exports)
+    needs_update = force or exports_missing or should_invoke_llm(meta, skeleton)
+    subsystem_count = max(1, len(skeleton.subsystems))
+
+    if dry_run:
+        stale_dirs = ["."] if needs_update else []
+        return RefreshResult(
+            dirs_processed=0,
+            dirs_skipped=len(stale_dirs),
+            files_processed=0,
+            tokens_used=0,
+            errors=[],
+            budget_exhausted=False,
+            strategy="tier2",
+            est_cost_usd=0.0,
+            stale_directories=stale_dirs,
+        )
+
+    with CtxLock(root, command="refresh"):
+        if not needs_update:
+            return RefreshResult(
+                dirs_processed=0,
+                dirs_skipped=subsystem_count,
+                files_processed=0,
+                tokens_used=0,
+                errors=[],
+                budget_exhausted=False,
+                strategy="tier2",
+                est_cost_usd=0.0,
+                stale_directories=[],
+            )
+
+        ctx_dir.mkdir(parents=True, exist_ok=True)
+        (ctx_dir / "CONTEXT-0.md").write_text(render_context_0(skeleton), encoding="utf-8")
+        (ctx_dir / "CONTEXT-1.md").write_text(render_context_1(skeleton), encoding="utf-8")
+        (ctx_dir / "CONTEXT.md").write_text(render_context_full(skeleton), encoding="utf-8")
+        meta["mode"] = "tier2"
+        meta["structural_hash"] = skeleton.structural_hash
+        meta["boundary_doc_hash"] = skeleton.boundary_doc_hash
+        meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
+        save_json_atomic(meta_path, meta)
+
+    return RefreshResult(
+        dirs_processed=subsystem_count,
+        dirs_skipped=0,
+        files_processed=skeleton.total_files,
+        tokens_used=0,
+        errors=[],
+        budget_exhausted=False,
+        strategy="tier2",
+        est_cost_usd=0.0,
+        stale_directories=[],
+    )
+
+
 def _directory_within_depth(path: Path, root: Path, depth: Optional[int]) -> bool:
     if depth is None:
         return True
@@ -245,6 +328,9 @@ def refresh(
         raise ValueError("--setup and --watch cannot be used together.")
     if dry_run and watch:
         raise ValueError("--dry-run and --watch cannot be used together.")
+
+    if _is_tier2_repo(root) and not setup and not watch:
+        return _refresh_tier2(root, force=force, dry_run=dry_run, max_depth=max_depth)
 
     setup_provider: str | None = None
     setup_model: str | None = None
@@ -446,6 +532,22 @@ def refresh(
     )
 
     if not dry_run:
+        meta_path = root / ".ctx" / "metadata.json"
+        if meta_path.is_file() and not _is_tier2_repo(root):
+            try:
+                from datetime import datetime, timezone
+
+                from ctx.init import _populate_ctx_dir
+                from ctx.stats_board import load_json_safe, save_json_atomic
+
+                _populate_ctx_dir(root, root / ".ctx")
+                meta = load_json_safe(meta_path, {})
+                if isinstance(meta, dict):
+                    meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
+                    save_json_atomic(meta_path, meta)
+            except Exception as exc:
+                logger.warning("Tier 1 .ctx/ export sync failed: %s", exc)
+
         try:
             from ctx.stats_board import record_run
             record_run(root, result, config)

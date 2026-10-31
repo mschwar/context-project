@@ -112,12 +112,14 @@ class CtxProject:
         return self.get_export(depth)
 
     def is_stale(self) -> bool:
-        """Return True if Tier 2 structural/boundary hashes changed or exports are missing."""
+        """Return True if Tier 1 manifests or Tier 2 structural/boundary hashes are stale or missing."""
         for tier_name in ("CONTEXT.md", "CONTEXT-1.md", "CONTEXT-0.md"):
             if not (self.ctx_dir / tier_name).is_file():
                 return True
         meta = self.metadata
-        if meta.mode == "tier2" and meta.structural_hash and meta.boundary_doc_hash:
+        if meta.mode == "tier2":
+            if not meta.structural_hash or not meta.boundary_doc_hash:
+                return True
             try:
                 from ctx.skeleton import extract_skeleton, should_invoke_llm
             except ImportError:
@@ -131,7 +133,24 @@ class CtxProject:
                 },
                 skeleton,
             )
-        return False
+
+        try:
+            from ctx.generator import inspect_directory_health
+            from ctx.ignore import load_ignore_patterns
+            from ctx.manifest import read_manifest
+        except ImportError:
+            return False
+
+        spec = load_ignore_patterns(self.root)
+        health = inspect_directory_health(self.root, spec, self.root)
+        if not health or any(entry.status != "fresh" or entry.error is not None for entry in health):
+            return True
+
+        root_manifest = read_manifest(self.root)
+        if root_manifest is None:
+            return True
+        context_0 = (self.ctx_dir / "CONTEXT-0.md").read_text(encoding="utf-8")
+        return root_manifest.frontmatter.content_hash not in context_0
 
     @property
     def context_full(self) -> str:
