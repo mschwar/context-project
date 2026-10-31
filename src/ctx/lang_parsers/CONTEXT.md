@@ -7,7 +7,7 @@ files: 11
 dirs: 0
 tokens_total: 5211
 ---
-# C:/Users/Matty/Documents/context-project/src/ctx/lang_parsers
+# src/ctx/lang_parsers
 
 Language-specific parsers that extract public APIs and structural elements from source files across multiple programming languages.
 

@@ -40,20 +40,21 @@ BitNet is deprecated in this repo. Attempting to use it raises an informative er
 | `preflight.py` | Preflight onboarding gate (`ctx setup --check`). Validates provider detection, config resolution, live connectivity, sample model summary quality, and target directory readiness. |
 | `stats_board.py` | Persistent run-stats ledger. Records every `ctx refresh` invocation with retention pruning (`prune_runs`); exposes per-repo and global aggregates for `ctx stats --board`. Also exposes `load_json_safe` and `save_json_atomic` helpers used by `init.py`. |
 | `mcp_server.py` | Stdio JSON-RPC 2.0 MCP server exposing `api.py` functions as tools and `.ctx/` exports/metadata/hook telemetry as read-only MCP resources. |
-| `ignore.py` | `.gitignore`-style filtering using the `pathspec` library. |
-| `git.py` | Git-aware changed-file detection for selective refresh. |
+| `lock.py` | Cross-process `.ctx.lock` write mutex with atomic temp-file replacement, PID-liveness checks, and background heartbeat renewal for long runs. |
+| `ignore.py` | `.gitignore`-style filtering using `pathspec`, merging built-in `.ctxignore.default`, the repo's `.gitignore`, and `.ctxignore` overrides. |
+| `git.py` | Git-aware changed-file detection (staged, unstaged, and untracked files) for selective refresh. |
 | `watcher.py` | File watching and debounced incremental refresh. |
 | `server.py` | HTTP server for reading generated manifests remotely (optional `[serve]` extra). |
 
 ## Data Flow
 
-1. **Scan:** Walk tree (filtered by `.ctxignore` and `max_depth`).
+1. **Scan:** Walk tree (filtered by `.ctxignore.default` + `.gitignore` + `.ctxignore`, `extensions`, and `max_depth`).
 2. **Sort:** Order directories by depth descending (bottom-up).
 3. **Hash:** Compute current `content_hash` for the directory.
 4. **Compare:** If `update` mode, skip if the hash matches the existing manifest.
-5. **Summarize Files:** Batch text files, send to LLM for one-line summaries. Detect binary files and extract metadata.
-6. **Summarize Directory:** Send file summaries + existing child summaries to LLM to generate the directory's purpose and full markdown body.
-7. **Write:** Save `CONTEXT.md` with updated frontmatter and body.
+5. **Summarize Files:** Batch text files (truncated by real token count), send to LLM for one-line summaries (disk-cached by model + file payload hash). Detect empty and binary files deterministically.
+6. **Summarize Directory:** Send file summaries + existing child summaries to LLM (disk-cached by model + content hash + child summaries) to generate the directory's purpose and optional notes, while rendering `# <relative-path>`, `## Files`, and `## Subdirectories` deterministically.
+7. **Write:** Atomically save `CONTEXT.md` with updated frontmatter and body.
 
 ## Manifest Format (`CONTEXT.md`)
 
@@ -67,7 +68,7 @@ files: count
 dirs: count
 tokens_total: aggregate-count
 ---
-# /absolute/path
+# relative/path
 
 One-line purpose of this directory.
 

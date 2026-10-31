@@ -7,7 +7,7 @@ files: 1
 dirs: 2
 tokens_total: 39
 ---
-# C:/Users/Matty/Documents/context-project/tests/fixtures/sample_project
+# tests/fixtures/sample_project
 
 Minimal sample project for testing context manifest generation with a simple Python app and utility functions.
 

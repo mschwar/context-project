@@ -1,50 +1,50 @@
 ---
-generated: '2026-10-30T15:05:37Z'
+generated: '2026-10-31T21:34:52Z'
 generator: ctx/1.1.0
 model: qwen2.5:7b-instruct
-content_hash: sha256:1c0bacbbf21afe258353657f67c8e12784fd37f987581541c4891b1ff048932a
-files: 20
-dirs: 8
-tokens_total: 17692
+content_hash: sha256:ff56e0ddc764ae53e5b9bc5990368bf0dfadd9d7dd260b3372c2fdabe8d8ca8b
+files: 19
+dirs: 9
+tokens_total: 6841
 ---
-# /central/repos/active/context-project
+# .
 
-Documentation, guidelines, and configuration for the context-project, including version control, testing, and agent-friendly development practices.
+Houses agent instructions, operational policies, and development guidelines for the `ctx` tool, focusing on its architecture, testing, and contribution practices.
 
 ## Files
 - **.ctxignore.default** — Default ignore patterns for ctx projects.
 - **.gitattributes** — Configures Git to auto detect text files and normalize line endings.
-- **.gitignore** — Excludes files and directories for version control, including Python cache, IDE local files, test artifacts, and environment files.
-- **.pre-commit-hooks.yaml** — Pre-commit hook for validating ctx manifest files are up to date.
-- **=4.0** — Version specification for package compatibility.
-- **AGENTS.md** — Documentation and instructions for ctx tool usage and configuration.
+- **.gitignore** — Excludes generated, temporary, and local files from version control.
+- **.pre-commit-hooks.yaml** — Pre-commit hook for verifying ctx manifest files are up to date.
+- **AGENTS.md** — Agent instructions and configuration for ctx tool usage and setup.
 - **AGENT_FIRST_OVERHAUL.md** — Comprehensive plan for reorienting the `ctx` tool towards autonomous agent consumption, detailing the transition from human-operated to agent-friendly interfaces and surfaces.
-- **CONTRIBUTING.md** — Guides contributors on maintaining the agentic software development lifecycle including context updates, testing, and commit practices.
+- **CONTRIBUTING.md** — Guides contribution to the project emphasizing agentic SDLC practices, context maintenance, implementation blocks, test-driven development, and manifest review.
 - **GATE_CLOSEOUT.md** — Defines the gate closeout protocol including validation, reflection, and documentation steps.
-- **README.md** — Quick start guide and usage instructions for ctx tool.
-- **RUNBOOK.md** — Instructions for operating, validating, and developing ctx, including CLI commands and release procedures.
-- **TODOS.md** — Describes TODO items for improving context project management, including run history pruning, MCP resource exposure, and SDK development.
-- **architecture.md** — Describes the architecture and components of the ctx project, including generation, hashing, and summarization processes.
+- **README.md** — Quick start guide and usage instructions for the ctx tool.
+- **RUNBOOK.md** — Instructions for operating, validating, and developing ctx including CLI commands and setup procedures.
+- **TODOS.md** — Configures run record retention policy to prevent unbounded growth and optimize disk usage.
+- **architecture.md** — Describes the architecture and design principles of the ctx project, including its manifest generation and LLM integration strategies.
 - **commitlint.config.mjs** — Configuration for commit linting using conventional commit standards.
-- **mcp.json** — Filesystem-native context layer configuration for generating and managing CONTEXT.md manifests.
+- **mcp.json** — Configuration for MCP servers including context layer command details.
 - **package-lock.json** — Package lockfile for versioned dependencies and devDependencies.
-- **package.json** — Manifest defining project metadata and dependencies for npm packaging.
+- **package.json** — Development configuration and scripts for the ctx-tool-dev package.
 - **pyproject.toml** — Configuration for the project including dependencies, URLs, and scripts.
 - **rules.md** — Defines engineering standards, agentic rules, and testing requirements for the project.
-- **state.md** — Summary of the current development status and upcoming milestones for the `ctx` project.
+- **state.md** — Summary of the current development status and upcoming milestones of ctx project.
 
 ## Subdirectories
 - **.githooks/** — This directory contains Git hooks that enforce automated testing and code quality checks before commits are made to the repository.
-- **.github/** — This directory contains GitHub configuration files and automation workflows that support CI/CD processes and custom actions for the context-project.
+- **.github/** — Houses actions and workflows for validating and managing repository checks in a ctx project.
 - **.husky/** — This directory contains Git hooks that enforce code quality standards and branching workflows through automated validation at commit and push stages.
-- **archive/** — Contains historical and reflective documents related to the development of the context-project CLI tool and its associated filesystem-native context management system.
+- **archive/** — Contains historical and reflective documents and agent instructions related to the development and evolution of the context-project-audit-remediation tool, including its core ideas, plans, and roadmap.
 - **docs/** — Tracks and aggregates context refresh run statistics for analytics and public leaderboard, alongside design documents for the `ctx` tool's architecture and new feature implementations.
 - **documents/** — This directory contains strategic planning and architectural thesis documents for the context-project, focusing on agent-first design principles and system overhaul strategies.
-- **src/** — Unified API and CLI entry points for managing and generating CONTEXT.md files, integrating various utilities and services.
-- **tests/** — Tests for various components of the context-project, including CLI, API, language parsers, and server functionalities.
+- **ops/** — Holds operational policies and procedures for managing changes and audits, including merge policies.
+- **src/** — Contains configuration and setup for the `ctx` context, including steps for adding new providers.
+- **tests/** — Tests for various components of the project, including CLI, API, language parsers, and configuration handling.
 
 ## Notes
-- Cross-module relationships: The `src` directory contains the unified API and CLI entry points, while `tests` houses the test suites for various components.
-- Architectural notes: The project follows agent-first design principles and includes comprehensive documentation for transitioning from human-operated to autonomous agent consumption.
+- Cross-module relationships include AGENTS.md, CONTRIBUTING.md, and RUNBOOK.md, which detail agent-first design and operational procedures.
+- The directory also contains `.githooks`, `.github`, and `.husky` for automated testing and code quality checks, ensuring consistent development practices.
 
 <!-- Generated by ctx (https://pypi.org/project/ctx-tool/) -->

@@ -1,7 +1,8 @@
 # Default ignore patterns for ctx
 # These are always applied. Users can add more via .ctxignore in their project root.
 
-# Version control
+# Version control (both .git/ directory and .git worktree pointer file)
+.git
 .git/
 
 # Python
@@ -33,9 +34,15 @@ node_modules/
 *~
 .obsidian/
 
-# Workspace / agent noise
+# Workspace / agent / tool cache noise
 .claude/
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+.coverage
+htmlcov/
 .worktrees/
 .tmp/
 

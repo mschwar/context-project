@@ -818,7 +818,8 @@ class OpenAIClient:
         return LLMResult(text=text, input_tokens=input_tokens, output_tokens=output_tokens)
 
 
-_TOKEN_COUNTS_CACHE_KEY = "__token_counts__"
+def _tokens_sidecar_path(cache_path: Path) -> Path:
+    return cache_path.with_name(f"{cache_path.stem}.tokens.json")
 
 
 class CachingLLMClient:
@@ -849,24 +850,24 @@ class CachingLLMClient:
             try:
                 data = json.loads(cache_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
-                    raw_tokens = data.get(_TOKEN_COUNTS_CACHE_KEY)
-                    if isinstance(raw_tokens, str):
-                        try:
-                            parsed_tokens = json.loads(raw_tokens)
-                            if isinstance(parsed_tokens, dict):
-                                self._token_counts = {
-                                    k: int(v)
-                                    for k, v in parsed_tokens.items()
-                                    if isinstance(k, str) and isinstance(v, (int, float))
-                                }
-                        except (json.JSONDecodeError, ValueError, TypeError):
-                            pass
                     self._disk_cache = {
                         k: v for k, v in data.items()
-                        if isinstance(k, str) and isinstance(v, str) and k != _TOKEN_COUNTS_CACHE_KEY
+                        if isinstance(k, str) and isinstance(v, str)
                     }
             except (json.JSONDecodeError, OSError):
                 pass  # Corrupt or missing cache — start fresh
+            tokens_path = _tokens_sidecar_path(cache_path)
+            if tokens_path.exists():
+                try:
+                    parsed_tokens = json.loads(tokens_path.read_text(encoding="utf-8"))
+                    if isinstance(parsed_tokens, dict):
+                        self._token_counts = {
+                            k: int(v)
+                            for k, v in parsed_tokens.items()
+                            if isinstance(k, str) and isinstance(v, (int, float))
+                        }
+                except (json.JSONDecodeError, OSError, ValueError, TypeError):
+                    pass
             with self._lock:
                 for key, summary in self._disk_cache.items():
                     fut: Future[str] = Future()
@@ -889,15 +890,17 @@ class CachingLLMClient:
                 evicted_key = next(iter(self._disk_cache))
                 del self._disk_cache[evicted_key]
                 self._token_counts.pop(evicted_key, None)
-            payload = dict(self._disk_cache)
-            if self._token_counts:
-                payload[_TOKEN_COUNTS_CACHE_KEY] = json.dumps(self._token_counts, sort_keys=True)
             try:
                 self._cache_path.parent.mkdir(parents=True, exist_ok=True)
                 self._cache_path.write_text(
-                    json.dumps(payload, indent=2),
+                    json.dumps(self._disk_cache, indent=2),
                     encoding="utf-8",
                 )
+                if self._token_counts:
+                    _tokens_sidecar_path(self._cache_path).write_text(
+                        json.dumps(self._token_counts, indent=2, sort_keys=True),
+                        encoding="utf-8",
+                    )
             except OSError as exc:
                 logger.warning("Failed to write LLM cache to %s: %s", self._cache_path, exc)
 

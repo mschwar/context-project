@@ -7,7 +7,7 @@ files: 0
 dirs: 1
 tokens_total: 0
 ---
-# C:/Users/Matty/Documents/context-project/tests/fixtures
+# tests/fixtures
 
 Test fixture directory containing sample projects and data for testing context manifest generation.
 

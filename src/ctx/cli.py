@@ -1347,7 +1347,7 @@ def stats(ctx: click.Context, path: str, verbose: bool, output_format: str, boar
                     if not totals.get("total_runs", 0):
                         click.echo("No runs recorded yet.")
                     else:
-                        click.echo(f"ctx running board — global\n")
+                        click.echo("ctx running board — global\n")
                         click.echo(f"Repos tracked:      {totals.get('repos_touched', 0)}")
                         click.echo(f"Total runs:         {totals.get('total_runs', 0)}")
                         click.echo(f"Total directories:  {totals.get('total_dirs_processed', 0)}")

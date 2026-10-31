@@ -143,3 +143,19 @@ def test_load_ignore_patterns_respects_gitignore_with_ctxignore_override(tmp_pat
     assert should_ignore(tmp_path / "local_dump", spec, tmp_path) is True
     assert should_ignore(tmp_path / "extra_skip.bak", spec, tmp_path) is True
     assert should_ignore(tmp_path / "keep_for_ctx.md", spec, tmp_path) is False
+
+
+def test_git_worktree_pointer_file_and_tool_caches_are_ignored_by_default(tmp_path) -> None:
+    """Worktree .git pointer files and .ruff_cache/.mypy_cache directories must be ignored by default."""
+    git_pointer = tmp_path / ".git"
+    git_pointer.write_text("gitdir: /repo/.git/worktrees/wt1\n", encoding="utf-8")
+    ruff_dir = tmp_path / ".ruff_cache"
+    ruff_dir.mkdir()
+    mypy_dir = tmp_path / ".mypy_cache"
+    mypy_dir.mkdir()
+
+    spec = load_ignore_patterns(tmp_path)
+
+    assert should_ignore(git_pointer, spec, tmp_path) is True
+    assert should_ignore(ruff_dir, spec, tmp_path) is True
+    assert should_ignore(mypy_dir, spec, tmp_path) is True

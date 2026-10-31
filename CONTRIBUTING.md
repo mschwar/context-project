@@ -7,9 +7,12 @@ We embrace an **Agentic SDLC**. This means the codebase is designed to be co-aut
 ### 1. Context Maintenance
 Every PR that adds or modifies a directory MUST update the corresponding `CONTEXT.md` files.
 - Use `ctx refresh .` before committing your changes.
-- Ensure the `content_hash` in the frontmatter is updated to reflect the new state.
-- Verification: Running `ctx check . --check-exit` should return exit code `0` for a fresh tree.
-- **CI enforcement:** The `CTX Manifest Check` workflow currently runs the legacy equivalent `ctx status . --check-exit-code` on every push and PR. The canonical command is `ctx check . --check-exit`. Always run `ctx refresh .` locally and include the updated `CONTEXT.md` files in your commit before pushing.
+- Ensure the `content_hash` in the frontmatter and portable repo-relative `# <path>` heading reflect the new state.
+- **Verification:** Run full body and freshness verification locally before opening or merging a PR:
+  ```bash
+  CTX_OUTPUT=json python -m ctx check . --verify --check-exit
+  ```
+- **Merge policy (`ops/merge-policy.json`):** Hosted cloud-VM PR triggers are retired (`workflow_dispatch` only). Run `python -m pytest` and `CTX_OUTPUT=json python -m ctx check . --verify --check-exit` locally on the host, and keep `"GitGuardian Security Checks"` green on the exact PR head SHA.
 
 ### 2. Implementation Blocks
 New functions and classes should include an `Implementation:` block in their docstrings. This provides clear, step-by-step instructions for subsequent agents to follow when filling in stubs or refactoring.
@@ -30,10 +33,11 @@ During code review, pay special attention to the `CONTEXT.md` changes. They are 
 ```bash
 pip install -e ".[dev]"
 python -m pytest tests/
+CTX_OUTPUT=json python -m ctx check . --verify --check-exit
 ```
 
 ## Agentic Rules of Engagement
-- **Never bypass `.ctxignore`:** Respect the filtering logic to keep manifests clean and consistent across CLI surfaces.
-- **Atomic Commits:** Prefer small, focused commits that update both code and its associated context.
-- **Deterministic Hashing:** If you modify `hasher.py`, ensure that hashes remain stable across platforms (Windows/Linux).
-- **One Gate Per PR:** For roadmap work, keep each branch scoped to one named gate unless `AGENTS.md` says otherwise.
+- **Respect `.gitignore` and `.ctxignore`:** `ctx` merges `.ctxignore.default`, the repo's `.gitignore`, and `.ctxignore` overrides so manifests never leak gitignored workspace state.
+- **Atomic Commits:** Prefer small, focused commits following Conventional Commits (enforced via `.husky/commit-msg` commitlint).
+- **Deterministic Hashing & Portable Headings:** Hashes and `# <relative-path>` headings must remain identical across Linux, macOS, Windows, and isolated git worktrees.
+- **One Gate Per PR:** For roadmap work, keep each branch scoped to one named gate unless `AGENTS.md` or an explicit audit remediation gate specifies otherwise.

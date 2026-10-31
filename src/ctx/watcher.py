@@ -7,13 +7,17 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from ctx.config import Config
 from ctx.ignore import should_ignore
+
+if TYPE_CHECKING:
+    import pathspec
+    from ctx.llm import LLMClient
 
 
 # How long to wait after the last file event before triggering regeneration.

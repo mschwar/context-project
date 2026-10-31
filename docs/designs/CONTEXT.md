@@ -7,7 +7,7 @@ files: 2
 dirs: 0
 tokens_total: 2460
 ---
-# /central/repos/active/context-project/docs/designs
+# docs/designs
 
 Documents and plans for the design and implementation of new features in the `ctx` tool, including integration of export layers and Git hooks.
 

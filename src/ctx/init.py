@@ -32,10 +32,8 @@ from __future__ import annotations
 
 import getpass
 import hashlib
-import json
 import logging
 import os
-import signal
 import subprocess
 import sys
 import time as _time

@@ -261,7 +261,7 @@ def run_preflight(path: str = ".") -> PreflightResult:
                     name="connectivity",
                     status="fail",
                     detail=f"{resolved_provider} is running but has no models loaded.",
-                    fix=f"pull a model first — e.g., `ollama pull llama3.2`",
+                    fix="pull a model first — e.g., `ollama pull llama3.2`",
                 ))
             else:
                 checks.append(PreflightCheck(
