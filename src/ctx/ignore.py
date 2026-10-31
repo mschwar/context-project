@@ -68,6 +68,15 @@ def load_ignore_patterns(
     """
     pattern_lines = _load_default_patterns(default_patterns_path)
 
+    gitignore_path = target_root / ".gitignore"
+    if gitignore_path.is_file():
+        try:
+            pattern_lines.extend(
+                _pattern_lines(gitignore_path.read_text(encoding="utf-8", errors="replace"))
+            )
+        except OSError:
+            pass
+
     user_patterns_path = target_root / ".ctxignore"
     if user_patterns_path.exists():
         pattern_lines.extend(_pattern_lines(user_patterns_path.read_text(encoding="utf-8")))

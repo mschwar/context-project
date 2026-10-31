@@ -125,3 +125,21 @@ def test_should_ignore_uses_relative_posix_paths(tmp_path) -> None:
 
     assert should_ignore(markdown_file, spec, tmp_path) is True
     assert should_ignore(text_file, spec, tmp_path) is False
+
+
+def test_load_ignore_patterns_respects_gitignore_with_ctxignore_override(tmp_path) -> None:
+    """Repo .gitignore patterns should be ignored by default, while .ctxignore can override via !."""
+    (tmp_path / ".gitignore").write_text("secrets.env\nlocal_dump/\nkeep_for_ctx.md\n", encoding="utf-8")
+    (tmp_path / ".ctxignore").write_text("!keep_for_ctx.md\nextra_skip.bak\n", encoding="utf-8")
+
+    (tmp_path / "secrets.env").write_text("KEY=1", encoding="utf-8")
+    (tmp_path / "local_dump").mkdir()
+    (tmp_path / "keep_for_ctx.md").write_text("# Doc", encoding="utf-8")
+    (tmp_path / "extra_skip.bak").write_text("bak", encoding="utf-8")
+
+    spec = load_ignore_patterns(tmp_path)
+
+    assert should_ignore(tmp_path / "secrets.env", spec, tmp_path) is True
+    assert should_ignore(tmp_path / "local_dump", spec, tmp_path) is True
+    assert should_ignore(tmp_path / "extra_skip.bak", spec, tmp_path) is True
+    assert should_ignore(tmp_path / "keep_for_ctx.md", spec, tmp_path) is False

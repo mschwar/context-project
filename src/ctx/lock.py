@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 
-STALE_TIMEOUT_SECONDS = 30
+STALE_TIMEOUT_SECONDS = 900
+HEARTBEAT_INTERVAL_SECONDS = 15.0
 
 
 @dataclass
@@ -31,12 +33,21 @@ class LockHeldError(Exception):
 
 
 class CtxLock:
-    """Cross-platform file lock based on a PID file."""
+    """Cross-platform file lock based on a PID file with active heartbeat refresh."""
 
-    def __init__(self, root: Path, *, command: str) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        command: str,
+        heartbeat_interval: float = HEARTBEAT_INTERVAL_SECONDS,
+    ) -> None:
         self._root = root
         self._command = command
         self._lock_path = root / ".ctx-cache" / "lock"
+        self._heartbeat_interval = heartbeat_interval
+        self._heartbeat_stop: threading.Event | None = None
+        self._heartbeat_thread: threading.Thread | None = None
 
     def _read_lock(self) -> LockInfo | None:
         try:
@@ -67,7 +78,38 @@ class CtxLock:
             f"timestamp={info.timestamp}\n"
             f"command={info.command}\n"
         )
-        self._lock_path.write_text(content, encoding="utf-8")
+        tmp_path = self._lock_path.parent / f".lock.tmp.{info.pid}.{threading.get_ident()}"
+        try:
+            tmp_path.write_text(content, encoding="utf-8")
+            os.replace(tmp_path, self._lock_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    def _start_heartbeat(self) -> None:
+        stop_event = threading.Event()
+        self._heartbeat_stop = stop_event
+
+        def _beat() -> None:
+            while not stop_event.wait(self._heartbeat_interval):
+                existing = self._read_lock()
+                if existing is None or existing.pid != os.getpid():
+                    return
+                try:
+                    self._write_lock()
+                except OSError:
+                    return
+
+        thread = threading.Thread(target=_beat, name="ctx-lock-heartbeat", daemon=True)
+        self._heartbeat_thread = thread
+        thread.start()
+
+    def _stop_heartbeat(self) -> None:
+        if self._heartbeat_stop is not None:
+            self._heartbeat_stop.set()
+        if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
+            self._heartbeat_thread.join(timeout=1.0)
+        self._heartbeat_stop = None
+        self._heartbeat_thread = None
 
     def _pid_alive(self, pid: int) -> bool:
         if pid <= 0:
@@ -94,9 +136,9 @@ class CtxLock:
             return True
 
     def _is_stale(self, info: LockInfo) -> bool:
-        if time.time() - info.timestamp > STALE_TIMEOUT_SECONDS:
+        if not self._pid_alive(info.pid):
             return True
-        return not self._pid_alive(info.pid)
+        return time.time() - info.timestamp > STALE_TIMEOUT_SECONDS
 
     def acquire(self) -> None:
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -118,10 +160,14 @@ class CtxLock:
         actual = self._read_lock()
         if actual is None or actual.pid != os.getpid():
             raise LockHeldError(actual or LockInfo(pid=0, timestamp=0.0, command="unknown"))
+        self._start_heartbeat()
 
     def release(self) -> None:
+        self._stop_heartbeat()
         try:
-            self._lock_path.unlink(missing_ok=True)
+            existing = self._read_lock()
+            if existing is None or existing.pid == os.getpid():
+                self._lock_path.unlink(missing_ok=True)
         except OSError:
             pass
 

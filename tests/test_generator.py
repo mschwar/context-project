@@ -518,3 +518,25 @@ def test_extensions_allowlist_filters_generation_health_and_verify(tmp_path, mon
     check_res = api_module.check(root, verify=True, check_exit=True)
     assert check_res.summary["fresh"] == 1
     assert check_res.summary["invalid"] == 0
+
+
+def test_smart_update_tree_refreshes_committed_stale_dirs_outside_changed_files(tmp_path) -> None:
+    """Smart refresh must never leave committed-stale or missing-manifest directories stale."""
+    from ctx.generator import inspect_directory_health, update_tree
+
+    root = _copy_sample_project(tmp_path)
+    spec = load_ignore_patterns(root)
+    config = Config(api_key="test-key")
+    generate_tree(root, config, FakeLLMClient(), spec)
+
+    # Simulate an earlier commit modifying src/ without refreshing manifests,
+    # followed by a working-tree edit only in docs/guide.md
+    src_files = [p for p in (root / "src").iterdir() if p.is_file() and p.name != "CONTEXT.md"]
+    assert src_files
+    src_files[0].write_text("# committed earlier without ctx refresh\nx = 99\n", encoding="utf-8")
+    (root / "docs" / "guide.md").write_text("working tree edit\n", encoding="utf-8")
+
+    update_tree(root, config, FakeLLMClient(), spec, changed_files=[root / "docs" / "guide.md"])
+
+    health = inspect_directory_health(root, spec, root)
+    assert all(entry.status == "fresh" for entry in health)

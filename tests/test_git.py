@@ -14,11 +14,12 @@ from ctx.git import (
 COMMON_KWARGS = dict(capture_output=True, text=True, check=True)
 
 
-def _mock_run(unstaged_stdout: str = "", staged_stdout: str = ""):
+def _mock_run(unstaged_stdout: str = "", staged_stdout: str = "", untracked_stdout: str = ""):
     """Return a side_effect function that returns appropriate mocks per call."""
     responses = {
         tuple(UNSTAGED_CMD): unstaged_stdout,
         tuple(STAGED_CMD): staged_stdout,
+        tuple(UNTRACKED_CMD): untracked_stdout,
     }
 
     def side_effect(cmd, **kwargs):
@@ -35,19 +36,25 @@ def test_get_changed_files_no_changes(tmp_path):
     with patch("subprocess.run", side_effect=_mock_run()) as mock_run:
         changes = get_changed_files(tmp_path)
         assert changes == []
-        assert mock_run.call_count == 2
+        assert mock_run.call_count == 3
         mock_run.assert_any_call(UNSTAGED_CMD, cwd=tmp_path, **COMMON_KWARGS)
         mock_run.assert_any_call(STAGED_CMD, cwd=tmp_path, **COMMON_KWARGS)
+        mock_run.assert_any_call(UNTRACKED_CMD, cwd=tmp_path, **COMMON_KWARGS)
 
 
 def test_get_changed_files_with_changes(tmp_path):
     with patch("subprocess.run", side_effect=_mock_run(
         unstaged_stdout="src/file1.py\ndocs/README.md\n",
+        untracked_stdout="pkg/brand_new.py\n",
     )) as mock_run:
         changes = get_changed_files(tmp_path)
         # Sorted alphabetically since we deduplicate via a set
-        assert set(changes) == {tmp_path / "src" / "file1.py", tmp_path / "docs" / "README.md"}
-        assert mock_run.call_count == 2
+        assert set(changes) == {
+            tmp_path / "src" / "file1.py",
+            tmp_path / "docs" / "README.md",
+            tmp_path / "pkg" / "brand_new.py",
+        }
+        assert mock_run.call_count == 3
 
 
 def test_get_changed_files_deduplicates_staged_and_unstaged(tmp_path):

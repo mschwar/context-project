@@ -637,6 +637,42 @@ def _process_one_directory(
         return 0, 0, 0, str(exc)
 
 
+def _expand_smart_target_directories(
+    ordered_directories: list[Path],
+    root: Path,
+    spec: pathspec.PathSpec,
+    changed_files: list[Path],
+    *,
+    incremental: bool,
+    extensions: Optional[list[str]] = None,
+) -> list[Path]:
+    """Select directories touched by *changed_files* unioned with any missing/hash-stale directories."""
+    target_directories: set[Path] = set()
+
+    def _add_with_ancestors(dir_path: Path) -> None:
+        if dir_path == root or dir_path.is_relative_to(root):
+            target_directories.add(dir_path)
+            for ancestor in dir_path.parents:
+                if ancestor == root or ancestor.is_relative_to(root):
+                    target_directories.add(ancestor)
+                if ancestor == root:
+                    break
+
+    for changed_file in changed_files:
+        _add_with_ancestors(changed_file.parent)
+
+    if incremental:
+        for directory in ordered_directories:
+            if directory in target_directories:
+                continue
+            if _should_regenerate_directory(
+                directory, root, spec, incremental=True, extensions=extensions
+            ):
+                _add_with_ancestors(directory)
+
+    return [d for d in ordered_directories if d in target_directories]
+
+
 def _run_generation(
     root: Path,
     config: Config,
@@ -651,29 +687,14 @@ def _run_generation(
     ordered_directories = _ordered_directories(root, spec, max_depth=config.max_depth)
 
     if changed_files is not None:
-        target_directories: set[Path] = set()
-        for changed_file in changed_files:
-            # Add the directory containing the changed file
-            dir_to_check = changed_file.parent
-            if dir_to_check.is_relative_to(root):
-                target_directories.add(dir_to_check)
-                # Add all ancestors up to the root
-                for ancestor in dir_to_check.parents:
-                    if ancestor == root or ancestor.is_relative_to(root):
-                        target_directories.add(ancestor)
-                    if ancestor == root: # Stop at the root
-                        break
-        
-        # Filter ordered_directories to only include those in target_directories
-        # Or, more precisely, those that are affected by the change (contain a changed file or are ancestors of one)
-        # Given bottom-up processing, if a directory is in target_directories,
-        # it means it either contains a changed file, or an ancestor of one.
-        # This implies its children would have been processed already if they contained changed files.
-        filtered_ordered_directories = []
-        for d in ordered_directories:
-            if d in target_directories:
-                filtered_ordered_directories.append(d)
-        ordered_directories = filtered_ordered_directories
+        ordered_directories = _expand_smart_target_directories(
+            ordered_directories,
+            root,
+            spec,
+            changed_files,
+            incremental=incremental,
+            extensions=config.extensions,
+        )
 
     total_dirs = len(ordered_directories)
 
@@ -941,17 +962,14 @@ def check_stale_dirs(
     ordered_directories = _ordered_directories(root, spec, max_depth=config.max_depth)
 
     if changed_files is not None:
-        target_directories: set[Path] = set()
-        for changed_file in changed_files:
-            dir_to_check = changed_file.parent
-            if dir_to_check.is_relative_to(root):
-                target_directories.add(dir_to_check)
-                for ancestor in dir_to_check.parents:
-                    if ancestor == root or ancestor.is_relative_to(root):
-                        target_directories.add(ancestor)
-                    if ancestor == root:
-                        break
-        ordered_directories = [d for d in ordered_directories if d in target_directories]
+        ordered_directories = _expand_smart_target_directories(
+            ordered_directories,
+            root,
+            spec,
+            changed_files,
+            incremental=True,
+            extensions=config.extensions,
+        )
 
     return [
         directory for directory in ordered_directories

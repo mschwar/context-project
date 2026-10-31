@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from ctx.lock import CtxLock, LockHeldError
+from ctx.lock import STALE_TIMEOUT_SECONDS, CtxLock, LockHeldError
 
 
 def _lock_path(root: Path) -> Path:
@@ -67,11 +67,32 @@ def test_lock_stale_old_timestamp_is_stolen(tmp_path) -> None:
     _write_lock_file(
         tmp_path,
         pid=os.getpid(),
-        timestamp=time.time() - 120.0,
+        timestamp=time.time() - (STALE_TIMEOUT_SECONDS + 30.0),
         command="refresh",
     )
     with CtxLock(tmp_path, command="refresh"):
         assert _lock_path(tmp_path).exists()
+
+
+def test_lock_live_process_not_stolen_after_30s_and_heartbeat_refreshes(tmp_path) -> None:
+    """A 120s-old lock held by a live PID must NOT be stolen, and active locks heartbeat."""
+    _write_lock_file(
+        tmp_path,
+        pid=os.getpid(),
+        timestamp=time.time() - 120.0,
+        command="refresh",
+    )
+    with pytest.raises(LockHeldError):
+        CtxLock(tmp_path, command="refresh").acquire()
+    _lock_path(tmp_path).unlink()
+
+    with CtxLock(tmp_path, command="refresh", heartbeat_interval=0.05) as active_lock:
+        first_info = active_lock._read_lock()
+        assert first_info is not None
+        time.sleep(0.12)
+        refreshed_info = active_lock._read_lock()
+        assert refreshed_info is not None
+        assert refreshed_info.timestamp > first_info.timestamp
 
 
 def test_lock_fresh_alive_pid_raises(tmp_path, monkeypatch) -> None:
