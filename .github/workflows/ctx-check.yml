@@ -1,16 +1,7 @@
 name: CTX Manifest Check
 
 on:
-  push:
-    branches:
-      - main
-      - feat/**
-      - fix/**
-  pull_request:
-    branches:
-      - main
-      - feat/**
-      - fix/**
+  workflow_dispatch:
 
 jobs:
   check_ctx_manifests:

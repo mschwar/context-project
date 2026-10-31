@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "required_checks": ["GitGuardian Security Checks"],
+  "retired_checks": ["test", "check_ctx_manifests", "Validate PR", "SonarCloud Code Analysis"],
+  "base_branch": "main",
+  "notes": "Hosted cloud-VM PR test/lint workflows retired to workflow_dispatch (publish.yml preserved); run local verification on the host and require GitGuardian Security Checks on the PR head."
+}
