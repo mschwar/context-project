@@ -324,3 +324,21 @@ def test_load_config_reads_guardrails_from_ctxconfig(monkeypatch, tmp_path) -> N
 def test_estimate_cost_shared_helper() -> None:
     assert 2.5 < estimate_cost(1_000_000, "anthropic", "claude-3-sonnet") < 3.5
     assert estimate_cost(1_000_000, "ollama", "llama3.2") == pytest.approx(0.0)
+
+
+def test_estimate_cost_specific_models_and_output_tokens() -> None:
+    # Substring specificity: mini/nano variants must not match parent model prefixes
+    assert estimate_cost(1_000_000, "openai", "gpt-4o-mini") == pytest.approx(0.15)
+    assert estimate_cost(1_000_000, "openai", "gpt-4o") == pytest.approx(2.50)
+    assert estimate_cost(1_000_000, "openai", "gpt-4.1-nano") == pytest.approx(0.10)
+    assert estimate_cost(1_000_000, "openai", "gpt-4.1-mini") == pytest.approx(0.40)
+    assert estimate_cost(1_000_000, "openai", "gpt-4.1") == pytest.approx(2.00)
+    # Split input/output pricing
+    split_cost = estimate_cost(
+        2_000_000,
+        "anthropic",
+        "claude-haiku-4-5-20251001",
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+    )
+    assert split_cost == pytest.approx(0.80 + 4.00)

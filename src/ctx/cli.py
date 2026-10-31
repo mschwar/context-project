@@ -966,7 +966,7 @@ def watch(ctx: click.Context, path: str, provider: Optional[str], model: Optiona
     _exit_for_broker(broker, json_mode=json_mode)
 
 
-@cli.command(hidden=True)
+@cli.command()
 @click.argument("path", default=".", required=False)
 @click.option("--check", "check_only", is_flag=True, help="Print detected provider without writing config.")
 @_subcommand_output_option
@@ -977,9 +977,9 @@ def setup(
     check_only: bool,
     sub_output_mode: Optional[str] = None,
 ) -> None:
-    """Auto-detect LLM provider and write .ctxconfig."""
+    """Auto-detect LLM provider, run preflight checks, or write .ctxconfig."""
     json_mode = _resolve_json_mode(ctx, sub_output_mode)
-    _echo_legacy_warning("setup", "refresh --setup", json_mode=json_mode)
+    _echo_legacy_warning("setup", "refresh --setup", json_mode=json_mode, suppress=check_only)
     with OutputBroker(command="setup", json_mode=json_mode) as broker:
         target_path = Path(path)
         config_file = target_path / ".ctxconfig"
@@ -1288,7 +1288,7 @@ def export(
                     click.echo(f"Exported fleet capsule for {capsule_res.repo_name} to {resolved_out_file}")
                 else:
                     click.echo(capsule_res.capsule_markdown, nl=False)
-        elif api._is_tier2_repo(root):
+        else:
             exp_res = api.export_context(
                 root,
                 output_file=resolved_out_file,
@@ -1305,69 +1305,10 @@ def export(
                         click.echo(f"Exported {n} manifest{'s' if n != 1 else ''} to {resolved_out_file}")
                 elif exp_res.content:
                     click.echo(exp_res.content, nl=False)
-        else:
-            spec = load_ignore_patterns(root)
-            health_entries = [
-                entry for entry in inspect_directory_health(root, spec, root)
-                if _directory_within_depth(entry.path, root, depth)
-            ]
-
-            if filter_mode == "missing":
-                missing_dirs = []
-                for entry in health_entries:
-                    if entry.status != "missing":
-                        continue
-                    rel_display = entry.relative_path if entry.relative_path != "." else ""
-                    missing_dirs.append((rel_display + "/") if rel_display else "./")
-                content = "\n".join(f"# {d} [MISSING]" for d in missing_dirs)
-                broker.set_data(
-                    {
-                        "manifests_exported": len(missing_dirs),
-                        "filter": filter_mode,
-                        "depth": depth,
-                        "content": content,
-                    }
-                )
-                if resolved_out_file:
-                    Path(resolved_out_file).write_text(content, encoding="utf-8")
-                    n = len(missing_dirs)
-                    click.echo(f"Exported {n} missing director{'y' if n == 1 else 'ies'} to {resolved_out_file}")
-                elif content:
-                    click.echo(content, nl=False)
-            else:
-                files = [
-                    entry.path / "CONTEXT.md"
-                    for entry in health_entries
-                    if entry.status != "missing" and (filter_mode != "stale" or entry.status == "stale")
-                ]
-
-                parts = []
-                for f in files:
-                    try:
-                        rel = f.relative_to(root).as_posix()
-                    except ValueError:
-                        rel = f.as_posix()
-                    parts.append(f"# {rel}\n\n{f.read_text(encoding='utf-8')}")
-
-                content = "\n\n".join(parts)
-                broker.set_data(
-                    {
-                        "manifests_exported": len(files),
-                        "filter": filter_mode,
-                        "depth": depth,
-                        "content": content,
-                    }
-                )
-
-                if resolved_out_file:
-                    Path(resolved_out_file).write_text(content, encoding="utf-8")
-                    click.echo(f"Exported {len(files)} manifest{'s' if len(files) != 1 else ''} to {resolved_out_file}")
-                else:
-                    click.echo(content, nl=False)
     _exit_for_broker(broker, json_mode=json_mode)
 
 
-@cli.command(hidden=True)
+@cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--verbose", "-v", is_flag=True, help="Show per-directory breakdown table.")
 @click.option("--format", "output_format", type=click.Choice(["text", "json", "csv"]), default="text", help="Output format.")

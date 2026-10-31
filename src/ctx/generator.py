@@ -58,6 +58,9 @@ class GenerateStats:
     tokens_used: int = 0
     budget_exhausted: bool = False
     local_batch_fallbacks: int = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
+    tokens_saved: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -588,9 +591,14 @@ def _generate_directory_manifest(
             )
         )
 
-    directory_result = client.summarize_directory(path, file_summaries, subdir_summaries)
-    purpose, notes = _extract_directory_purpose_and_notes(directory_result.text, path)
     content_hash = hash_directory(path, spec, root, extensions=config.extensions)
+    if isinstance(client, CachingLLMClient):
+        directory_result = client.summarize_directory(
+            path, file_summaries, subdir_summaries, content_hash=content_hash
+        )
+    else:
+        directory_result = client.summarize_directory(path, file_summaries, subdir_summaries)
+    purpose, notes = _extract_directory_purpose_and_notes(directory_result.text, path)
     write_manifest(
         path,
         model=_manifest_model(config, client),
@@ -763,6 +771,9 @@ def _run_generation(
                         stats.budget_exhausted = True
 
     stats.local_batch_fallbacks = int(getattr(client, "local_batch_fallbacks", 0) or 0)
+    if hasattr(client, "hit_miss_counts"):
+        stats.cache_hits, stats.cache_misses = client.hit_miss_counts
+    stats.tokens_saved = int(getattr(client, "tokens_saved", 0) or 0)
     return stats
 
 
@@ -818,10 +829,19 @@ def generate_tree(
            i. Update stats, call progress callback.
         5. Return stats.
     """
+    caching_client = (
+        client
+        if isinstance(client, CachingLLMClient)
+        else CachingLLMClient(
+            client,
+            cache_path=_resolve_cache_path(config, root),
+            max_cache_entries=config.max_cache_entries,
+        )
+    )
     return _run_generation(
         root,
         config,
-        CachingLLMClient(client, cache_path=_resolve_cache_path(config, root), max_cache_entries=config.max_cache_entries),
+        caching_client,
         spec,
         incremental=False,
         progress=progress,
@@ -862,10 +882,19 @@ def update_tree(
               bottom-up and the parent's hash_directory() will compute a new hash.
         4. Return stats.
     """
+    caching_client = (
+        client
+        if isinstance(client, CachingLLMClient)
+        else CachingLLMClient(
+            client,
+            cache_path=_resolve_cache_path(config, root),
+            max_cache_entries=config.max_cache_entries,
+        )
+    )
     return _run_generation(
         root,
         config,
-        CachingLLMClient(client, cache_path=_resolve_cache_path(config, root), max_cache_entries=config.max_cache_entries),
+        caching_client,
         spec,
         incremental=True,
         progress=progress,

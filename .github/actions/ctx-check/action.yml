@@ -1,35 +1,47 @@
 name: 'CTX Check'
-description: 'Checks if CONTEXT.md files are fresh in a ctx project.'
+description: 'Checks if CONTEXT.md files are valid and fresh in a ctx project.'
 inputs:
   path:
     description: 'Path to the ctx project root.'
-    required: true
+    required: false
     default: '.'
   github_token:
     description: 'GitHub Token for checking out the repository.'
-    required: true
+    required: false
+    default: ${{ github.token }}
+  version:
+    description: 'Optional ctx-tool PyPI version constraint (e.g. ==1.1.0).'
+    required: false
+    default: ''
 runs:
   using: "composite"
   steps:
     - name: Checkout repository
+      if: ${{ !hashFiles(format('{0}/.git', inputs.path)) }}
       uses: actions/checkout@v4
       with:
         token: ${{ inputs.github_token }}
-        path: '${{ inputs.path }}' # Checkout into the specified path
+        path: '${{ inputs.path }}'
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10' # Or compatible version
+        python-version: '3.11'
 
-    - name: Install dependencies
+    - name: Install ctx-tool
+      shell: bash
+      working-directory: '${{ inputs.path }}'
+      env:
+        CTX_VERSION_SPEC: ${{ inputs.version }}
+      run: |
+        if [ -f pyproject.toml ] && grep -q 'name = "ctx-tool"' pyproject.toml; then
+          python -m pip install -e "."
+        else
+          python -m pip install "ctx-tool${CTX_VERSION_SPEC}"
+        fi
+
+    - name: Run ctx check verification gate
       shell: bash
       working-directory: '${{ inputs.path }}'
       run: |
-        pip install -e ".[dev]" # Install ctx and its dev dependencies
-
-    - name: Run ctx status check
-      shell: bash
-      working-directory: '${{ inputs.path }}'
-      run: |
-        python -m ctx status --check-exit-code .
+        CTX_OUTPUT=json python -m ctx check . --verify --check-exit

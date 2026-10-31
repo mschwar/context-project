@@ -11,11 +11,10 @@ subdirectory lists always match the real filesystem.
 
 from __future__ import annotations
 
-import anthropic
 import hashlib
+import importlib
 import json
 import logging
-import openai
 import threading
 import time
 from concurrent.futures import Future
@@ -24,10 +23,54 @@ from pathlib import Path
 from typing import Callable, Optional, Protocol
 
 import click
-from anthropic import Anthropic
-from openai import OpenAI
 
 from ctx.config import LOCAL_PROVIDERS, Config
+
+
+def _load_anthropic_module():
+    mod = globals().get("anthropic")
+    if mod is None:
+        mod = importlib.import_module("anthropic")
+        globals()["anthropic"] = mod
+    return mod
+
+
+def _load_openai_module():
+    mod = globals().get("openai")
+    if mod is None:
+        mod = importlib.import_module("openai")
+        globals()["openai"] = mod
+    return mod
+
+
+def _get_anthropic_cls():
+    cls = globals().get("Anthropic")
+    if cls is not None:
+        return cls
+    cls = _load_anthropic_module().Anthropic
+    globals()["Anthropic"] = cls
+    return cls
+
+
+def _get_openai_cls():
+    cls = globals().get("OpenAI")
+    if cls is not None:
+        return cls
+    cls = _load_openai_module().OpenAI
+    globals()["OpenAI"] = cls
+    return cls
+
+
+def __getattr__(name: str):
+    if name == "anthropic":
+        return _load_anthropic_module()
+    if name == "openai":
+        return _load_openai_module()
+    if name == "Anthropic":
+        return _get_anthropic_cls()
+    if name == "OpenAI":
+        return _get_openai_cls()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 logger = logging.getLogger(__name__)
@@ -390,21 +433,24 @@ def _file_summary_output_budget(file_count: int) -> int:
 
 
 def _retryable_errors(provider: str) -> tuple[type[Exception], ...]:
-    retryable_map = {
-        "anthropic": (
-            anthropic.APIConnectionError,
-            anthropic.APITimeoutError,
-            anthropic.RateLimitError,
-            anthropic.InternalServerError,
-        ),
-        "openai": (
-            openai.APIConnectionError,
-            openai.APITimeoutError,
-            openai.RateLimitError,
-            openai.InternalServerError,
-        ),
-    }
-    return retryable_map.get(provider.lower(), ())
+    provider_lower = provider.lower()
+    if provider_lower == "anthropic":
+        mod = _load_anthropic_module()
+        return (
+            mod.APIConnectionError,
+            mod.APITimeoutError,
+            mod.RateLimitError,
+            mod.InternalServerError,
+        )
+    if provider_lower == "openai":
+        mod = _load_openai_module()
+        return (
+            mod.APIConnectionError,
+            mod.APITimeoutError,
+            mod.RateLimitError,
+            mod.InternalServerError,
+        )
+    return ()
 
 
 def _extract_retry_after(exc: Exception) -> float | None:
@@ -440,9 +486,14 @@ def _call_with_retries(
                 raise
 
             last_error = exc
+            is_local_timeout = (
+                is_local
+                and provider.lower() == "openai"
+                and isinstance(exc, _load_openai_module().APITimeoutError)
+            )
             max_attempts = (
                 min(RETRY_ATTEMPTS, LOCAL_TIMEOUT_RETRY_ATTEMPTS)
-                if (is_local and isinstance(exc, openai.APITimeoutError))
+                if is_local_timeout
                 else RETRY_ATTEMPTS
             )
             if attempt >= max_attempts:
@@ -492,7 +543,7 @@ class AnthropicClient:
     def __init__(self, config: Config, prompt_templates: dict[str, str]) -> None:
         self.config = config
         self.model = config.resolved_model()
-        self.client = Anthropic(api_key=config.api_key)
+        self.client = _get_anthropic_cls()(api_key=config.api_key)
         self.prompt_templates = prompt_templates
 
     def _summarize_files_chunk(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
@@ -571,7 +622,7 @@ class OpenAIClient:
             kwargs["base_url"] = config.base_url
         if config.provider in LOCAL_PROVIDERS:
             kwargs["timeout"] = 300.0
-        self.client = OpenAI(**kwargs)
+        self.client = _get_openai_cls()(**kwargs)
         self.prompt_templates = prompt_templates
         self.local_batch_fallbacks = 0
         self._local_batching_disabled = False
@@ -661,7 +712,7 @@ class OpenAIClient:
                 ),
                 is_local=self.config.provider in LOCAL_PROVIDERS,
             )
-        except openai.BadRequestError as exc:
+        except _load_openai_module().BadRequestError as exc:
             if self.config.provider in LOCAL_PROVIDERS:
                 return self._fallback_to_single_file_summaries(dir_path, files, f"HTTP 400: {exc}")
             raise
@@ -745,7 +796,7 @@ class OpenAIClient:
     ) -> LLMResult:
         try:
             response = self._call_summarize_directory(dir_path, file_summaries, subdir_summaries)
-        except openai.BadRequestError:
+        except _load_openai_module().BadRequestError:
             if self.config.provider not in LOCAL_PROVIDERS:
                 raise
             logger.warning(
@@ -767,13 +818,16 @@ class OpenAIClient:
         return LLMResult(text=text, input_tokens=input_tokens, output_tokens=output_tokens)
 
 
-class CachingLLMClient:
-    """Wraps an LLMClient and caches file summaries by content hash.
+_TOKEN_COUNTS_CACHE_KEY = "__token_counts__"
 
-    Avoids redundant LLM calls when the same file content appears more than once
-    within a generation run or across runs. The in-memory cache uses Futures for
-    stampede prevention. When cache_path is provided, summaries are also persisted
-    to disk so they survive process restarts. Thread-safe.
+
+class CachingLLMClient:
+    """Wraps an LLMClient and caches file and directory summaries by content hash.
+
+    Avoids redundant LLM calls when the same file or directory content appears more
+    than once within a generation run or across runs. The in-memory cache uses Futures
+    for stampede prevention. When cache_path is provided, summaries and token metadata
+    are persisted to disk so they survive process restarts. Thread-safe.
     """
 
     def __init__(self, client: LLMClient, cache_path: Optional[Path] = None, max_cache_entries: int = 10_000) -> None:
@@ -787,15 +841,29 @@ class CachingLLMClient:
         self._max_cache_entries = max_cache_entries
         self._disk_lock = threading.Lock()
         self._disk_cache: dict[str, str] = {}
+        self._token_counts: dict[str, int] = {}
         self.cache_hits: int = 0
         self.cache_misses: int = 0
+        self.tokens_saved: int = 0
         if cache_path is not None and cache_path.exists():
             try:
                 data = json.loads(cache_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
+                    raw_tokens = data.get(_TOKEN_COUNTS_CACHE_KEY)
+                    if isinstance(raw_tokens, str):
+                        try:
+                            parsed_tokens = json.loads(raw_tokens)
+                            if isinstance(parsed_tokens, dict):
+                                self._token_counts = {
+                                    k: int(v)
+                                    for k, v in parsed_tokens.items()
+                                    if isinstance(k, str) and isinstance(v, (int, float))
+                                }
+                        except (json.JSONDecodeError, ValueError, TypeError):
+                            pass
                     self._disk_cache = {
                         k: v for k, v in data.items()
-                        if isinstance(k, str) and isinstance(v, str)
+                        if isinstance(k, str) and isinstance(v, str) and k != _TOKEN_COUNTS_CACHE_KEY
                     }
             except (json.JSONDecodeError, OSError):
                 pass  # Corrupt or missing cache — start fresh
@@ -805,18 +873,29 @@ class CachingLLMClient:
                     fut.set_result(summary)
                     self._cache[key] = fut
 
-    def _write_batch_to_disk(self, new_entries: dict[str, str]) -> None:
-        """Write multiple new cache entries to disk in a single operation."""
+    def _write_batch_to_disk(
+        self,
+        new_entries: dict[str, str],
+        new_tokens: Optional[dict[str, int]] = None,
+    ) -> None:
+        """Write multiple new cache entries (and optional token metadata) to disk atomically."""
         if self._cache_path is None or not new_entries:
             return
         with self._disk_lock:
             self._disk_cache.update(new_entries)
+            if new_tokens:
+                self._token_counts.update(new_tokens)
             while len(self._disk_cache) > self._max_cache_entries:
-                del self._disk_cache[next(iter(self._disk_cache))]
+                evicted_key = next(iter(self._disk_cache))
+                del self._disk_cache[evicted_key]
+                self._token_counts.pop(evicted_key, None)
+            payload = dict(self._disk_cache)
+            if self._token_counts:
+                payload[_TOKEN_COUNTS_CACHE_KEY] = json.dumps(self._token_counts, sort_keys=True)
             try:
                 self._cache_path.parent.mkdir(parents=True, exist_ok=True)
                 self._cache_path.write_text(
-                    json.dumps(self._disk_cache, indent=2),
+                    json.dumps(payload, indent=2),
                     encoding="utf-8",
                 )
             except OSError as exc:
@@ -859,6 +938,7 @@ class CachingLLMClient:
                 if keys[i] in self._cache:
                     file_futures.append(self._cache[keys[i]])
                     self.cache_hits += 1
+                    self.tokens_saved += self._token_counts.get(keys[i], 0)
                 else:
                     fut: Future[str] = Future()
                     self._cache[keys[i]] = fut
@@ -872,12 +952,24 @@ class CachingLLMClient:
         if to_fetch:
             try:
                 new_results = self._client.summarize_files(dir_path, [files[i] for i in to_fetch])
+                total_batch_tokens = sum(r.input_tokens + r.output_tokens for r in new_results)
+                per_file_tokens = (
+                    max(1, round(total_batch_tokens / len(new_results)))
+                    if total_batch_tokens > 0 and new_results
+                    else 0
+                )
                 new_disk_entries: dict[str, str] = {}
+                new_token_entries: dict[str, int] = {}
                 for i, result in zip(to_fetch, new_results):
                     file_futures[i].set_result(result.text)
                     original_results[i] = result
                     new_disk_entries[keys[i]] = result.text
-                self._write_batch_to_disk(new_disk_entries)
+                    if per_file_tokens > 0:
+                        new_token_entries[keys[i]] = per_file_tokens
+                if new_token_entries:
+                    with self._lock:
+                        self._token_counts.update(new_token_entries)
+                self._write_batch_to_disk(new_disk_entries, new_token_entries or None)
             except Exception as exc:
                 for i in to_fetch:
                     if not file_futures[i].done():
@@ -897,8 +989,53 @@ class CachingLLMClient:
         dir_path: Path,
         file_summaries: list[FileSummary],
         subdir_summaries: list[SubdirSummary],
+        *,
+        content_hash: str = "",
     ) -> LLMResult:
-        return self._client.summarize_directory(dir_path, file_summaries, subdir_summaries)
+        dir_payload = {
+            "dir": dir_path.name or dir_path.as_posix(),
+            "content_hash": content_hash,
+            "files": [
+                {"name": s.name, "summary": s.summary, "is_binary": s.is_binary}
+                for s in file_summaries
+            ],
+            "subdirs": [
+                {"name": s.name, "summary": s.summary}
+                for s in subdir_summaries
+            ],
+        }
+        key = hashlib.sha256(
+            self.model.encode() + b":dir:" + json.dumps(dir_payload, sort_keys=True).encode()
+        ).hexdigest()
+
+        need_fetch = False
+        with self._lock:
+            if key in self._cache:
+                fut = self._cache[key]
+                self.cache_hits += 1
+                self.tokens_saved += self._token_counts.get(key, 0)
+            else:
+                fut = Future()
+                self._cache[key] = fut
+                self.cache_misses += 1
+                need_fetch = True
+
+        if not need_fetch:
+            return LLMResult(text=fut.result())
+
+        try:
+            result = self._client.summarize_directory(dir_path, file_summaries, subdir_summaries)
+            tok = result.input_tokens + result.output_tokens
+            if tok > 0:
+                with self._lock:
+                    self._token_counts[key] = tok
+            fut.set_result(result.text)
+            self._write_batch_to_disk({key: result.text}, {key: tok} if tok > 0 else None)
+            return result
+        except Exception as exc:
+            if not fut.done():
+                fut.set_exception(exc)
+            raise
 
 
 def create_client(config: Config) -> AnthropicClient | OpenAIClient:

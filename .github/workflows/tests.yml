@@ -31,4 +31,4 @@ jobs:
         run: python -m pytest tests
 
       - name: Verify manifest health
-        run: python -m ctx status .
+        run: CTX_OUTPUT=json python -m ctx check . --verify --check-exit

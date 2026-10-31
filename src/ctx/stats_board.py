@@ -123,9 +123,11 @@ def _classify_errors(errors: list[str]) -> dict:
 def _build_run_record(result, config) -> dict:
     hits = result.cache_hits
     misses = result.cache_misses
-    total = hits + misses
-    if total > 0:
-        tokens_saved = round((hits / total) * result.tokens_used)
+    explicit_saved = int(getattr(result, "tokens_saved", 0) or 0)
+    if explicit_saved > 0:
+        tokens_saved = explicit_saved
+    elif hits > 0 and misses > 0:
+        tokens_saved = round((result.tokens_used / misses) * hits)
     else:
         tokens_saved = 0
     from ctx.config import estimate_cost

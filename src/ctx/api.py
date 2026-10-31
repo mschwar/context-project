@@ -70,6 +70,7 @@ class RefreshResult:
     local_batch_fallbacks: int = 0
     cache_hits: int = 0
     cache_misses: int = 0
+    tokens_saved: int = 0
 
 
 @dataclass
@@ -470,6 +471,9 @@ def refresh(
             cumulative_stats.local_batch_fallbacks,
             stats.local_batch_fallbacks,
         )
+        cumulative_stats.cache_hits += stats.cache_hits
+        cumulative_stats.cache_misses += stats.cache_misses
+        cumulative_stats.tokens_saved += stats.tokens_saved
 
         if not until_complete:
             break
@@ -505,11 +509,13 @@ def refresh(
     if watch and not errors:
         run_watch(root, config, client, spec)
 
-    cache_hits, cache_misses = (
-        client.hit_miss_counts
-        if hasattr(client, "hit_miss_counts")
-        else (0, 0)
-    )
+    if cumulative_stats.cache_hits or cumulative_stats.cache_misses:
+        cache_hits, cache_misses = cumulative_stats.cache_hits, cumulative_stats.cache_misses
+    elif hasattr(client, "hit_miss_counts"):
+        cache_hits, cache_misses = client.hit_miss_counts
+    else:
+        cache_hits, cache_misses = 0, 0
+    tokens_saved = cumulative_stats.tokens_saved or int(getattr(client, "tokens_saved", 0) or 0)
 
     result = RefreshResult(
         dirs_processed=cumulative_stats.dirs_processed,
@@ -526,9 +532,13 @@ def refresh(
         setup_provider=setup_provider,
         setup_model=setup_model,
         setup_detected_via=setup_detected_via,
-        local_batch_fallbacks=int(getattr(client, "local_batch_fallbacks", 0) or 0),
+        local_batch_fallbacks=max(
+            cumulative_stats.local_batch_fallbacks,
+            int(getattr(client, "local_batch_fallbacks", 0) or 0),
+        ),
         cache_hits=cache_hits,
         cache_misses=cache_misses,
+        tokens_saved=tokens_saved,
     )
 
     if not dry_run:
