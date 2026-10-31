@@ -124,7 +124,8 @@ def test_generate_tree_creates_manifests(tmp_path) -> None:
         manifest = read_manifest(directory)
         assert manifest is not None
         assert manifest.frontmatter.model == "fake-llm-model"
-        assert manifest.body.startswith(f"# {directory.as_posix()}")
+        rel = directory.relative_to(root).as_posix() if directory != root else "."
+        assert manifest.body.startswith(f"# {rel}\n")
 
 
 def test_generate_tree_renders_manifest_sections_deterministically(tmp_path) -> None:
@@ -354,7 +355,7 @@ def test_validate_manifest_body_reports_hallucinations_and_illegal_none(tmp_path
     spec = load_ignore_patterns(root)
     body = "\n".join(
         [
-            f"# {root.as_posix()}",
+            "# .",
             "",
             "Project root.",
             "",
@@ -428,3 +429,92 @@ def test_configurable_max_concurrent_dirs(tmp_path) -> None:
     # Should still complete all dirs, just with limited parallelism
     assert stats.dirs_processed == 3
     assert stats.errors == []
+
+
+def test_manifest_headings_are_repo_relative_and_portable_across_paths(tmp_path) -> None:
+    """Generated manifests must remain valid when the repo checkout moves to a new host path."""
+    checkout_a = tmp_path / "host_a" / "repo"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "sample_project", checkout_a)
+    spec_a = load_ignore_patterns(checkout_a)
+    generate_tree(checkout_a, Config(api_key="test-key"), FakeLLMClient(), spec_a)
+
+    checkout_b = tmp_path / "host_b" / "different_user" / "repo"
+    shutil.copytree(checkout_a, checkout_b)
+    spec_b = load_ignore_patterns(checkout_b)
+
+    for rel in (".", "docs", "src"):
+        target = checkout_b if rel == "." else checkout_b / rel
+        manifest = read_manifest(target)
+        assert manifest is not None
+        assert validate_manifest_body(target, checkout_b, spec_b, manifest) == []
+
+
+def test_max_file_tokens_truncates_by_tokens_not_characters(tmp_path) -> None:
+    """max_file_tokens should preserve > max_file_tokens characters when token count fits."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    # 500 lines of "value = 123\n" is ~6000 chars (~2000 tokens), well under 4000 tokens
+    code = "value = 123\n" * 500
+    (root / "large.py").write_text(code, encoding="utf-8")
+
+    spec = load_ignore_patterns(root)
+    client = FakeLLMClient()
+    config = Config(api_key="test-key", max_file_tokens=4000)
+    generate_tree(root, config, client, spec)
+
+    assert len(client.file_calls) == 1
+    sent_content = client.file_calls[0][1][0]["content"]
+    assert len(sent_content) == len(code)  # previously sliced at 4000 chars!
+
+    # Now cap at 50 tokens and confirm it truncates accurately to <= 50 tokens
+    client_capped = FakeLLMClient()
+    generate_tree(root, Config(api_key="test-key", max_file_tokens=50, cache_path=""), client_capped, spec)
+    capped_content = client_capped.file_calls[0][1][0]["content"]
+    assert len(capped_content) < len(code)
+    from ctx.generator import _estimate_tokens
+    assert _estimate_tokens(capped_content) <= 50
+
+
+def test_zero_byte_empty_file_skips_llm_without_counting_as_binary(tmp_path) -> None:
+    """0-byte files must render deterministically as [empty file] with zero file-LLM calls."""
+    root = tmp_path / "empty_proj"
+    root.mkdir()
+    (root / "empty.txt").write_text("", encoding="utf-8")
+
+    spec = load_ignore_patterns(root)
+    client = FakeLLMClient()
+    stats = generate_tree(root, Config(api_key="test-key"), client, spec)
+
+    assert stats.files_processed == 1
+    assert stats.files_binary == 0
+    assert client.file_calls == []
+    manifest = read_manifest(root)
+    assert manifest is not None
+    assert "- **empty.txt** — [empty file]" in manifest.body
+
+
+def test_extensions_allowlist_filters_generation_health_and_verify(tmp_path, monkeypatch) -> None:
+    """CTX_EXTENSIONS / Config.extensions must filter files consistently across refresh and check."""
+    from ctx import api as api_module
+
+    root = tmp_path / "ext_proj"
+    root.mkdir()
+    (root / "keep.py").write_text("x = 1\n", encoding="utf-8")
+    (root / "skip.txt").write_text("ignore me\n", encoding="utf-8")
+    (root / ".ctxconfig").write_text("extensions:\n  - .py\n", encoding="utf-8")
+
+    spec = load_ignore_patterns(root)
+    config = Config(api_key="test-key", extensions=[".py"])
+    generate_tree(root, config, FakeLLMClient(), spec)
+
+    manifest = read_manifest(root)
+    assert manifest is not None
+    assert manifest.frontmatter.files == 1
+    assert "keep.py" in manifest.body
+    assert "skip.txt" not in manifest.body
+
+    # Mutating excluded skip.txt must NOT mark directory stale or fail --verify
+    (root / "skip.txt").write_text("mutated excluded text\n", encoding="utf-8")
+    check_res = api_module.check(root, verify=True, check_exit=True)
+    assert check_res.summary["fresh"] == 1
+    assert check_res.summary["invalid"] == 0

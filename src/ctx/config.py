@@ -259,6 +259,35 @@ def _iter_config_dirs(start_dir: Path) -> list[Path]:
     return [start_dir, *start_dir.parents]
 
 
+def resolve_configured_extensions(target_path: Path) -> Optional[list[str]]:
+    """Resolve file-extension allowlist from CTX_EXTENSIONS or .ctxconfig without requiring API keys."""
+    env_extensions = os.getenv("CTX_EXTENSIONS")
+    if env_extensions is not None:
+        parsed = [item.strip() for item in env_extensions.split(",") if item.strip()]
+        return parsed or None
+
+    start_dir = target_path if target_path.is_dir() else target_path.parent
+    for directory in _iter_config_dirs(start_dir):
+        config_path = directory / ".ctxconfig"
+        if not config_path.exists():
+            continue
+        try:
+            data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            return None
+        if isinstance(data, dict) and "extensions" in data:
+            raw = data["extensions"]
+            if raw is None:
+                return None
+            if isinstance(raw, str):
+                return [raw.strip()] if raw.strip() else None
+            if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
+                cleaned = [item.strip() for item in raw if item.strip()]
+                return cleaned or None
+        break
+    return None
+
+
 def load_config(
     target_path: Path,
     *,

@@ -1328,8 +1328,9 @@ def _write_verify_manifest(
             for child in directory.iterdir()
             if child.is_dir() and not should_ignore(child, spec, root)
         )
+        rel_heading = directory.relative_to(root).as_posix() if directory != root else "."
         lines = [
-            f"# {directory.as_posix()}",
+            f"# {rel_heading}",
             "",
             purpose or f"{directory.name or directory.as_posix()} directory.",
             "",
@@ -1617,7 +1618,7 @@ def test_verify_reports_invalid_manifest_body(tmp_path) -> None:
         root,
         body="\n".join(
             [
-                f"# {root.as_posix()}",
+                "# .",
                 "",
                 "Project root.",
                 "",

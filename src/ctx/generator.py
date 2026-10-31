@@ -24,8 +24,8 @@ from typing import Callable, Literal, Optional
 
 import pathspec
 
-from ctx.config import LOCAL_PROVIDERS, Config
-from ctx.hasher import hash_directory, is_stale
+from ctx.config import LOCAL_PROVIDERS, Config, resolve_configured_extensions
+from ctx.hasher import file_matches_extensions, hash_directory, is_stale, normalize_extensions
 from ctx.ignore import should_ignore
 from ctx.llm import CachingLLMClient, LLMClient, FileSummary, SubdirSummary
 from ctx.manifest import Manifest, ManifestFrontmatter, read_manifest, write_manifest
@@ -90,19 +90,40 @@ def _relative_path_str(path: Path, root: Path) -> str:
 _TIKTOKEN_ENCODER: object = None  # lazy-loaded; None = not yet attempted, False = unavailable
 
 
-def _estimate_tokens(text: str) -> int:
+def _get_tiktoken_encoder() -> object:
     global _TIKTOKEN_ENCODER
-    if not text:
-        return 0
     if _TIKTOKEN_ENCODER is None:
         try:
             import tiktoken
             _TIKTOKEN_ENCODER = tiktoken.get_encoding("cl100k_base")
         except (ImportError, ValueError):
             _TIKTOKEN_ENCODER = False  # mark unavailable so we don't retry
-    if _TIKTOKEN_ENCODER is False:
+    return _TIKTOKEN_ENCODER
+
+
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    encoder = _get_tiktoken_encoder()
+    if encoder is False:
         return max(1, math.ceil(len(text) / 4))
-    return len(_TIKTOKEN_ENCODER.encode(text))  # type: ignore[union-attr]
+    return len(encoder.encode(text))  # type: ignore[union-attr]
+
+
+def _truncate_to_tokens(text: str, max_tokens: int) -> tuple[str, int]:
+    """Truncate *text* to at most *max_tokens* tokens and return (truncated_text, token_count)."""
+    if not text or max_tokens <= 0:
+        return "", 0
+    encoder = _get_tiktoken_encoder()
+    if encoder is False:
+        char_cap = max_tokens * 4
+        truncated = text[:char_cap]
+        return truncated, max(1, math.ceil(len(truncated) / 4)) if truncated else 0
+    tokens = encoder.encode(text)  # type: ignore[union-attr]
+    if len(tokens) <= max_tokens:
+        return text, len(tokens)
+    truncated_tokens = tokens[:max_tokens]
+    return encoder.decode(truncated_tokens), len(truncated_tokens)  # type: ignore[union-attr]
 
 
 def _extract_manifest_summary(manifest: Manifest, directory_name: str) -> str:
@@ -156,9 +177,12 @@ def _render_manifest_body(
     subdir_summaries: list[SubdirSummary],
     purpose: str,
     notes: list[str],
+    *,
+    root: Optional[Path] = None,
 ) -> str:
+    heading = _relative_path_str(path, root) if root is not None else path.as_posix()
     lines = [
-        f"# {path.as_posix()}",
+        f"# {heading}",
         "",
         purpose.strip(),
         "",
@@ -274,9 +298,12 @@ def validate_manifest_body(
     root: Path,
     spec: pathspec.PathSpec,
     manifest: Manifest,
+    *,
+    extensions: Optional[list[str]] = None,
 ) -> list[str]:
     """Validate that a manifest body structurally matches the real directory."""
-    files, directories = _list_directory_entries(path, spec, root)
+    effective_exts = extensions if extensions is not None else resolve_configured_extensions(root)
+    files, directories = _list_directory_entries(path, spec, root, extensions=effective_exts)
     expected_files = [file_path.name for file_path in files]
     expected_directories = [directory.name for directory in directories]
 
@@ -291,7 +318,7 @@ def validate_manifest_body(
         )
 
     heading, purpose, sections = _parse_manifest_sections(manifest.body)
-    expected_heading = path.as_posix()
+    expected_heading = _relative_path_str(path, root)
     if heading != expected_heading:
         issues.append(f"Manifest heading should be '# {expected_heading}'.")
     if purpose is None:
@@ -375,9 +402,12 @@ def _list_directory_entries(
     path: Path,
     spec: pathspec.PathSpec,
     target_root: Path,
+    *,
+    extensions: Optional[list[str]] = None,
 ) -> tuple[list[Path], list[Path]]:
     files: list[Path] = []
     directories: list[Path] = []
+    normalized_exts = normalize_extensions(extensions)
 
     for child in sorted(path.iterdir(), key=lambda item: item.name):
         if should_ignore(child, spec, target_root):
@@ -385,6 +415,8 @@ def _list_directory_entries(
         if child.is_dir():
             directories.append(child)
         elif child.is_file():
+            if not file_matches_extensions(child, normalized_exts):
+                continue
             files.append(child)
 
     return files, directories
@@ -398,10 +430,24 @@ def _binary_file_summary(path: Path) -> FileSummary:
     )
 
 
+def _empty_file_summary(path: Path) -> FileSummary:
+    return FileSummary(
+        name=path.name,
+        summary="[empty file]",
+        is_binary=False,
+    )
+
+
 def _prepare_file_entry(
     path: Path,
     config: Config,
 ) -> tuple[FileSummary | dict, int]:
+    try:
+        if path.stat().st_size == 0:
+            return _empty_file_summary(path), 0
+    except OSError:
+        pass
+
     content: Optional[str] = None
     if not is_binary_file(path):
         try:
@@ -411,6 +457,8 @@ def _prepare_file_entry(
 
     if content is None:
         return _binary_file_summary(path), 0
+    if content == "":
+        return _empty_file_summary(path), 0
 
     language = detect_language(path)
     metadata: dict = {}
@@ -437,14 +485,14 @@ def _prepare_file_entry(
     elif language == "Elixir":
         metadata = parse_elixir_file(path)
 
-    truncated = content[: config.max_file_tokens]
+    truncated, token_count = _truncate_to_tokens(content, config.max_file_tokens)
     entry = {
         "name": path.name,
         "content": truncated,
         "language": language,
         "metadata": metadata,
     }
-    return entry, _estimate_tokens(truncated)
+    return entry, token_count
 
 
 def _should_regenerate_directory(
@@ -453,11 +501,12 @@ def _should_regenerate_directory(
     spec: pathspec.PathSpec,
     *,
     incremental: bool,
+    extensions: Optional[list[str]] = None,
 ) -> bool:
     if not incremental:
         return True
 
-    current_hash = hash_directory(path, spec, root)
+    current_hash = hash_directory(path, spec, root, extensions=extensions)
     manifest = read_manifest(path)
     return manifest is None or is_stale(manifest.frontmatter.content_hash, current_hash)
 
@@ -488,7 +537,7 @@ def _generate_directory_manifest(
     client: LLMClient,
     spec: pathspec.PathSpec,
 ) -> tuple[int, int, int]:
-    files, directories = _list_directory_entries(path, spec, root)
+    files, directories = _list_directory_entries(path, spec, root, extensions=config.extensions)
 
     ordered_entries: list[FileSummary | dict] = []
     text_inputs: list[dict] = []
@@ -498,7 +547,8 @@ def _generate_directory_manifest(
     for file_path in files:
         entry, estimated_tokens = _prepare_file_entry(file_path, config)
         if isinstance(entry, FileSummary):
-            binary_count += 1
+            if entry.is_binary:
+                binary_count += 1
             ordered_entries.append(entry)
             continue
 
@@ -506,7 +556,7 @@ def _generate_directory_manifest(
         tokens_total += estimated_tokens
         ordered_entries.append(entry)
 
-    text_results = client.summarize_files(path, text_inputs)
+    text_results = client.summarize_files(path, text_inputs) if text_inputs else []
     if len(text_results) != len(text_inputs):
         raise ValueError(f"Expected {len(text_inputs)} file summaries for {path}, got {len(text_results)}.")
 
@@ -540,7 +590,7 @@ def _generate_directory_manifest(
 
     directory_result = client.summarize_directory(path, file_summaries, subdir_summaries)
     purpose, notes = _extract_directory_purpose_and_notes(directory_result.text, path)
-    content_hash = hash_directory(path, spec, root)
+    content_hash = hash_directory(path, spec, root, extensions=config.extensions)
     write_manifest(
         path,
         model=_manifest_model(config, client),
@@ -548,7 +598,7 @@ def _generate_directory_manifest(
         files=len(files),
         dirs=len(directories),
         tokens_total=tokens_total,
-        body=_render_manifest_body(path, file_summaries, subdir_summaries, purpose, notes),
+        body=_render_manifest_body(path, file_summaries, subdir_summaries, purpose, notes, root=root),
     )
 
     total_tokens_used = sum(result.input_tokens + result.output_tokens for result in text_results)
@@ -575,7 +625,9 @@ def _process_one_directory(
     try:
         if budget_stop is not None and budget_stop.is_set():
             return 0, 0, 0, "skip"
-        if not _should_regenerate_directory(directory, root, spec, incremental=incremental):
+        if not _should_regenerate_directory(
+            directory, root, spec, incremental=incremental, extensions=config.extensions
+        ):
             return 0, 0, 0, "skip"
         file_count, binary_count, tokens_used = _generate_directory_manifest(
             directory, root, config, client, spec
@@ -806,6 +858,7 @@ def inspect_directory_health(
     target_root: Path,
     *,
     max_depth: Optional[int] = None,
+    extensions: Optional[list[str]] = None,
 ) -> list[DirectoryHealth]:
     """Inspect manifest health for all directories in a tree.
 
@@ -814,10 +867,12 @@ def inspect_directory_health(
         spec: Ignore spec.
         target_root: Root for relative path computation.
         max_depth: Optional maximum depth relative to *root*.
+        extensions: Optional file-extension allowlist.
 
     Returns:
         List of DirectoryHealth rows sorted by relative path.
     """
+    effective_exts = extensions if extensions is not None else resolve_configured_extensions(target_root)
     directories = _collect_directories(root, spec, target_root, max_depth=max_depth)
     results: list[DirectoryHealth] = []
 
@@ -845,7 +900,7 @@ def inspect_directory_health(
             )
             continue
 
-        current_hash = hash_directory(directory, spec, target_root)
+        current_hash = hash_directory(directory, spec, target_root, extensions=effective_exts)
         status = "stale" if is_stale(manifest.frontmatter.content_hash, current_hash) else "fresh"
         results.append(
             DirectoryHealth(
@@ -900,7 +955,9 @@ def check_stale_dirs(
 
     return [
         directory for directory in ordered_directories
-        if _should_regenerate_directory(directory, root, spec, incremental=True)
+        if _should_regenerate_directory(
+            directory, root, spec, incremental=True, extensions=config.extensions
+        )
     ]
 
 

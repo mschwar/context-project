@@ -63,6 +63,26 @@ def hash_file(path: Path) -> str:
     return f"sha256:{hashlib.sha256(payload).hexdigest()}"
 
 
+def normalize_extensions(extensions: list[str] | None) -> set[str] | None:
+    """Normalize an optional extension allowlist into lowercase '.ext' strings."""
+    if not extensions:
+        return None
+    normalized: set[str] = set()
+    for raw in extensions:
+        cleaned = raw.strip().lower()
+        if not cleaned:
+            continue
+        normalized.add(cleaned if cleaned.startswith(".") else f".{cleaned}")
+    return normalized or None
+
+
+def file_matches_extensions(path: Path, normalized_extensions: set[str] | None) -> bool:
+    """Return True if *path* satisfies the optional extension allowlist."""
+    if normalized_extensions is None:
+        return True
+    return path.suffix.lower() in normalized_extensions
+
+
 def _path_identity(path: Path) -> str:
     try:
         return str(path.resolve(strict=False))
@@ -75,6 +95,7 @@ def _hash_directory(
     spec: pathspec.PathSpec,
     target_root: Path,
     active_paths: set[str],
+    normalized_extensions: set[str] | None = None,
 ) -> str:
     identity = _path_identity(path)
     if identity in active_paths:
@@ -101,8 +122,12 @@ def _hash_directory(
                 child_hash = ERROR_HASH
             else:
                 if is_directory:
-                    child_hash = _hash_directory(child, spec, target_root, active_paths)
+                    child_hash = _hash_directory(
+                        child, spec, target_root, active_paths, normalized_extensions
+                    )
                 else:
+                    if not file_matches_extensions(child, normalized_extensions):
+                        continue
                     child_hash = hash_file(child)
 
             combined.append(f"{child.name}:{child_hash}\n")
@@ -117,6 +142,8 @@ def hash_directory(
     path: Path,
     spec: pathspec.PathSpec,
     target_root: Path,
+    *,
+    extensions: list[str] | None = None,
 ) -> str:
     """Compute a stable hash for a directory based on its children's hashes.
 
@@ -124,20 +151,21 @@ def hash_directory(
         path: Absolute path to the directory.
         spec: Ignore spec (skip ignored children).
         target_root: Root for relative path computation in ignore matching.
+        extensions: Optional file-extension allowlist.
 
     Returns:
         Hash string like "sha256:def456...".
 
     Implementation:
         1. List immediate children (files + dirs), sorted by name.
-        2. Filter out ignored paths using spec.
+        2. Filter out ignored paths using spec (and optional extension allowlist).
         3. For each child: if file, hash_file(); if dir, hash_directory() (recursive).
         4. Detect recursive directory cycles and substitute a stable sentinel hash.
         5. Build string: "childname:childhash\\n" for each child, sorted.
         6. SHA-256 that combined string.
         7. Return f"sha256:{hexdigest}".
     """
-    return _hash_directory(path, spec, target_root, set())
+    return _hash_directory(path, spec, target_root, set(), normalize_extensions(extensions))
 
 
 def is_stale(manifest_hash: str, current_hash: str) -> bool:
