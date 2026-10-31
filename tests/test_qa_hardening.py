@@ -1882,3 +1882,394 @@ def test_r4_custom_hooks_path_inside_worktree_stays_fresh_and_rolls_back_on_fail
     assert proj_t1 is not None
     assert proj_t1.is_stale() is False
 
+
+def test_r1_post_validation_pause_blocks_reclamation_and_fences_subsequent_writes(
+    tmp_path: Path,
+) -> None:
+    """Publication fence holds .lock.reclaim.guard across validation+os.replace so TOCTOU overwrite is impossible."""
+    repo = _init_git_repo(tmp_path / "repo_r1_fence")
+    (repo / "sub").mkdir()
+    (repo / "sub" / "worker.py").write_text("def work() -> int:\n    return 1\n", encoding="utf-8")
+
+    src_dir = str(Path(__file__).resolve().parents[1] / "src")
+    env = dict(os.environ)
+    env["PYTHONPATH"] = src_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+
+    in_fence_ready = tmp_path / "in_fence_ready"
+    resume_commit = tmp_path / "resume_commit"
+    post_fence_frozen = tmp_path / "post_fence_frozen"
+    wake_frozen = tmp_path / "wake_frozen"
+    reclaimer_ready = tmp_path / "reclaimer_ready"
+    reclaimer_release = tmp_path / "reclaimer_release"
+
+    writer_a_script = (
+        "import os, sys, time\n"
+        "from pathlib import Path\n"
+        "from unittest.mock import patch\n"
+        "import ctx.lock as lock_mod\n"
+        "from ctx.config import Config\n"
+        "from ctx.ignore import load_ignore_patterns\n"
+        "from ctx.init import init_project\n"
+        "from ctx.llm import LLMResult\n"
+        "from ctx.lock import LockSupersededError, STALE_TIMEOUT_SECONDS, _ACTIVE_LOCKS\n"
+        "repo, in_fence, resume_c, post_frozen, wake_f = [Path(p) for p in sys.argv[1:6]]\n"
+        "sub_manifest = (repo / 'sub' / 'CONTEXT.md').resolve()\n"
+        "paused_once = False\n"
+        "def _post_validation_hook(target: Path) -> None:\n"
+        "    global paused_once\n"
+        "    if not paused_once and target.resolve() == sub_manifest:\n"
+        "        paused_once = True\n"
+        "        active = _ACTIVE_LOCKS[repo.resolve()][0]\n"
+        "        active._stop_heartbeat()\n"
+        "        stale_ts = time.time() - STALE_TIMEOUT_SECONDS - 120.0\n"
+        "        (repo / '.ctx-cache' / 'lock').write_text(\n"
+        "            f'pid={os.getpid()}\\ntimestamp={stale_ts}\\ncommand=refresh\\ntoken={active._token}\\n'\n"
+        "        )\n"
+        "        os.utime(repo / '.ctx-cache' / '.lock.guard', (stale_ts, stale_ts))\n"
+        "        in_fence.write_text('1')\n"
+        "        while not resume_c.exists():\n"
+        "            time.sleep(0.01)\n"
+        "lock_mod._POST_FENCE_VALIDATION_HOOK = _post_validation_hook\n"
+        "class _TwoStageClient:\n"
+        "    model = 'writer-a'\n"
+        "    def summarize_files(self, d, files):\n"
+        "        return [LLMResult(text=f'WRITER_A_{f[\"name\"]}') for f in files]\n"
+        "    def summarize_directory(self, d, files, subdirs):\n"
+        "        if d.resolve() == repo.resolve():\n"
+        "            post_frozen.write_text('1')\n"
+        "            while not wake_f.exists():\n"
+        "                time.sleep(0.01)\n"
+        "        return LLMResult(text=f'# {d.name}\\n\\nWRITER_A_PURPOSE.')\n"
+        "cfg = Config(provider='ollama', model='writer-a', api_key='none', cache_path='')\n"
+        "with patch('ctx.api._build_generation_runtime', return_value=(cfg, load_ignore_patterns(repo), _TwoStageClient())):\n"
+        "    try:\n"
+        "        init_project(repo, force=True, tier2=False)\n"
+        "        print('UNEXPECTED_A_SUCCESS')\n"
+        "    except LockSupersededError:\n"
+        "        print('WRITER_A_FENCED')\n"
+    )
+
+    reclaimer_b_script = (
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "from ctx.config import Config\n"
+        "from ctx.generator import generate_tree\n"
+        "from ctx.ignore import load_ignore_patterns\n"
+        "from ctx.init import _populate_ctx_dir\n"
+        "from ctx.llm import LLMResult\n"
+        "from ctx.lock import CtxLock\n"
+        "from ctx.stats_board import save_json_atomic, write_text_atomic\n"
+        "repo, ready, rel = [Path(p) for p in sys.argv[1:4]]\n"
+        "class _CanonicalBClient:\n"
+        "    model = 'canonical-b'\n"
+        "    def summarize_files(self, d, files):\n"
+        "        return [LLMResult(text=f'CANONICAL_B_{f[\"name\"]}') for f in files]\n"
+        "    def summarize_directory(self, d, files, subdirs):\n"
+        "        return LLMResult(text=f'# {d.name}\\n\\nCANONICAL_B_PURPOSE.')\n"
+        "cfg = Config(provider='ollama', model='canonical-b', api_key='none', cache_path='')\n"
+        "with CtxLock(repo, command='canonical-b'):\n"
+        "    write_text_atomic(repo / '.gitignore', '.ctx/\\n')\n"
+        "    spec = load_ignore_patterns(repo)\n"
+        "    generate_tree(repo, cfg, _CanonicalBClient(), spec)\n"
+        "    ctx_dir = repo / '.ctx'\n"
+        "    write_text_atomic(ctx_dir / '.gitignore', '*\\n')\n"
+        "    _populate_ctx_dir(repo, ctx_dir)\n"
+        "    save_json_atomic(ctx_dir / 'metadata.json', {'schema_version': 1, 'mode': 'standard', 'owner': 'B'})\n"
+        "    ready.write_text('1')\n"
+        "    while not rel.exists():\n"
+        "        time.sleep(0.01)\n"
+        "print('CANONICAL_B_DONE')\n"
+    )
+
+    proc_a = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            writer_a_script,
+            str(repo),
+            str(in_fence_ready),
+            str(resume_commit),
+            str(post_fence_frozen),
+            str(wake_frozen),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    proc_b: subprocess.Popen[str] | None = None
+    try:
+        deadline = time.time() + 10.0
+        while not in_fence_ready.exists() and time.time() < deadline:
+            time.sleep(0.01)
+        assert in_fence_ready.exists(), proc_a.stderr.read() if proc_a.poll() is not None else ""
+
+        # Writer A has ALREADY passed verify_ownership() inside publication_fence() and is paused right before os.replace!
+        # Even though lock timestamp + .lock.guard mtime are stale, reclamation MUST be blocked by .lock.reclaim.guard!
+        with pytest.raises(LockHeldError):
+            with CtxLock(repo, command="premature-reclaimer"):
+                pass
+
+        # Allow Writer A to finish committing sub/CONTEXT.md, exit publication_fence(), and freeze before root CONTEXT.md
+        resume_commit.write_text("1", encoding="utf-8")
+        while not post_fence_frozen.exists() and time.time() < deadline:
+            time.sleep(0.01)
+        assert post_fence_frozen.exists()
+
+        # Now Writer A is outside publication_fence() and genuinely frozen -> Reclaimer B MUST reclaim and publish CANONICAL_B!
+        proc_b = subprocess.Popen(
+            [sys.executable, "-c", reclaimer_b_script, str(repo), str(reclaimer_ready), str(reclaimer_release)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        while not reclaimer_ready.exists() and time.time() < deadline:
+            time.sleep(0.01)
+        assert reclaimer_ready.exists(), proc_b.stderr.read() if proc_b.poll() is not None else ""
+
+        tracked = [
+            repo / "CONTEXT.md",
+            repo / "sub" / "CONTEXT.md",
+            repo / ".gitignore",
+            repo / CTX_DIR / "CONTEXT.md",
+            repo / CTX_DIR / "CONTEXT-1.md",
+            repo / CTX_DIR / "CONTEXT-0.md",
+            repo / CTX_DIR / "metadata.json",
+            repo / ".ctx-cache" / "lock",
+        ]
+        snap_b = {p: p.read_bytes() for p in tracked}
+        assert b"CANONICAL_B" in snap_b[repo / "sub" / "CONTEXT.md"]
+        assert b"CANONICAL_B" in snap_b[repo / "CONTEXT.md"]
+
+        # Wake Writer A: its next fenced commit (root CONTEXT.md) and rollback MUST abort without touching a single byte!
+        wake_frozen.write_text("1", encoding="utf-8")
+        out_a, err_a = proc_a.communicate(timeout=10.0)
+        assert "WRITER_A_FENCED" in out_a, f"stdout={out_a!r} stderr={err_a!r}"
+
+        for p, expected in snap_b.items():
+            assert p.is_file()
+            assert p.read_bytes() == expected
+
+        reclaimer_release.write_text("1", encoding="utf-8")
+        out_b, err_b = proc_b.communicate(timeout=10.0)
+        assert "CANONICAL_B_DONE" in out_b, f"stdout={out_b!r} stderr={err_b!r}"
+    finally:
+        for p in (proc_a, proc_b):
+            if p is not None and p.poll() is None:
+                p.kill()
+                p.communicate()
+
+
+def test_r5_hook_telemetry_holds_hook_guard_and_never_recreates_ctx_after_uninit(
+    tmp_path: Path,
+) -> None:
+    """run_hook must retain .ctx-cache/.hook.guard through _append_hook_log so uninit never leaves .ctx/hook_log.json."""
+    import ctx.init as init_mod
+    from ctx.init import InitError, _acquire_pid, run_hook
+
+    repo = _init_git_repo(tmp_path / "repo_r5")
+    (repo / "app.py").write_text("def run() -> int:\n    return 1\n", encoding="utf-8")
+    init_project(repo, tier2=True)
+
+    entered_telemetry = threading.Event()
+    release_telemetry = threading.Event()
+    real_append_log = init_mod._append_hook_log
+
+    def _pausing_append_log(ctx_dir: Path, entry: dict) -> None:
+        entered_telemetry.set()
+        release_telemetry.wait(timeout=5.0)
+        real_append_log(ctx_dir, entry)
+
+    uninit_done = threading.Event()
+    uninit_err: list[BaseException] = []
+
+    with patch("ctx.init._append_hook_log", side_effect=_pausing_append_log):
+        hook_thread = threading.Thread(target=run_hook, args=(repo, "post-commit"))
+        hook_thread.start()
+        assert entered_telemetry.wait(timeout=5.0)
+
+        # 1. While run_hook is paused at telemetry publication, .hook.guard MUST still be held!
+        with pytest.raises(InitError, match="Cannot uninitialize while a background ctx hook is running"):
+            uninit_project(repo, wait_timeout=0.04)
+
+        # 2. A waiting uninit_project waits for telemetry + _release_pid, then removes .ctx/ completely
+        def _run_waiting_uninit() -> None:
+            try:
+                uninit_project(repo, wait_timeout=5.0)
+            except BaseException as exc:  # pragma: no cover
+                uninit_err.append(exc)
+            finally:
+                uninit_done.set()
+
+        uninit_thread = threading.Thread(target=_run_waiting_uninit)
+        uninit_thread.start()
+        time.sleep(0.05)
+        assert not uninit_done.is_set()
+
+        release_telemetry.set()
+        hook_thread.join(timeout=5.0)
+        uninit_thread.join(timeout=5.0)
+
+    assert uninit_err == []
+    assert not (repo / CTX_DIR).exists()
+
+    # 3. Late _acquire_pid(..., _active_hook=True) after teardown must return False without creating .ctx/
+    assert _acquire_pid(repo, _active_hook=True) is False
+    assert not (repo / CTX_DIR).exists()
+
+    # 4. Subsequent init_project without --force must succeed cleanly
+    init_project(repo, tier2=True)
+    assert (repo / CTX_DIR / "metadata.json").is_file()
+
+
+def test_r6_concurrent_worktree_init_and_peer_uninit_preserve_shared_hooks_and_clean_rollback(
+    tmp_path: Path,
+) -> None:
+    """Shared worktree hooks must serialize concurrent peer init/uninit and clean up accurately on failure or dual uninit."""
+    from ctx.init import CTX_HOOK_START, HOOK_NAMES, _resolve_hooks_dir
+
+    repo_a = _init_git_repo(tmp_path / "repo_a")
+    (repo_a / "mod.py").write_text("def f() -> int:\n    return 1\n", encoding="utf-8")
+    wt_b = tmp_path / "wt_b"
+    subprocess.run(
+        ["git", "-C", str(repo_a), "worktree", "add", "-b", "feature-wt-b", str(wt_b)],
+        capture_output=True,
+        check=True,
+    )
+    shared_hooks_dir = _resolve_hooks_dir(repo_a).resolve()
+    assert _resolve_hooks_dir(wt_b).resolve() == shared_hooks_dir
+
+    cfg = Config(provider="ollama", model="fake-qa-model", api_key="none", cache_path="")
+
+    # 1. repo_a is initialized; wt_b pauses mid-init AFTER _install_hooks and BEFORE wt_b/.ctx/metadata.json exists,
+    #    while repo_a runs uninit_project(repo_a). Shared hooks MUST survive for wt_b!
+    init_project(repo_a, tier2=True)
+    b_hooks_installed_pause = threading.Event()
+    b_resume_publish = threading.Event()
+
+    class _PausingClient(_SimpleFakeClient):
+        def summarize_directory(self, d: Path, files: list, subdirs: list) -> LLMResult:
+            if d.resolve() == wt_b.resolve():
+                b_hooks_installed_pause.set()
+                b_resume_publish.wait(timeout=5.0)
+            return super().summarize_directory(d, files, subdirs)
+
+    b_err: list[BaseException] = []
+    a_uninit_res: list[dict] = []
+    a_err: list[BaseException] = []
+
+    with patch(
+        "ctx.api._build_generation_runtime",
+        return_value=(cfg, load_ignore_patterns(wt_b), _PausingClient()),
+    ):
+        t_b = threading.Thread(target=lambda: init_project(wt_b, tier2=False))
+        t_b.start()
+        assert b_hooks_installed_pause.wait(timeout=5.0)
+        assert not (wt_b / CTX_DIR / "metadata.json").exists()
+
+        def _uninit_a() -> None:
+            try:
+                a_uninit_res.append(uninit_project(repo_a))
+            except BaseException as exc:  # pragma: no cover
+                a_err.append(exc)
+
+        t_a = threading.Thread(target=_uninit_a)
+        t_a.start()
+        time.sleep(0.05)
+        # t_a must wait on _shared_hooks_lock while t_b finishes publishing wt_b/.ctx/metadata.json
+        assert t_a.is_alive()
+
+        b_resume_publish.set()
+        t_b.join(timeout=10.0)
+        t_a.join(timeout=10.0)
+
+    assert b_err == []
+    assert a_err == []
+    assert not (repo_a / CTX_DIR).exists()
+    assert (wt_b / CTX_DIR / "metadata.json").is_file()
+    assert a_uninit_res[0]["hooks_removed"] == []
+    for hook_name in HOOK_NAMES:
+        hook_file = shared_hooks_dir / hook_name
+        assert hook_file.is_file(), f"Peer uninit deleted shared hook {hook_name} needed by wt_b!"
+        assert CTX_HOOK_START in hook_file.read_text(encoding="utf-8")
+
+    # 2. Dual concurrent uninit(repo_a) + uninit(wt_b) when BOTH are initialized -> neither remains initialized AND hooks are removed!
+    init_project(repo_a, tier2=True)
+    barrier = threading.Barrier(2)
+    dual_results: list[dict] = []
+    dual_lock = threading.Lock()
+
+    def _barrier_uninit(target: Path) -> None:
+        barrier.wait(timeout=5.0)
+        res = uninit_project(target)
+        with dual_lock:
+            dual_results.append(res)
+
+    t1 = threading.Thread(target=_barrier_uninit, args=(repo_a,))
+    t2 = threading.Thread(target=_barrier_uninit, args=(wt_b,))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10.0)
+    t2.join(timeout=10.0)
+
+    assert len(dual_results) == 2
+    assert not (repo_a / CTX_DIR).exists()
+    assert not (wt_b / CTX_DIR).exists()
+    for hook_name in HOOK_NAMES:
+        assert not (shared_hooks_dir / hook_name).exists()
+
+    # 3. Failing init_project(wt_b) concurrent with uninit_project(repo_a) -> clean rollback + hooks removed when neither remains initialized
+    pre_step3_wt_b_manifest = (wt_b / "CONTEXT.md").read_bytes()
+    (wt_b / "step3_sub").mkdir()
+    (wt_b / "step3_sub" / "extra.py").write_text("X = 3\n", encoding="utf-8")
+    init_project(repo_a, tier2=True)
+    b_fail_pause = threading.Event()
+    b_trigger_fail = threading.Event()
+
+    class _FailingClient(_SimpleFakeClient):
+        def summarize_directory(self, d: Path, files: list, subdirs: list) -> LLMResult:
+            if d.resolve() == wt_b.resolve():
+                b_fail_pause.set()
+                b_trigger_fail.wait(timeout=5.0)
+                raise RuntimeError("simulated mid-init LLM crash in wt_b")
+            return super().summarize_directory(d, files, subdirs)
+
+    b_fail_exc: list[BaseException] = []
+    a_uninit_after_fail: list[dict] = []
+
+    with patch(
+        "ctx.api._build_generation_runtime",
+        return_value=(cfg, load_ignore_patterns(wt_b), _FailingClient()),
+    ):
+        def _failing_init_b() -> None:
+            try:
+                init_project(wt_b, force=True, tier2=False)
+            except BaseException as exc:
+                b_fail_exc.append(exc)
+
+        tb_fail = threading.Thread(target=_failing_init_b)
+        tb_fail.start()
+        assert b_fail_pause.wait(timeout=5.0)
+        assert (wt_b / "step3_sub" / "CONTEXT.md").is_file()
+
+        ta_uninit = threading.Thread(target=lambda: a_uninit_after_fail.append(uninit_project(repo_a)))
+        ta_uninit.start()
+        time.sleep(0.05)
+        assert ta_uninit.is_alive()
+
+        b_trigger_fail.set()
+        tb_fail.join(timeout=10.0)
+        ta_uninit.join(timeout=10.0)
+
+    assert len(b_fail_exc) == 1
+    assert not (wt_b / CTX_DIR).exists()
+    assert not (wt_b / "step3_sub" / "CONTEXT.md").exists()
+    assert (wt_b / "CONTEXT.md").read_bytes() == pre_step3_wt_b_manifest
+    assert not (repo_a / CTX_DIR).exists()
+    assert len(a_uninit_after_fail) == 1
+    assert set(a_uninit_after_fail[0]["hooks_removed"]) == set(HOOK_NAMES)
+    for hook_name in HOOK_NAMES:
+        assert not (shared_hooks_dir / hook_name).exists()
+
+

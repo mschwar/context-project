@@ -291,12 +291,14 @@ def probe_provider_connectivity(
 
 def write_default_config(path: Path, provider: str, model: str | None = None, base_url: str | None = None) -> None:
     """Write a minimal .ctxconfig into *path* directory."""
+    from ctx.stats_board import write_text_atomic
+
     lines = [f"provider: {provider}"]
     if model:
         lines.append(f"model: {model}")
     if base_url:
         lines.append(f"base_url: {base_url}")
-    (path / ".ctxconfig").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(path / ".ctxconfig", "\n".join(lines) + "\n")
 
 
 def infer_provider_from_base_url(base_url: str) -> str:

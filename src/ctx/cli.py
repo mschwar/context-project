@@ -1612,9 +1612,12 @@ def clean(
                         broker.set_data({"manifests_removed": 0, "paths": []})
                         aborted = True
                 if not aborted:
+                    from ctx.lock import fenced_unlink
+
                     with CtxLock(root, command="reset"):
                         for manifest_path in manifests:
-                            manifest_path.unlink()
+                            fenced_unlink(manifest_path, missing_ok=True)
+                        api._sync_tier1_ctx_exports(root)
                     click.echo(f"Removed {len(manifests)} CONTEXT.md file(s).")
                     broker.set_data({"manifests_removed": len(manifests), "paths": rel_paths})
     _exit_for_broker(broker, json_mode=json_mode)

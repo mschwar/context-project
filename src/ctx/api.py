@@ -35,7 +35,13 @@ from ctx.generator import (
 from ctx.ignore import load_ignore_patterns
 from ctx.manifest import read_manifest
 from ctx.llm import create_client
-from ctx.lock import CtxLock, LockSupersededError, assert_lock_ownership_for_path
+from ctx.lock import (
+    CtxLock,
+    LockSupersededError,
+    assert_lock_ownership_for_path,
+    fenced_mkdir,
+    fenced_unlink,
+)
 
 
 ProgressCallback = Callable[[Path, int, int, int], None]
@@ -269,8 +275,7 @@ def _refresh_tier2_locked(
         rendered_c0 = render_context_0(skeleton)
         rendered_c1 = render_context_1(skeleton)
         rendered_full = render_context_full(skeleton)
-        assert_lock_ownership_for_path(ctx_dir)
-        ctx_dir.mkdir(parents=True, exist_ok=True)
+        fenced_mkdir(ctx_dir, parents=True, exist_ok=True)
         write_text_atomic(ctx_dir / "CONTEXT-0.md", rendered_c0)
         write_text_atomic(ctx_dir / "CONTEXT-1.md", rendered_c1)
         write_text_atomic(ctx_dir / "CONTEXT.md", rendered_full)
@@ -653,8 +658,7 @@ def refresh(
         assert_lock_ownership_for_path(root)
         for manifest_path in _iter_tree_manifests(root):
             if manifest_path not in preexisting_manifests:
-                assert_lock_ownership_for_path(manifest_path)
-                manifest_path.unlink(missing_ok=True)
+                fenced_unlink(manifest_path, missing_ok=True)
         for manifest_path, prior_bytes in preexisting_manifests.items():
             _write_bytes_atomic(manifest_path, prior_bytes)
 
@@ -1298,8 +1302,7 @@ def reset(
         manifests = _iter_tree_manifests(root)
         paths = [_path_relative(manifest, root) for manifest in manifests]
         for manifest in manifests:
-            assert_lock_ownership_for_path(manifest)
-            manifest.unlink(missing_ok=True)
+            fenced_unlink(manifest, missing_ok=True)
         _sync_tier1_ctx_exports(root)
 
     return ResetResult(manifests_removed=len(manifests), paths=paths)

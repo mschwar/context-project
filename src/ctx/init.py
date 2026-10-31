@@ -36,10 +36,13 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time as _time
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
 
 from ctx import __version__
 from ctx.lock import (
@@ -47,6 +50,10 @@ from ctx.lock import (
     LockHeldError,
     LockSupersededError,
     assert_lock_ownership_for_path,
+    fenced_mkdir,
+    fenced_replace,
+    fenced_unlink,
+    lock_publication_fence_for_path,
     release_os_lock,
     try_acquire_os_lock,
 )
@@ -115,34 +122,34 @@ def init_project(
                 raise InitError(
                     f"Already initialized: {ctx_dir} exists. Use --force to reinitialize."
                 )
-            prior_gitignore = gitignore_path.read_bytes() if gitignore_path.exists() else None
-            prior_ctx_snapshot = _snapshot_dir(ctx_dir)
-            hooks_dir, missing_hook_dirs, prior_hooks = _snapshot_hooks(root)
-            try:
-                _add_to_gitignore(root, CTX_DIR + "/")
-                hooks_installed = _install_hooks(root)
-                skeleton = extract_skeleton(root)
-                rendered_c0 = render_context_0(skeleton)
-                rendered_c1 = render_context_1(skeleton)
-                rendered_full = render_context_full(skeleton)
-                assert_lock_ownership_for_path(ctx_dir)
-                ctx_dir.mkdir(exist_ok=True)
-                write_text_atomic(ctx_dir / ".gitignore", "*\n")
-                write_text_atomic(ctx_dir / "CONTEXT-0.md", rendered_c0)
-                write_text_atomic(ctx_dir / "CONTEXT-1.md", rendered_c1)
-                write_text_atomic(ctx_dir / "CONTEXT.md", rendered_full)
-                metadata["mode"] = "tier2"
-                metadata["structural_hash"] = skeleton.structural_hash
-                metadata["boundary_doc_hash"] = skeleton.boundary_doc_hash
-                save_json_atomic(ctx_dir / METADATA_FILE, metadata)
-                manifests_refreshed = len(skeleton.subsystems)
-            except LockSupersededError:
-                raise
-            except Exception:
-                _restore_hooks(root, hooks_dir, missing_hook_dirs, prior_hooks)
-                _restore_dir_snapshot(ctx_dir, prior_ctx_snapshot)
-                _restore_gitignore(gitignore_path, prior_gitignore)
-                raise
+            with _shared_hooks_lock(root):
+                prior_gitignore = gitignore_path.read_bytes() if gitignore_path.exists() else None
+                prior_ctx_snapshot = _snapshot_dir(ctx_dir)
+                hooks_dir, missing_hook_dirs, prior_hooks = _snapshot_hooks(root)
+                try:
+                    _add_to_gitignore(root, CTX_DIR + "/")
+                    hooks_installed = _install_hooks(root)
+                    skeleton = extract_skeleton(root)
+                    rendered_c0 = render_context_0(skeleton)
+                    rendered_c1 = render_context_1(skeleton)
+                    rendered_full = render_context_full(skeleton)
+                    fenced_mkdir(ctx_dir, parents=True, exist_ok=True)
+                    write_text_atomic(ctx_dir / ".gitignore", "*\n")
+                    write_text_atomic(ctx_dir / "CONTEXT-0.md", rendered_c0)
+                    write_text_atomic(ctx_dir / "CONTEXT-1.md", rendered_c1)
+                    write_text_atomic(ctx_dir / "CONTEXT.md", rendered_full)
+                    metadata["mode"] = "tier2"
+                    metadata["structural_hash"] = skeleton.structural_hash
+                    metadata["boundary_doc_hash"] = skeleton.boundary_doc_hash
+                    save_json_atomic(ctx_dir / METADATA_FILE, metadata)
+                    manifests_refreshed = len(skeleton.subsystems)
+                except LockSupersededError:
+                    raise
+                except Exception:
+                    _restore_hooks(root, hooks_dir, missing_hook_dirs, prior_hooks)
+                    _restore_dir_snapshot(ctx_dir, prior_ctx_snapshot)
+                    _restore_gitignore(gitignore_path, prior_gitignore)
+                    raise
     else:
         finalized = False
         tx_mutated = False
@@ -151,6 +158,7 @@ def init_project(
         hooks_dir_ref: Path | None = None
         missing_hook_dirs: list[Path] = []
         prior_hooks: dict[str, tuple[bytes, int] | None] = {}
+        hooks_lock_stack = ExitStack()
 
         def _begin_standard_ctx_locked() -> None:
             nonlocal tx_mutated, prior_gitignore, prior_ctx_snapshot
@@ -159,6 +167,7 @@ def init_project(
                 raise InitError(
                     f"Already initialized: {ctx_dir} exists. Use --force to reinitialize."
                 )
+            hooks_lock_stack.enter_context(_shared_hooks_lock(root))
             prior_gitignore = gitignore_path.read_bytes() if gitignore_path.exists() else None
             prior_ctx_snapshot = _snapshot_dir(ctx_dir)
             hooks_dir_ref, missing_hook_dirs, prior_hooks = _snapshot_hooks(root)
@@ -167,18 +176,20 @@ def init_project(
             hooks_installed = _install_hooks(root)
 
         def _rollback_standard_ctx_locked() -> None:
-            if not tx_mutated:
-                return
-            assert hooks_dir_ref is not None
-            _restore_hooks(root, hooks_dir_ref, missing_hook_dirs, prior_hooks)
-            _restore_dir_snapshot(ctx_dir, prior_ctx_snapshot)
-            _restore_gitignore(gitignore_path, prior_gitignore)
+            try:
+                if not tx_mutated:
+                    return
+                assert hooks_dir_ref is not None
+                _restore_hooks(root, hooks_dir_ref, missing_hook_dirs, prior_hooks)
+                _restore_dir_snapshot(ctx_dir, prior_ctx_snapshot)
+                _restore_gitignore(gitignore_path, prior_gitignore)
+            finally:
+                hooks_lock_stack.close()
 
         def _finalize_standard_ctx_locked() -> None:
             nonlocal finalized
             rendered_exports = _render_ctx_exports(root)
-            assert_lock_ownership_for_path(ctx_dir)
-            ctx_dir.mkdir(exist_ok=True)
+            fenced_mkdir(ctx_dir, parents=True, exist_ok=True)
             write_text_atomic(ctx_dir / ".gitignore", "*\n")
             _add_to_gitignore(root, CTX_DIR + "/")
             for filename, content in rendered_exports:
@@ -187,34 +198,38 @@ def init_project(
             metadata["last_refresh"] = datetime.now(timezone.utc).isoformat()
             save_json_atomic(ctx_dir / METADATA_FILE, metadata)
             finalized = True
+            hooks_lock_stack.close()
 
         from ctx.api import refresh
 
-        refresh_result = refresh(
-            root,
-            force=force,
-            _force_tier1=True,
-            _on_locked_begin=_begin_standard_ctx_locked,
-            _on_locked_success=_finalize_standard_ctx_locked,
-            _on_locked_rollback=_rollback_standard_ctx_locked,
-        )
+        try:
+            refresh_result = refresh(
+                root,
+                force=force,
+                _force_tier1=True,
+                _on_locked_begin=_begin_standard_ctx_locked,
+                _on_locked_success=_finalize_standard_ctx_locked,
+                _on_locked_rollback=_rollback_standard_ctx_locked,
+            )
 
-        # Fallback for unit tests that mock ctx.api.refresh without invoking locked callbacks
-        if not finalized:
-            if refresh_result.errors:
-                raise InitError(
-                    f"Initial manifest refresh failed: {refresh_result.errors[0]}"
-                )
-            with CtxLock(root, command="init"):
-                _begin_standard_ctx_locked()
-                try:
-                    _finalize_standard_ctx_locked()
-                except LockSupersededError:
-                    raise
-                except Exception:
-                    _rollback_standard_ctx_locked()
-                    raise
-        manifests_refreshed = refresh_result.dirs_processed
+            # Fallback for unit tests that mock ctx.api.refresh without invoking locked callbacks
+            if not finalized:
+                if refresh_result.errors:
+                    raise InitError(
+                        f"Initial manifest refresh failed: {refresh_result.errors[0]}"
+                    )
+                with CtxLock(root, command="init"):
+                    _begin_standard_ctx_locked()
+                    try:
+                        _finalize_standard_ctx_locked()
+                    except LockSupersededError:
+                        raise
+                    except Exception:
+                        _rollback_standard_ctx_locked()
+                        raise
+            manifests_refreshed = refresh_result.dirs_processed
+        finally:
+            hooks_lock_stack.close()
 
     result = {
         "root": str(root),
@@ -230,12 +245,18 @@ def init_project(
     return result
 
 
-def uninit_project(root: Path, *, wait_timeout: float = 2.0) -> dict:
+def uninit_project(
+    root: Path,
+    *,
+    wait_timeout: float = 2.0,
+    hooks_wait_timeout: float = 60.0,
+) -> dict:
     """Remove .ctx/ infrastructure and hooks from a git repo.
 
     Coordinates with active background hooks via the persistent .ctx-cache/.hook.guard
-    kernel lock and with active writers via CtxLock so teardown never unlinks an open
-    guard inode or races with in-flight exports.
+    kernel lock, with active writers via CtxLock, and with peer git worktrees via
+    _shared_hooks_lock so teardown never unlinks an open guard inode, races with
+    in-flight telemetry/exports, or deletes hooks while a peer worktree initializes.
     """
     root = root.resolve()
     ctx_dir = root / CTX_DIR
@@ -243,8 +264,8 @@ def uninit_project(root: Path, *, wait_timeout: float = 2.0) -> dict:
     if not ctx_dir.is_dir():
         raise InitError(f"Not initialized: {ctx_dir} does not exist.")
 
-    # Release any hook descriptor held inside the current Python process first.
-    _release_pid(root)
+    # Release any non-active direct unit-test hook descriptor held inside the current process.
+    _release_inactive_local_pid(root)
 
     hook_fd = _acquire_hook_guard_for_teardown(root, timeout_seconds=wait_timeout)
     if hook_fd is None:
@@ -258,27 +279,23 @@ def uninit_project(root: Path, *, wait_timeout: float = 2.0) -> dict:
                 if not ctx_dir.is_dir():
                     raise InitError(f"Not initialized: {ctx_dir} does not exist.")
 
-                assert_lock_ownership_for_path(root)
-                # 1. Remove ctx blocks from hooks unless another initialized worktree shares this hooks dir
-                if _other_worktrees_share_hooks(root):
-                    hooks_removed: list[str] = []
-                else:
-                    hooks_removed = _remove_hooks(root)
-
-                # 2. Remove .ctx/ directory (the persistent hook guard lives in .ctx-cache/.hook.guard)
-                assert_lock_ownership_for_path(ctx_dir)
-                _rmtree(ctx_dir)
-
-                # 3. Remove .ctx/ from root .gitignore
-                assert_lock_ownership_for_path(root)
-                _remove_from_gitignore(root, CTX_DIR + "/")
-
-                # 4. Remove PID files if present (current + legacy)
-                for rel_pid in (PID_FILE, LEGACY_PID_FILE):
+                with _shared_hooks_lock(root, timeout_seconds=hooks_wait_timeout):
                     assert_lock_ownership_for_path(root)
-                    pid_file = root / rel_pid
-                    if pid_file.exists():
-                        pid_file.unlink(missing_ok=True)
+                    # 1. Remove ctx blocks from hooks unless another initialized worktree shares this hooks dir
+                    if _other_worktrees_share_hooks(root):
+                        hooks_removed: list[str] = []
+                    else:
+                        hooks_removed = _remove_hooks(root)
+
+                    # 2. Remove .ctx/ directory while holding _shared_hooks_lock so peer uninit sees updated state
+                    _rmtree(ctx_dir)
+
+                    # 3. Remove .ctx/ from root .gitignore
+                    _remove_from_gitignore(root, CTX_DIR + "/")
+
+                    # 4. Remove PID files if present (current + legacy)
+                    for rel_pid in (PID_FILE, LEGACY_PID_FILE):
+                        fenced_unlink(root / rel_pid, missing_ok=True, fence_path=root)
         except LockHeldError as exc:
             raise InitError(
                 f"Cannot uninitialize while another ctx write operation holds the lock: {exc}"
@@ -312,7 +329,7 @@ def run_hook(root: Path, trigger: str) -> None:
         return
 
     # PID debounce: skip if another hook (or uninit teardown) holds the persistent kernel guard
-    if not _acquire_pid(root):
+    if not _acquire_pid(root, _active_hook=True):
         logger.debug("ctx hook: another hook is running, skipping")
         return
 
@@ -349,18 +366,20 @@ def run_hook(root: Path, trigger: str) -> None:
         error_msg = str(exc)
         logger.warning("ctx hook failed: %s", exc)
     finally:
-        _release_pid(root)
-
-        # Append telemetry only while project remains initialized and this hook was not superseded
-        if not superseded and meta_path.is_file():
-            elapsed_ms = round((_time.monotonic() - start) * 1000)
-            _append_hook_log(ctx_dir, {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "trigger": trigger,
-                "duration_ms": elapsed_ms,
-                "success": success,
-                "error": error_msg if not success else None,
-            })
+        try:
+            # Append telemetry while STILL holding .ctx-cache/.hook.guard so uninit_project()
+            # cannot remove .ctx/ between meta_path verification and hook_log.json publication.
+            if not superseded and meta_path.is_file():
+                elapsed_ms = round((_time.monotonic() - start) * 1000)
+                _append_hook_log(ctx_dir, {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "trigger": trigger,
+                    "duration_ms": elapsed_ms,
+                    "success": success,
+                    "error": error_msg if not success else None,
+                })
+        finally:
+            _release_pid(root)
 
 
 # ── Error class ─────────────────────────────────────────────────────
@@ -371,19 +390,76 @@ class InitError(Exception):
 
 # ── Internal helpers ────────────────────────────────────────────────
 
-def _write_bytes_atomic(path: Path, data: bytes) -> None:
-    """Write raw bytes atomically via a same-directory temporary file and os.replace."""
-    import tempfile
+_SHARED_HOOKS_THREAD_LOCKS: dict[Path, threading.Lock] = {}
+_SHARED_HOOKS_THREAD_LOCKS_GUARD = threading.Lock()
 
-    assert_lock_ownership_for_path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+
+def _shared_hooks_guard_path(hooks_dir: Path) -> Path:
+    """Return a deterministic kernel lock path for *hooks_dir* outside working-tree source dirs."""
+    resolved_hooks = hooks_dir.resolve()
+    if (
+        resolved_hooks.name == "hooks"
+        and resolved_hooks.parent.name == ".git"
+        and resolved_hooks.parent.is_dir()
+    ):
+        return resolved_hooks.parent / "ctx-hooks.guard"
+    uid = getattr(os, "getuid", lambda: 0)()
+    digest = hashlib.sha256(str(resolved_hooks).encode("utf-8")).hexdigest()[:24]
+    return Path(tempfile.gettempdir()) / f"ctx-shared-hooks-{uid}-{digest}.guard"
+
+
+@contextmanager
+def _shared_hooks_lock(root: Path, *, timeout_seconds: float = 60.0) -> Iterator[None]:
+    """Serialize hook installation, rollback, and removal across git worktrees sharing a hooks dir."""
+    guard_path = _shared_hooks_guard_path(_resolve_hooks_dir(root))
+    with _SHARED_HOOKS_THREAD_LOCKS_GUARD:
+        thread_lock = _SHARED_HOOKS_THREAD_LOCKS.setdefault(guard_path, threading.Lock())
+
+    deadline = _time.monotonic() + max(0.0, timeout_seconds)
+    remaining = max(0.0, deadline - _time.monotonic())
+    acquired_thread = thread_lock.acquire(timeout=remaining)
+    if not acquired_thread:
+        raise InitError(
+            "Timed out waiting for shared git hooks lock; another ctx init/uninit operation is active."
+        )
+
+    os_fd: int | None = None
+    try:
+        while True:
+            os_fd = try_acquire_os_lock(guard_path)
+            if os_fd is not None:
+                break
+            if _time.monotonic() >= deadline:
+                raise InitError(
+                    "Timed out waiting for shared git hooks lock; another ctx init/uninit operation is active."
+                )
+            _time.sleep(0.01)
+        yield
+    finally:
+        if os_fd is not None:
+            release_os_lock(os_fd)
+        thread_lock.release()
+
+
+def _write_bytes_atomic(
+    path: Path,
+    data: bytes,
+    *,
+    mode: int | None = None,
+    fence_path: Path | None = None,
+) -> None:
+    """Write raw bytes atomically via a same-directory temporary file and kernel-fenced os.replace."""
+    check_path = fence_path or path
+    assert_lock_ownership_for_path(check_path)
+    fenced_mkdir(path.parent, parents=True, exist_ok=True, fence_path=check_path)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.tmp-")
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
-        assert_lock_ownership_for_path(path)
-        os.replace(tmp, path)
-    except Exception:
+        if mode is not None and os.name != "nt":
+            os.chmod(tmp, mode)
+        fenced_replace(tmp, path, fence_path=check_path)
+    except BaseException:
         try:
             os.unlink(tmp)
         except OSError:
@@ -393,9 +469,8 @@ def _write_bytes_atomic(path: Path, data: bytes) -> None:
 
 def _restore_gitignore(gitignore_path: Path, prior_gitignore: bytes | None) -> None:
     """Restore root .gitignore byte-for-byte inside an active CtxLock transaction."""
-    assert_lock_ownership_for_path(gitignore_path)
     if prior_gitignore is None:
-        gitignore_path.unlink(missing_ok=True)
+        fenced_unlink(gitignore_path, missing_ok=True)
     else:
         _write_bytes_atomic(gitignore_path, prior_gitignore)
 
@@ -431,19 +506,15 @@ def _restore_hooks(
     for hook_name, prior in prior_files.items():
         hook_path = hooks_dir / hook_name
         if prior is None:
-            hook_path.unlink(missing_ok=True)
+            fenced_unlink(hook_path, missing_ok=True, fence_path=root)
         else:
             raw_bytes, mode = prior
-            _write_bytes_atomic(hook_path, raw_bytes)
-            if os.name != "nt":
-                try:
-                    hook_path.chmod(mode)
-                except OSError:
-                    pass
+            _write_bytes_atomic(hook_path, raw_bytes, mode=mode, fence_path=root)
     for created_dir in missing_dirs:
         try:
-            if created_dir.is_dir() and not any(created_dir.iterdir()):
-                created_dir.rmdir()
+            with lock_publication_fence_for_path(root):
+                if created_dir.is_dir() and not any(created_dir.iterdir()):
+                    created_dir.rmdir()
         except OSError:
             break
 
@@ -467,11 +538,10 @@ def _restore_dir_snapshot(dir_path: Path, snapshot: dict[Path, bytes] | None) ->
             _rmtree(dir_path)
         return
 
-    dir_path.mkdir(parents=True, exist_ok=True)
+    fenced_mkdir(dir_path, parents=True, exist_ok=True)
     for existing in list(dir_path.rglob("*")):
         if existing.is_file() and existing.relative_to(dir_path) not in snapshot:
-            assert_lock_ownership_for_path(existing)
-            existing.unlink(missing_ok=True)
+            fenced_unlink(existing, missing_ok=True)
     for rel_path, raw_bytes in snapshot.items():
         _write_bytes_atomic(dir_path / rel_path, raw_bytes)
 
@@ -492,8 +562,7 @@ def _populate_ctx_dir(root: Path, ctx_dir: Path) -> None:
     prior_snapshot = _snapshot_dir(ctx_dir)
     rendered = _render_ctx_exports(root)
     try:
-        assert_lock_ownership_for_path(ctx_dir)
-        ctx_dir.mkdir(parents=True, exist_ok=True)
+        fenced_mkdir(ctx_dir, parents=True, exist_ok=True)
         for filename, content in rendered:
             write_text_atomic(ctx_dir / filename, content)
     except LockSupersededError:
@@ -610,7 +679,7 @@ def _install_hooks(root: Path) -> list[str]:
     """
     assert_lock_ownership_for_path(root)
     hooks_dir = _resolve_hooks_dir(root)
-    hooks_dir.mkdir(parents=True, exist_ok=True)
+    fenced_mkdir(hooks_dir, parents=True, exist_ok=True, fence_path=root)
     installed = []
     hook_block = _generate_hook_script(root)
 
@@ -622,21 +691,27 @@ def _install_hooks(root: Path) -> list[str]:
             existing = hook_path.read_text(encoding="utf-8")
             if CTX_HOOK_START in existing:
                 # Update existing ctx block in place
-                _update_ctx_block(hook_path, existing, hook_block, mode=prior_mode)
+                _update_ctx_block(hook_path, existing, hook_block, mode=prior_mode, fence_path=root)
             else:
                 # Chain: append ctx block to existing hook
-                _chain_hook(hook_path, existing, hook_block, mode=prior_mode)
+                _chain_hook(hook_path, existing, hook_block, mode=prior_mode, fence_path=root)
         else:
-            # Create new hook file
+            # Create new hook file with executable mode applied before atomic os.replace
             content = "#!/bin/sh\n" + hook_block + "\n"
-            write_text_atomic(hook_path, content)
-            _make_executable(hook_path)
+            _write_bytes_atomic(hook_path, content.encode("utf-8"), mode=0o755, fence_path=root)
         installed.append(hook_name)
 
     return installed
 
 
-def _update_ctx_block(hook_path: Path, existing: str, new_block: str, *, mode: int | None = None) -> None:
+def _update_ctx_block(
+    hook_path: Path,
+    existing: str,
+    new_block: str,
+    *,
+    mode: int | None = None,
+    fence_path: Path | None = None,
+) -> None:
     """Replace the ctx block in an existing hook file."""
     start = existing.index(CTX_HOOK_START)
     end = existing.index(CTX_HOOK_END) + len(CTX_HOOK_END)
@@ -644,18 +719,28 @@ def _update_ctx_block(hook_path: Path, existing: str, new_block: str, *, mode: i
     if end < len(existing) and existing[end] == "\n":
         end += 1
     updated = existing[:start] + new_block + "\n" + existing[end:]
-    write_text_atomic(hook_path, updated)
-    if os.name != "nt":
-        hook_path.chmod((mode if mode is not None else hook_path.stat().st_mode) | 0o111)
+    target_mode = (mode if mode is not None else 0o755) | 0o111
+    _write_bytes_atomic(hook_path, updated.encode("utf-8"), mode=target_mode, fence_path=fence_path)
 
 
-def _chain_hook(hook_path: Path, existing: str, hook_block: str, *, mode: int | None = None) -> None:
+def _chain_hook(
+    hook_path: Path,
+    existing: str,
+    hook_block: str,
+    *,
+    mode: int | None = None,
+    fence_path: Path | None = None,
+) -> None:
     """Append ctx block to an existing non-ctx hook."""
     if not existing.endswith("\n"):
         existing += "\n"
-    write_text_atomic(hook_path, existing + hook_block + "\n")
-    if os.name != "nt":
-        hook_path.chmod((mode if mode is not None else hook_path.stat().st_mode) | 0o111)
+    target_mode = (mode if mode is not None else 0o755) | 0o111
+    _write_bytes_atomic(
+        hook_path,
+        (existing + hook_block + "\n").encode("utf-8"),
+        mode=target_mode,
+        fence_path=fence_path,
+    )
 
 
 def _remove_hooks(root: Path) -> list[str]:
@@ -686,12 +771,15 @@ def _remove_hooks(root: Path) -> list[str]:
 
         if not remaining or remaining == "#!/bin/sh":
             # Hook was ctx-only, delete the file
-            hook_path.unlink()
+            fenced_unlink(hook_path, missing_ok=True, fence_path=root)
         else:
             # Preserve non-ctx content
-            write_text_atomic(hook_path, remaining + "\n")
-            if os.name != "nt":
-                hook_path.chmod(prior_mode | 0o111)
+            _write_bytes_atomic(
+                hook_path,
+                (remaining + "\n").encode("utf-8"),
+                mode=(prior_mode | 0o111),
+                fence_path=root,
+            )
 
         removed.append(hook_name)
 
@@ -701,7 +789,8 @@ def _remove_hooks(root: Path) -> list[str]:
 def _make_executable(path: Path) -> None:
     """Make a file executable (no-op on Windows, git handles it)."""
     if os.name != "nt":
-        path.chmod(path.stat().st_mode | 0o111)
+        with lock_publication_fence_for_path(path):
+            path.chmod(path.stat().st_mode | 0o111)
 
 
 def _add_to_gitignore(root: Path, entry: str) -> None:
@@ -734,23 +823,50 @@ def _remove_from_gitignore(root: Path, entry: str) -> None:
 
 
 def _rmtree(path: Path) -> None:
-    """Remove a directory tree. Handles read-only files on Windows."""
+    """Remove a directory tree while holding the kernel publication fence."""
     import shutil
-
-    assert_lock_ownership_for_path(path)
 
     def _on_error(func, fpath, exc_info):
         os.chmod(fpath, 0o777)
         func(fpath)
 
-    shutil.rmtree(path, onerror=_on_error)
+    with lock_publication_fence_for_path(path):
+        if path.exists():
+            shutil.rmtree(path, onerror=_on_error)
 
 
 # ── PID debounce ────────────────────────────────────────────────────
 
 HOOK_GUARD_FILE = ".ctx-cache/.hook.guard"
-_HELD_HOOK_FDS: dict[Path, tuple[int, bool]] = {}
+_HELD_HOOK_FDS: dict[Path, tuple[int, bool, bool]] = {}
 _HELD_HOOK_FDS_LOCK = threading.Lock()
+
+
+def _has_active_local_hook(root: Path) -> bool:
+    """Return True if an active run_hook() invocation in this process holds the hook guard."""
+    pid_path = root.resolve() / PID_FILE
+    with _HELD_HOOK_FDS_LOCK:
+        entry = _HELD_HOOK_FDS.get(pid_path)
+        return bool(entry is not None and entry[2])
+
+
+def _release_inactive_local_pid(root: Path) -> None:
+    """Release only non-active direct unit-test _acquire_pid() descriptors in this process."""
+    pid_path = root.resolve() / PID_FILE
+    with _HELD_HOOK_FDS_LOCK:
+        entry = _HELD_HOOK_FDS.get(pid_path)
+        if entry is None or entry[2]:
+            return
+        _HELD_HOOK_FDS.pop(pid_path, None)
+    os_fd, created_ctx_dir, _ = entry
+    try:
+        pid_path.unlink(missing_ok=True)
+        if created_ctx_dir and pid_path.parent.is_dir() and not any(pid_path.parent.iterdir()):
+            pid_path.parent.rmdir()
+    except OSError:
+        pass
+    finally:
+        release_os_lock(os_fd)
 
 
 def _acquire_hook_guard_for_teardown(root: Path, *, timeout_seconds: float = 2.0) -> int | None:
@@ -758,15 +874,18 @@ def _acquire_hook_guard_for_teardown(root: Path, *, timeout_seconds: float = 2.0
     guard_path = root.resolve() / HOOK_GUARD_FILE
     deadline = _time.monotonic() + max(0.0, timeout_seconds)
     while True:
-        os_fd = try_acquire_os_lock(guard_path)
-        if os_fd is not None:
-            return os_fd
+        if not _has_active_local_hook(root):
+            os_fd = try_acquire_os_lock(guard_path)
+            if os_fd is not None:
+                if not _has_active_local_hook(root):
+                    return os_fd
+                release_os_lock(os_fd)
         if _time.monotonic() >= deadline:
             return None
         _time.sleep(0.02)
 
 
-def _acquire_pid(root: Path) -> bool:
+def _acquire_pid(root: Path, *, _active_hook: bool = False) -> bool:
     """Acquire exclusive hook execution ownership backed by an OS kernel lock on .ctx-cache/.hook.guard."""
     resolved_root = root.resolve()
     pid_path = resolved_root / PID_FILE
@@ -777,6 +896,10 @@ def _acquire_pid(root: Path) -> bool:
         return False
 
     try:
+        if _active_hook and not (resolved_root / CTX_DIR / METADATA_FILE).is_file():
+            release_os_lock(os_fd)
+            return False
+
         if pid_path.is_file():
             try:
                 stored_pid = int(pid_path.read_text(encoding="utf-8").strip())
@@ -790,7 +913,7 @@ def _acquire_pid(root: Path) -> bool:
         write_text_atomic(pid_path, str(os.getpid()))
         with _HELD_HOOK_FDS_LOCK:
             prev_entry = _HELD_HOOK_FDS.pop(pid_path, None)
-            _HELD_HOOK_FDS[pid_path] = (os_fd, created_ctx_dir)
+            _HELD_HOOK_FDS[pid_path] = (os_fd, created_ctx_dir, _active_hook)
         if prev_entry is not None:
             release_os_lock(prev_entry[0])
         return True
@@ -848,7 +971,9 @@ def _pid_alive(pid: int) -> bool:
 # ── Hook telemetry ──────────────────────────────────────────────────
 
 def _append_hook_log(ctx_dir: Path, entry: dict) -> None:
-    """Append an entry to hook_log.json with bounded retention."""
+    """Append an entry to hook_log.json with bounded retention while project remains initialized."""
+    if not (ctx_dir / METADATA_FILE).is_file():
+        return
     log_path = ctx_dir / HOOK_LOG_FILE
     try:
         data = load_json_safe(log_path, {"runs": []})
@@ -857,6 +982,8 @@ def _append_hook_log(ctx_dir: Path, entry: dict) -> None:
         data["runs"].append(entry)
         if len(data["runs"]) > MAX_HOOK_LOG_ENTRIES:
             data["runs"] = data["runs"][-MAX_HOOK_LOG_ENTRIES:]
+        if not (ctx_dir / METADATA_FILE).is_file():
+            return
         save_json_atomic(log_path, data)
     except Exception as exc:
         # Never let telemetry failure crash the hook

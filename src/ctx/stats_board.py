@@ -82,17 +82,16 @@ def load_json_safe(path: Path, default: dict) -> dict:
 
 
 def save_json_atomic(path: Path, data: dict) -> None:
-    from ctx.lock import assert_lock_ownership_for_path
+    from ctx.lock import assert_lock_ownership_for_path, fenced_mkdir, fenced_replace
 
     assert_lock_ownership_for_path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    fenced_mkdir(path.parent, parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        assert_lock_ownership_for_path(path)
-        os.replace(tmp, path)
-    except Exception:
+        fenced_replace(tmp, path)
+    except BaseException:
         try:
             os.unlink(tmp)
         except OSError:
@@ -100,19 +99,20 @@ def save_json_atomic(path: Path, data: dict) -> None:
         raise
 
 
-def write_text_atomic(path: Path, content: str) -> None:
-    """Write UTF-8 text atomically via a same-directory temp file and os.replace."""
-    from ctx.lock import assert_lock_ownership_for_path
+def write_text_atomic(path: Path, content: str, *, mode: int | None = None) -> None:
+    """Write UTF-8 text atomically via a same-directory temp file and kernel-fenced os.replace."""
+    from ctx.lock import assert_lock_ownership_for_path, fenced_mkdir, fenced_replace
 
     assert_lock_ownership_for_path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    fenced_mkdir(path.parent, parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.tmp-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
-        assert_lock_ownership_for_path(path)
-        os.replace(tmp, path)
-    except Exception:
+        if mode is not None and os.name != "nt":
+            os.chmod(tmp, mode)
+        fenced_replace(tmp, path)
+    except BaseException:
         try:
             os.unlink(tmp)
         except OSError:
