@@ -329,21 +329,15 @@ def resolve_project_anchor(target_path: Path) -> Path:
         home_dir = None
 
     for directory in candidates:
-        if directory.name in {".tmp", "test-work"}:
-            break
         if (directory / ".git").exists() or (directory / ".ctx").is_dir():
             return directory
 
     for directory in candidates:
-        if directory.name in {".tmp", "test-work"}:
-            break
         if directory != home_dir and (directory / ".ctxconfig").is_file():
             return directory
 
     anchor = start_dir
     for directory in candidates[1:]:
-        if directory.name in {".tmp", "test-work"}:
-            break
         if (directory / "CONTEXT.md").is_file():
             anchor = directory
         else:

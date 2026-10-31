@@ -402,11 +402,70 @@ def _classify_boundary_doc(rel_posix: str) -> str | None:
     return None
 
 
-def _detect_config_entrypoints(root: Path, effective_exts: set[str] | None = None) -> list[str]:
-    entrypoints: list[str] = []
+def resolve_cli_entrypoint_target(root: Path, ep_target: str) -> str | None:
+    """Resolve a `[project.scripts]` `module.path:callable` target to a repo-relative file path if present."""
+    module_name = ep_target.split(":", 1)[0].strip()
+    if not module_name:
+        return None
+    mod_rel = module_name.replace(".", "/")
+    resolved_root = root.resolve()
+    for rel_candidate in (
+        f"src/{mod_rel}.py",
+        f"src/{mod_rel}/__init__.py",
+        f"{mod_rel}.py",
+        f"{mod_rel}/__init__.py",
+    ):
+        cand = (resolved_root / rel_candidate).resolve()
+        if cand.is_file() and cand.is_relative_to(resolved_root):
+            return cand.relative_to(resolved_root).as_posix()
+    return None
 
-    pyproject = root / "pyproject.toml"
-    if pyproject.is_file() and file_matches_extensions(pyproject, effective_exts):
+
+def _is_valid_config_target_file(
+    root: Path,
+    raw_target: str,
+    effective_exts: set[str] | None,
+    spec: object | None,
+    max_depth: int | None,
+) -> bool:
+    cleaned = raw_target.strip().lstrip("./")
+    if not cleaned:
+        return False
+    resolved_root = root.resolve()
+    target_path = (resolved_root / cleaned).resolve()
+    if not (target_path.is_file() and target_path.is_relative_to(resolved_root)):
+        return False
+    rel_parts = target_path.relative_to(resolved_root).parts
+    if any(
+        part.lower() in _NON_OPERATIONAL_DIRS or part in _ALWAYS_SKIP_DIRS
+        for part in rel_parts[:-1]
+    ):
+        return False
+    if spec is not None and should_ignore(target_path, spec, resolved_root):
+        return False
+    if not file_matches_extensions(target_path, effective_exts):
+        return False
+    if max_depth is not None and (len(rel_parts) - 1) > max_depth:
+        return False
+    return True
+
+
+def _detect_config_entrypoints(
+    root: Path,
+    effective_exts: set[str] | None = None,
+    *,
+    spec: object | None = None,
+    max_depth: int | None = None,
+) -> list[str]:
+    entrypoints: list[str] = []
+    resolved_root = root.resolve()
+
+    pyproject = resolved_root / "pyproject.toml"
+    if (
+        pyproject.is_file()
+        and file_matches_extensions(pyproject, effective_exts)
+        and not (spec is not None and should_ignore(pyproject, spec, resolved_root))
+    ):
         try:
             text = pyproject.read_text(encoding="utf-8")
             match = _PYPROJECT_SCRIPT_SECTION_RE.search(text)
@@ -419,33 +478,53 @@ def _detect_config_entrypoints(root: Path, effective_exts: set[str] | None = Non
                     if "=" in stripped and not stripped.startswith("#"):
                         k, v = stripped.split("=", 1)
                         cleaned_val = v.strip().strip("\"'")
+                        module_name = cleaned_val.split(":", 1)[0].strip()
+                        if any(
+                            seg.lower() in _NON_OPERATIONAL_DIRS
+                            for seg in module_name.split(".")
+                            if seg
+                        ):
+                            continue
+                        resolved_cli_rel = resolve_cli_entrypoint_target(resolved_root, cleaned_val)
+                        if resolved_cli_rel is not None and not _is_valid_config_target_file(
+                            resolved_root, resolved_cli_rel, effective_exts, spec, max_depth
+                        ):
+                            continue
                         entrypoints.append(f"cli:{k.strip()} -> {cleaned_val}")
         except (OSError, UnicodeDecodeError):
             pass
 
-    pkg_json = root / "package.json"
-    if pkg_json.is_file() and file_matches_extensions(pkg_json, effective_exts):
+    pkg_json = resolved_root / "package.json"
+    if (
+        pkg_json.is_file()
+        and file_matches_extensions(pkg_json, effective_exts)
+        and not (spec is not None and should_ignore(pkg_json, spec, resolved_root))
+    ):
         try:
             pkg = json.loads(pkg_json.read_text(encoding="utf-8"))
             if isinstance(pkg, dict):
                 main_val = pkg.get("main")
                 if isinstance(main_val, str) and main_val.strip():
                     target = main_val.strip()
-                    target_path = root / target.lstrip("./")
-                    if target_path.is_file() and file_matches_extensions(target_path, effective_exts):
+                    if _is_valid_config_target_file(
+                        resolved_root, target, effective_exts, spec, max_depth
+                    ):
                         entrypoints.append(f"npm:main -> {target}")
                 bin_val = pkg.get("bin")
                 if isinstance(bin_val, str) and bin_val.strip():
                     target = bin_val.strip()
-                    target_path = root / target.lstrip("./")
-                    if target_path.is_file() and file_matches_extensions(target_path, effective_exts):
+                    if _is_valid_config_target_file(
+                        resolved_root, target, effective_exts, spec, max_depth
+                    ):
                         entrypoints.append(f"npm:bin -> {target}")
                 elif isinstance(bin_val, dict):
                     for k, v in sorted(bin_val.items()):
-                        if isinstance(v, str):
-                            target_path = root / v.lstrip("./")
-                            if target_path.is_file() and file_matches_extensions(target_path, effective_exts):
-                                entrypoints.append(f"npm:bin:{k} -> {v}")
+                        if isinstance(v, str) and v.strip():
+                            target = v.strip()
+                            if _is_valid_config_target_file(
+                                resolved_root, target, effective_exts, spec, max_depth
+                            ):
+                                entrypoints.append(f"npm:bin:{k} -> {target}")
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             pass
 
@@ -624,7 +703,9 @@ def extract_skeleton(
     file_skeletons: list[FileSkeleton] = []
     boundary_docs: list[BoundaryDoc] = []
     lang_counts: Counter[str] = Counter()
-    entrypoints: list[str] = _detect_config_entrypoints(root, effective_exts)
+    entrypoints: list[str] = _detect_config_entrypoints(
+        root, effective_exts, spec=spec, max_depth=max_depth
+    )
 
     # Track internal module names for dependency classification
     internal_module_roots, internal_prefixes = _detect_repo_module_prefixes(root)

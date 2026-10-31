@@ -1,8 +1,8 @@
 ---
-generated: '2026-10-31T22:05:27Z'
+generated: '2026-10-31T22:32:10Z'
 generator: ctx/1.1.0
 model: qwen2.5:7b-instruct
-content_hash: sha256:dd7e037d0dd2cf5ff602f2a0ccb2082c18446479c178a461ada0682f3a89370b
+content_hash: sha256:eedace96d90bd942c61ab160ab81fc1f324938ffa0ac7284a668bac994335668
 files: 0
 dirs: 1
 tokens_total: 0
@@ -15,7 +15,7 @@ Unified API and CLI entry point for managing and validating `CONTEXT.md` files a
 - None
 
 ## Subdirectories
-- **ctx/** — Unified API and CLI entry point for managing and validating `CONTEXT.md` files across project directories.
+- **ctx/** — Core Python package implementing manifest generation, deterministic structural synthesis, CLI, MCP server, and consumer SDK.
 
 ## Notes
 - This directory serves as the central hub for interacting with `CONTEXT.md` files, providing a unified interface for various operations.

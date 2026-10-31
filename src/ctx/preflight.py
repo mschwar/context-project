@@ -111,11 +111,13 @@ def _infer_provider_from_base_url(base_url: str) -> str:
 
 
 def _resolve_explicit_provider(target: Path) -> tuple[str | None, str | None]:
-    """Check CTX_PROVIDER, .ctxconfig, or CTX_BASE_URL before falling back to port/env detection."""
+    """Check explicit provider first (CTX_PROVIDER > .ctxconfig), then effective base_url (CTX_BASE_URL > .ctxconfig)."""
     env_provider = os.getenv("CTX_PROVIDER", "").strip()
     if env_provider:
         return env_provider.lower(), "via CTX_PROVIDER"
 
+    cfg_base_url = ""
+    cfg_base_source: Path | None = None
     start = target.resolve() if target.exists() else target
     if not start.is_dir():
         start = start.parent
@@ -132,14 +134,15 @@ def _resolve_explicit_provider(target: Path) -> tuple[str | None, str | None]:
             raw_provider = str(data.get("provider") or "").strip()
             if raw_provider:
                 return raw_provider.lower(), f"via {cfg_path}"
-            raw_base_url = str(data.get("base_url") or "").strip()
-            if raw_base_url:
-                return _infer_provider_from_base_url(raw_base_url), f"via base_url in {cfg_path}"
+            cfg_base_url = str(data.get("base_url") or "").strip()
+            cfg_base_source = cfg_path
         break
 
     env_base_url = os.getenv("CTX_BASE_URL", "").strip()
     if env_base_url:
         return _infer_provider_from_base_url(env_base_url), "via CTX_BASE_URL"
+    if cfg_base_url:
+        return _infer_provider_from_base_url(cfg_base_url), f"via base_url in {cfg_base_source}"
 
     return None, None
 

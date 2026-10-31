@@ -933,11 +933,20 @@ def test_caching_client_saves_summaries_to_disk(tmp_path) -> None:
 
 def test_caching_client_loads_summaries_from_disk(tmp_path) -> None:
     import json, hashlib
+    from ctx.llm import DEFAULT_PROMPT_TEMPLATES
     cache_file = tmp_path / "cache.json"
     file_dict = {"name": "a.py", "content": "hello"}
-    # Key format: sha256(model_bytes + b":" + file_json). _CountingClient has no
-    # model attribute so CachingLLMClient.model returns "" → prefix is b":".
-    key = hashlib.sha256(b":" + json.dumps(file_dict, sort_keys=True).encode()).hexdigest()
+    # Key format: sha256(model_bytes + b":" + file_json + b":prompts:" + effective_prompts_json).
+    effective_prompts = {
+        k: DEFAULT_PROMPT_TEMPLATES[k]
+        for k in ("file_summary", "file_summary_system", "single_file_summary", "single_file_system")
+    }
+    key = hashlib.sha256(
+        b":"
+        + json.dumps(file_dict, sort_keys=True).encode()
+        + b":prompts:"
+        + json.dumps(effective_prompts, sort_keys=True).encode()
+    ).hexdigest()
     cache_file.write_text(json.dumps({key: "preloaded summary"}), encoding="utf-8")
 
     inner = _CountingClient()

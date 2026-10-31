@@ -17,6 +17,7 @@ import json
 import logging
 import threading
 import time
+from collections import Counter
 from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
@@ -822,59 +823,40 @@ def _tokens_sidecar_path(cache_path: Path) -> Path:
     return cache_path.with_name(f"{cache_path.stem}.tokens.json")
 
 
-def _apportion_exact(total: int, weights: list[int]) -> list[int]:
-    """Apportion *total* across *weights* using largest-remainder so sum(shares) == total."""
-    if total <= 0 or not weights:
-        return [0] * len(weights)
-    weight_sum = sum(weights)
-    if weight_sum <= 0:
-        weights = [1] * len(weights)
-        weight_sum = len(weights)
-    raw = [(total * w) / weight_sum for w in weights]
-    floors = [int(val) for val in raw]
-    remainder = total - sum(floors)
-    if remainder > 0:
-        order = sorted(range(len(weights)), key=lambda idx: (raw[idx] - floors[idx], -idx), reverse=True)
-        for idx in order[:remainder]:
-            floors[idx] += 1
-    return floors
-
-
-def _attribute_batch_tokens(
-    fetched_files: list[dict],
+def _extract_exact_token_spans(
+    keys_for_fetched: list[str],
     results: list[LLMResult],
-) -> list[tuple[int, int]]:
-    """Return exact (input_tokens, output_tokens) attribution for each fetched file."""
+) -> tuple[dict[str, tuple[int, int]], dict[tuple[str, ...], tuple[int, int]]]:
+    """Extract strictly exact measured token counts for single-file and full-batch spans.
+
+    Individual-file token usage is recorded only when a provider call measured a single
+    file (`span_len == 1`). Multi-file batch calls (`span_len > 1`) are recorded on the
+    exact batch key tuple so full-batch cache hits report exact avoided usage without
+    fabricating character-length estimates on partial batch hits.
+    """
     n = len(results)
     if n == 0:
-        return []
+        return {}, {}
 
-    non_zero_indices = [idx for idx, r in enumerate(results) if (r.input_tokens + r.output_tokens) > 0]
+    non_zero_indices = [
+        idx for idx, r in enumerate(results) if (r.input_tokens + r.output_tokens) > 0
+    ]
     if not non_zero_indices:
-        return [(0, 0)] * n
+        return {}, {}
 
-    attributed: list[tuple[int, int]] = [(0, 0)] * n
+    single_tokens: dict[str, tuple[int, int]] = {}
+    batch_tokens: dict[tuple[str, ...], tuple[int, int]] = {}
     for pos, start_idx in enumerate(non_zero_indices):
         end_idx = non_zero_indices[pos + 1] if (pos + 1) < len(non_zero_indices) else n
         span_len = end_idx - start_idx
         span_in = results[start_idx].input_tokens
         span_out = results[start_idx].output_tokens
         if span_len == 1:
-            attributed[start_idx] = (span_in, span_out)
-            continue
-        in_weights = [
-            max(1, len(json.dumps(fetched_files[idx], sort_keys=True)))
-            for idx in range(start_idx, end_idx)
-        ]
-        out_weights = [
-            max(1, len(results[idx].text))
-            for idx in range(start_idx, end_idx)
-        ]
-        in_shares = _apportion_exact(span_in, in_weights)
-        out_shares = _apportion_exact(span_out, out_weights)
-        for offset in range(span_len):
-            attributed[start_idx + offset] = (in_shares[offset], out_shares[offset])
-    return attributed
+            single_tokens[keys_for_fetched[start_idx]] = (span_in, span_out)
+        else:
+            batch_key_tuple = tuple(keys_for_fetched[start_idx:end_idx])
+            batch_tokens[batch_key_tuple] = (span_in, span_out)
+    return single_tokens, batch_tokens
 
 
 class CachingLLMClient:
@@ -882,20 +864,21 @@ class CachingLLMClient:
 
     Avoids redundant LLM calls when the same file or directory content appears more
     than once within a generation run or across runs. The in-memory cache uses Futures
-    for stampede prevention. When cache_path is provided, summaries and token metadata
-    are persisted to disk so they survive process restarts. Thread-safe.
+    for stampede prevention. When cache_path is provided, summaries and exact token
+    metadata are persisted to disk so they survive process restarts. Thread-safe.
     """
 
     def __init__(self, client: LLMClient, cache_path: Optional[Path] = None, max_cache_entries: int = 10_000) -> None:
         self._client = client
-        # Maps content hash → Future[tuple[str, int, int]] ((text, in_tokens, out_tokens)).
-        self._cache: dict[str, Future[tuple[str, int, int]]] = {}
+        # Maps content hash → Future[str].
+        self._cache: dict[str, Future[str]] = {}
         self._lock = threading.Lock()
         self._cache_path = cache_path
         self._max_cache_entries = max_cache_entries
         self._disk_lock = threading.Lock()
         self._disk_cache: dict[str, str] = {}
         self._token_counts: dict[str, tuple[int, int]] = {}
+        self._batch_tokens: dict[tuple[str, ...], tuple[int, int]] = {}
         self.cache_hits: int = 0
         self.cache_misses: int = 0
         self.tokens_saved: int = 0
@@ -919,6 +902,24 @@ class CachingLLMClient:
                         for k, v in parsed_tokens.items():
                             if not isinstance(k, str):
                                 continue
+                            if k == "__batches__" and isinstance(v, list):
+                                for item in v:
+                                    if not isinstance(item, dict):
+                                        continue
+                                    raw_keys = item.get("keys")
+                                    if (
+                                        isinstance(raw_keys, list)
+                                        and len(raw_keys) > 1
+                                        and all(isinstance(rk, str) for rk in raw_keys)
+                                        and all(rk in self._disk_cache for rk in raw_keys)
+                                    ):
+                                        in_t = int(item.get("in", 0) or 0)
+                                        out_t = int(item.get("out", 0) or 0)
+                                        if (in_t + out_t) > 0:
+                                            self._batch_tokens[tuple(raw_keys)] = (in_t, out_t)
+                                continue
+                            if k not in self._disk_cache:
+                                continue
                             if isinstance(v, dict):
                                 in_t = int(v.get("in", 0) or 0)
                                 out_t = int(v.get("out", 0) or 0)
@@ -929,48 +930,62 @@ class CachingLLMClient:
                     pass
             with self._lock:
                 for key, summary in self._disk_cache.items():
-                    in_t, out_t = self._token_counts.get(key, (0, 0))
-                    fut: Future[tuple[str, int, int]] = Future()
-                    fut.set_result((summary, in_t, out_t))
+                    fut: Future[str] = Future()
+                    fut.set_result(summary)
                     self._cache[key] = fut
 
-    def _custom_prompts_for(self, keys_subset: tuple[str, ...]) -> dict[str, str]:
+    def _effective_prompts_for(self, keys_subset: tuple[str, ...]) -> dict[str, str]:
         raw = getattr(self._client, "prompt_templates", None)
-        if not isinstance(raw, dict) or not raw:
-            return {}
+        overrides = raw if isinstance(raw, dict) else {}
         return {
-            k: str(v)
-            for k, v in raw.items()
-            if k in keys_subset and v is not None and str(v) != DEFAULT_PROMPT_TEMPLATES.get(k)
+            k: str(overrides[k])
+            if (k in overrides and overrides[k] is not None)
+            else DEFAULT_PROMPT_TEMPLATES[k]
+            for k in keys_subset
+            if k in DEFAULT_PROMPT_TEMPLATES
         }
 
     def _write_batch_to_disk(
         self,
         new_entries: dict[str, str],
         new_tokens: Optional[dict[str, tuple[int, int]]] = None,
+        new_batches: Optional[dict[tuple[str, ...], tuple[int, int]]] = None,
     ) -> None:
-        """Write multiple new cache entries (and optional token metadata) to disk."""
+        """Write multiple new cache entries (and exact token metadata) to disk."""
         if self._cache_path is None or not new_entries:
             return
         with self._disk_lock:
             self._disk_cache.update(new_entries)
             if new_tokens:
                 self._token_counts.update(new_tokens)
+            if new_batches:
+                self._batch_tokens.update(new_batches)
             while len(self._disk_cache) > self._max_cache_entries:
                 evicted_key = next(iter(self._disk_cache))
                 del self._disk_cache[evicted_key]
                 self._token_counts.pop(evicted_key, None)
+                if self._batch_tokens:
+                    self._batch_tokens = {
+                        bk: bv for bk, bv in self._batch_tokens.items() if evicted_key not in bk
+                    }
             try:
                 self._cache_path.parent.mkdir(parents=True, exist_ok=True)
                 self._cache_path.write_text(
                     json.dumps(self._disk_cache, indent=2),
                     encoding="utf-8",
                 )
-                if self._token_counts:
-                    serialized_tokens = {
+                if self._token_counts or self._batch_tokens:
+                    serialized_tokens: dict[str, object] = {
                         k: {"in": in_t, "out": out_t}
                         for k, (in_t, out_t) in self._token_counts.items()
+                        if k in self._disk_cache
                     }
+                    if self._batch_tokens:
+                        serialized_tokens["__batches__"] = [
+                            {"keys": list(bk), "in": in_t, "out": out_t}
+                            for bk, (in_t, out_t) in self._batch_tokens.items()
+                            if all(k in self._disk_cache for k in bk)
+                        ]
                     _tokens_sidecar_path(self._cache_path).write_text(
                         json.dumps(serialized_tokens, indent=2, sort_keys=True),
                         encoding="utf-8",
@@ -990,6 +1005,35 @@ class CachingLLMClient:
     def hit_miss_counts(self) -> tuple[int, int]:
         return self.cache_hits, self.cache_misses
 
+    def _compute_exact_file_hit_savings(self, hit_keys: list[str]) -> tuple[int, int]:
+        """Compute strictly exact saved (input_tokens, output_tokens) across cache-hit keys."""
+        if not hit_keys:
+            return 0, 0
+        remaining = Counter(hit_keys)
+        saved_in = 0
+        saved_out = 0
+        for key in list(remaining.keys()):
+            if key in self._token_counts:
+                count = remaining.pop(key)
+                in_t, out_t = self._token_counts[key]
+                saved_in += in_t * count
+                saved_out += out_t * count
+        if remaining and self._batch_tokens:
+            for batch_keys, (b_in, b_out) in self._batch_tokens.items():
+                needed = Counter(batch_keys)
+                while all(remaining[bk] >= req for bk, req in needed.items()):
+                    saved_in += b_in
+                    saved_out += b_out
+                    for bk, req in needed.items():
+                        remaining[bk] -= req
+                        if remaining[bk] <= 0:
+                            remaining.pop(bk, None)
+                    if not remaining:
+                        break
+                if not remaining:
+                    break
+        return saved_in, saved_out
+
     def summarize_files(
         self, dir_path: Path, files: list[dict]
     ) -> list[LLMResult]:
@@ -997,14 +1041,10 @@ class CachingLLMClient:
             return []
 
         model_bytes = self.model.encode()
-        custom_file_prompts = self._custom_prompts_for(
+        effective_file_prompts = self._effective_prompts_for(
             ("file_summary", "file_summary_system", "single_file_summary", "single_file_system")
         )
-        prompt_suffix = (
-            b":prompts:" + json.dumps(custom_file_prompts, sort_keys=True).encode()
-            if custom_file_prompts
-            else b""
-        )
+        prompt_suffix = b":prompts:" + json.dumps(effective_file_prompts, sort_keys=True).encode()
         keys = [
             hashlib.sha256(
                 model_bytes + b":" + json.dumps(f, sort_keys=True).encode() + prompt_suffix
@@ -1012,7 +1052,7 @@ class CachingLLMClient:
             for f in files
         ]
 
-        file_futures: list[Future[tuple[str, int, int]]] = []
+        file_futures: list[Future[str]] = []
         to_fetch: list[int] = []
         hit_indices: set[int] = set()
 
@@ -1023,7 +1063,7 @@ class CachingLLMClient:
                     self.cache_hits += 1
                     hit_indices.add(i)
                 else:
-                    fut: Future[tuple[str, int, int]] = Future()
+                    fut: Future[str] = Future()
                     self._cache[keys[i]] = fut
                     file_futures.append(fut)
                     to_fetch.append(i)
@@ -1033,20 +1073,23 @@ class CachingLLMClient:
         if to_fetch:
             try:
                 fetched_files = [files[i] for i in to_fetch]
+                fetched_keys = [keys[i] for i in to_fetch]
                 new_results = self._client.summarize_files(dir_path, fetched_files)
-                attributed_pairs = _attribute_batch_tokens(fetched_files, new_results)
+                single_tokens, batch_tokens = _extract_exact_token_spans(fetched_keys, new_results)
+                if single_tokens or batch_tokens:
+                    with self._lock:
+                        self._token_counts.update(single_tokens)
+                        self._batch_tokens.update(batch_tokens)
                 new_disk_entries: dict[str, str] = {}
-                new_token_entries: dict[str, tuple[int, int]] = {}
-                for i, result, (attr_in, attr_out) in zip(to_fetch, new_results, attributed_pairs):
-                    file_futures[i].set_result((result.text, attr_in, attr_out))
+                for i, result in zip(to_fetch, new_results):
+                    file_futures[i].set_result(result.text)
                     original_results[i] = result
                     new_disk_entries[keys[i]] = result.text
-                    if (attr_in + attr_out) > 0:
-                        new_token_entries[keys[i]] = (attr_in, attr_out)
-                if new_token_entries:
-                    with self._lock:
-                        self._token_counts.update(new_token_entries)
-                self._write_batch_to_disk(new_disk_entries, new_token_entries or None)
+                self._write_batch_to_disk(
+                    new_disk_entries,
+                    single_tokens or None,
+                    batch_tokens or None,
+                )
             except Exception as exc:
                 for i in to_fetch:
                     if not file_futures[i].done():
@@ -1054,23 +1097,21 @@ class CachingLLMClient:
                 raise
 
         resolved_outputs: list[LLMResult] = []
-        saved_in_delta = 0
-        saved_out_delta = 0
         for i in range(len(files)):
             if i in original_results:
                 resolved_outputs.append(original_results[i])
             else:
-                text, saved_in, saved_out = file_futures[i].result()
-                if i in hit_indices:
-                    saved_in_delta += saved_in
-                    saved_out_delta += saved_out
+                text = file_futures[i].result()
                 resolved_outputs.append(LLMResult(text=text))
 
-        if saved_in_delta or saved_out_delta:
+        if hit_indices:
+            hit_keys = [keys[i] for i in sorted(hit_indices)]
             with self._lock:
-                self.input_tokens_saved += saved_in_delta
-                self.output_tokens_saved += saved_out_delta
-                self.tokens_saved += saved_in_delta + saved_out_delta
+                saved_in_delta, saved_out_delta = self._compute_exact_file_hit_savings(hit_keys)
+                if saved_in_delta or saved_out_delta:
+                    self.input_tokens_saved += saved_in_delta
+                    self.output_tokens_saved += saved_out_delta
+                    self.tokens_saved += saved_in_delta + saved_out_delta
 
         return resolved_outputs
 
@@ -1093,10 +1134,8 @@ class CachingLLMClient:
                 {"name": s.name, "summary": s.summary}
                 for s in subdir_summaries
             ],
+            "prompts": self._effective_prompts_for(("directory_summary", "directory_summary_system")),
         }
-        custom_dir_prompts = self._custom_prompts_for(("directory_summary", "directory_summary_system"))
-        if custom_dir_prompts:
-            dir_payload["prompts"] = custom_dir_prompts
 
         key = hashlib.sha256(
             self.model.encode() + b":dir:" + json.dumps(dir_payload, sort_keys=True).encode()
@@ -1114,9 +1153,10 @@ class CachingLLMClient:
                 need_fetch = True
 
         if not need_fetch:
-            text, saved_in, saved_out = fut.result()
-            if saved_in or saved_out:
-                with self._lock:
+            text = fut.result()
+            with self._lock:
+                saved_in, saved_out = self._token_counts.get(key, (0, 0))
+                if saved_in or saved_out:
                     self.input_tokens_saved += saved_in
                     self.output_tokens_saved += saved_out
                     self.tokens_saved += saved_in + saved_out
@@ -1128,7 +1168,7 @@ class CachingLLMClient:
             if (in_t + out_t) > 0:
                 with self._lock:
                     self._token_counts[key] = (in_t, out_t)
-            fut.set_result((result.text, in_t, out_t))
+            fut.set_result(result.text)
             self._write_batch_to_disk(
                 {key: result.text},
                 {key: (in_t, out_t)} if (in_t + out_t) > 0 else None,

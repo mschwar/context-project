@@ -36,12 +36,13 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time as _time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ctx import __version__
-from ctx.lock import CtxLock
+from ctx.lock import CtxLock, release_os_lock, try_acquire_os_lock
 from ctx.stats_board import load_json_safe, save_json_atomic, write_text_atomic
 
 logger = logging.getLogger(__name__)
@@ -90,10 +91,6 @@ def init_project(
             f"Already initialized: {ctx_dir} exists. Use --force to reinitialize."
         )
 
-    ctx_dir.mkdir(exist_ok=True)
-    # Write .gitignore entries first so initial hashes include root .gitignore state
-    (ctx_dir / ".gitignore").write_text("*\n", encoding="utf-8")
-    _add_to_gitignore(root, CTX_DIR + "/")
     metadata = _build_metadata(root)
 
     if tier2:
@@ -105,6 +102,9 @@ def init_project(
         )
 
         with CtxLock(root, command="init"):
+            ctx_dir.mkdir(exist_ok=True)
+            (ctx_dir / ".gitignore").write_text("*\n", encoding="utf-8")
+            _add_to_gitignore(root, CTX_DIR + "/")
             skeleton = extract_skeleton(root)
             write_text_atomic(ctx_dir / "CONTEXT-0.md", render_context_0(skeleton))
             write_text_atomic(ctx_dir / "CONTEXT-1.md", render_context_1(skeleton))
@@ -115,20 +115,52 @@ def init_project(
             save_json_atomic(ctx_dir / METADATA_FILE, metadata)
             manifests_refreshed = len(skeleton.subsystems)
     else:
-        # Persist standard mode BEFORE refresh so `ctx init --force` on a Tier 2 repo
-        # transitions cleanly to Tier 1 manifest generation instead of dispatching Tier 2.
-        metadata["mode"] = "standard"
-        save_json_atomic(ctx_dir / METADATA_FILE, metadata)
+        gitignore_path = root / ".gitignore"
+        prior_gitignore = gitignore_path.read_bytes() if gitignore_path.exists() else None
+        finalized = False
 
-        # 3. Generate initial manifests via api.refresh
-        from ctx.api import refresh
-        refresh_result = refresh(root, force=force)
+        def _restore_gitignore() -> None:
+            if prior_gitignore is None:
+                gitignore_path.unlink(missing_ok=True)
+            else:
+                gitignore_path.write_bytes(prior_gitignore)
 
-        # 4. Create .ctx/ export layer + persist final metadata atomically under CtxLock
-        with CtxLock(root, command="init"):
+        def _finalize_standard_ctx() -> None:
+            nonlocal finalized
+            ctx_dir.mkdir(exist_ok=True)
+            (ctx_dir / ".gitignore").write_text("*\n", encoding="utf-8")
+            _add_to_gitignore(root, CTX_DIR + "/")
             _populate_ctx_dir(root, ctx_dir)
+            metadata["mode"] = "standard"
             metadata["last_refresh"] = datetime.now(timezone.utc).isoformat()
             save_json_atomic(ctx_dir / METADATA_FILE, metadata)
+            finalized = True
+
+        # Ensure root .gitignore contains .ctx/ before hashing root CONTEXT.md,
+        # rolling back if Tier 1 generation fails so failed init leaves zero residue.
+        _add_to_gitignore(root, CTX_DIR + "/")
+        from ctx.api import refresh
+
+        try:
+            refresh_result = refresh(
+                root,
+                force=force,
+                _force_tier1=True,
+                _on_locked_success=_finalize_standard_ctx,
+            )
+
+            # Fallback for unit tests that mock ctx.api.refresh without invoking _on_locked_success
+            if not finalized:
+                if refresh_result.errors:
+                    raise InitError(
+                        f"Initial manifest refresh failed: {refresh_result.errors[0]}"
+                    )
+                with CtxLock(root, command="init"):
+                    _finalize_standard_ctx()
+        except Exception:
+            if not finalized:
+                _restore_gitignore()
+            raise
         manifests_refreshed = refresh_result.dirs_processed
 
     # 6. Install git hooks
@@ -165,7 +197,8 @@ def uninit_project(root: Path) -> dict:
     else:
         hooks_removed = _remove_hooks(root)
 
-    # 2. Remove .ctx/ directory
+    # 2. Release any in-process hook lock, then remove .ctx/ directory
+    _release_pid(root)
     _rmtree(ctx_dir)
 
     # 3. Remove .ctx/ from root .gitignore
@@ -250,12 +283,12 @@ class InitError(Exception):
 # ── Internal helpers ────────────────────────────────────────────────
 
 def _populate_ctx_dir(root: Path, ctx_dir: Path) -> None:
-    """Write depth-tiered exports atomically into .ctx/."""
+    """Write depth-tiered Tier 1 exports atomically into .ctx/."""
     from ctx.api import export_context
 
     ctx_dir.mkdir(parents=True, exist_ok=True)
     for filename, depth in EXPORT_TIERS:
-        result = export_context(root, depth=depth)
+        result = export_context(root, depth=depth, _force_tier1=True)
         write_text_atomic(ctx_dir / filename, result.content)
 
 
@@ -490,108 +523,62 @@ def _rmtree(path: Path) -> None:
 
 # ── PID debounce ────────────────────────────────────────────────────
 
-_HOOK_PID_INIT_GRACE_SECONDS = 2.0
-_HOOK_PID_RECLAIM_STALE_SECONDS = 5.0
-
-
-def _try_create_pid_exclusive(pid_path: Path) -> bool:
-    try:
-        fd = os.open(str(pid_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-    except FileExistsError:
-        return False
-    try:
-        os.write(fd, str(os.getpid()).encode("utf-8"))
-    except Exception:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-        pid_path.unlink(missing_ok=True)
-        raise
-    else:
-        os.close(fd)
-    return True
-
-
-def _pid_file_is_active_or_initializing(pid_path: Path) -> bool:
-    """Return True when pid_path belongs to a live PID or was just created (< grace window)."""
-    try:
-        st = pid_path.stat()
-        raw = pid_path.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return False
-    except OSError:
-        return True
-
-    try:
-        stored_pid = int(raw)
-        return _pid_alive(stored_pid)
-    except ValueError:
-        # Empty or partially written PID file: treat as active if recently created!
-        return (_time.time() - st.st_mtime) < _HOOK_PID_INIT_GRACE_SECONDS
+HOOK_GUARD_FILE = ".ctx/.hook.guard"
+_HELD_HOOK_FDS: dict[Path, int] = {}
+_HELD_HOOK_FDS_LOCK = threading.Lock()
 
 
 def _acquire_pid(root: Path) -> bool:
-    """Atomically claim the hook PID file inside .ctx/ without publication or reclaim races."""
-    pid_path = root / PID_FILE
-    reclaim_path = pid_path.parent / "hook.pid.reclaim"
-    try:
-        pid_path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError:
+    """Acquire exclusive hook execution ownership backed by an OS kernel lock on .ctx/.hook.guard."""
+    resolved_root = root.resolve()
+    pid_path = resolved_root / PID_FILE
+    guard_path = resolved_root / HOOK_GUARD_FILE
+
+    os_fd = try_acquire_os_lock(guard_path)
+    if os_fd is None:
         return False
 
     try:
-        if _try_create_pid_exclusive(pid_path):
-            return True
-    except OSError:
-        return False
-
-    if _pid_file_is_active_or_initializing(pid_path):
-        return False
-
-    # Existing PID file is stale (dead PID) or abandoned (> grace window):
-    # serialize reclamation via an exclusive guard file so concurrent hooks debounce cleanly.
-    guard_fd: int | None = None
-    for _ in range(2):
-        try:
-            guard_fd = os.open(str(reclaim_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-            break
-        except FileExistsError:
+        if pid_path.is_file():
             try:
-                if (_time.time() - reclaim_path.stat().st_mtime) > _HOOK_PID_RECLAIM_STALE_SECONDS:
-                    reclaim_path.unlink(missing_ok=True)
-                    continue
-            except OSError:
+                stored_pid = int(pid_path.read_text(encoding="utf-8").strip())
+                if _pid_alive(stored_pid):
+                    release_os_lock(os_fd)
+                    return False
+            except (ValueError, OSError):
                 pass
-            return False
-        except OSError:
-            return False
 
-    if guard_fd is None:
-        return False
-
-    try:
-        os.close(guard_fd)
-        if _pid_file_is_active_or_initializing(pid_path):
-            return False
-        pid_path.unlink(missing_ok=True)
-        return _try_create_pid_exclusive(pid_path)
+        write_text_atomic(pid_path, str(os.getpid()))
+        with _HELD_HOOK_FDS_LOCK:
+            prev_fd = _HELD_HOOK_FDS.pop(pid_path, None)
+            _HELD_HOOK_FDS[pid_path] = os_fd
+        if prev_fd is not None:
+            release_os_lock(prev_fd)
+        return True
     except OSError:
+        release_os_lock(os_fd)
         return False
-    finally:
-        reclaim_path.unlink(missing_ok=True)
 
 
 def _release_pid(root: Path) -> None:
-    """Release the PID file."""
-    pid_path = root / PID_FILE
+    """Release the hook PID file while holding the OS kernel guard lock, then unlock."""
+    resolved_root = root.resolve()
+    pid_path = resolved_root / PID_FILE
+    with _HELD_HOOK_FDS_LOCK:
+        os_fd = _HELD_HOOK_FDS.pop(pid_path, None)
+
     try:
-        if pid_path.exists():
+        if os_fd is not None:
+            pid_path.unlink(missing_ok=True)
+        elif pid_path.exists():
             stored_pid = int(pid_path.read_text(encoding="utf-8").strip())
             if stored_pid == os.getpid():
                 pid_path.unlink(missing_ok=True)
     except (ValueError, OSError):
         pass
+    finally:
+        if os_fd is not None:
+            release_os_lock(os_fd)
 
 
 def _pid_alive(pid: int) -> bool:

@@ -24,13 +24,15 @@ from ctx.ignore import load_ignore_patterns, should_ignore
 from ctx.init import (
     CTX_DIR,
     CTX_HOOK_START,
+    HOOK_GUARD_FILE,
     HOOK_NAMES,
     PID_FILE,
     _acquire_pid,
+    _release_pid,
     init_project,
     uninit_project,
 )
-from ctx.llm import CachingLLMClient, FileSummary, LLMResult, SubdirSummary
+from ctx.llm import CachingLLMClient, DEFAULT_PROMPT_TEMPLATES, FileSummary, LLMResult, SubdirSummary
 from ctx.lock import STALE_TIMEOUT_SECONDS, CtxLock, LockHeldError
 from ctx.manifest import read_manifest
 from ctx.preflight import run_preflight
@@ -113,16 +115,13 @@ def test_ctx_lock_exclusive_acquisition_and_initializing_grace(tmp_path: Path) -
     assert len(winners) == 1
     assert len(failures) == 5
 
-    # Newly created empty lock file (< grace window) must NOT be unlinked as corrupt
-    lock_file = tmp_path / ".ctx-cache" / "lock"
-    lock_file.parent.mkdir(parents=True, exist_ok=True)
-    lock_file.write_text("", encoding="utf-8")
-    with pytest.raises(LockHeldError):
-        CtxLock(tmp_path, command="racer").acquire()
-    assert lock_file.exists()
-    lock_file.unlink()
+    # Persistent kernel guard inode must exist and remain stable across stale reclamation
+    guard_file = tmp_path / ".ctx-cache" / ".lock.guard"
+    assert guard_file.is_file()
+    guard_inode_before = guard_file.stat().st_ino
 
-    # Concurrent stale-lock reclamation also admits at most one winner
+    # Concurrent stale-lock reclamation also admits at most one winner without replacing guard inode
+    lock_file = tmp_path / ".ctx-cache" / "lock"
     lock_file.write_text(
         f"pid={os.getpid()}\ntimestamp={time.time() - STALE_TIMEOUT_SECONDS - 50}\ncommand=old\n",
         encoding="utf-8",
@@ -136,6 +135,8 @@ def test_ctx_lock_exclusive_acquisition_and_initializing_grace(tmp_path: Path) -
         barrier2.wait()
         try:
             lock.acquire()
+            # Payload on disk must always be complete and parseable while held
+            assert lock._read_lock() is not None
             with guard:
                 winners.append(idx)
             time.sleep(0.08)
@@ -152,6 +153,7 @@ def test_ctx_lock_exclusive_acquisition_and_initializing_grace(tmp_path: Path) -
 
     assert len(winners) == 1
     assert len(failures) == 3
+    assert guard_file.stat().st_ino == guard_inode_before
 
 
 def test_ctx_lock_multiprocess_exclusivity(tmp_path: Path) -> None:
@@ -201,19 +203,12 @@ def test_ctx_lock_multiprocess_exclusivity(tmp_path: Path) -> None:
     assert outputs.count("HELD") == 2
 
 
-def test_hook_acquire_pid_protects_initializing_empty_file_and_concurrent_reclaim(tmp_path: Path) -> None:
-    """An empty newly created .ctx/hook.pid must not be unlinked by a racing hook process."""
+def test_hook_acquire_pid_kernel_lock_exclusivity_across_threads_and_processes(tmp_path: Path) -> None:
+    """Concurrent hook contenders (threads and subprocesses) must lock persistent .ctx/.hook.guard exclusively."""
     pid_path = tmp_path / PID_FILE
     pid_path.parent.mkdir(parents=True, exist_ok=True)
-    pid_path.write_text("", encoding="utf-8")
-
-    # Freshly created empty PID file (< 2s) is treated as initializing/held
-    assert _acquire_pid(tmp_path) is False
-    assert pid_path.exists()
-
-    # Backdate mtime past grace window to simulate an abandoned corrupt PID file
-    old_ts = time.time() - 10.0
-    os.utime(pid_path, (old_ts, old_ts))
+    # Pre-seed a corrupt/stale PID file to exercise reclamation under contention
+    pid_path.write_text("not-a-pid", encoding="utf-8")
 
     barrier = threading.Barrier(4)
     results: list[bool] = []
@@ -233,6 +228,57 @@ def test_hook_acquire_pid_protects_initializing_empty_file_and_concurrent_reclai
 
     assert results.count(True) == 1
     assert results.count(False) == 3
+    guard_path = tmp_path / HOOK_GUARD_FILE
+    assert guard_path.is_file()
+    guard_inode = guard_path.stat().st_ino
+    assert int(pid_path.read_text(encoding="utf-8").strip()) == os.getpid()
+    _release_pid(tmp_path)
+    assert not pid_path.exists()
+    assert guard_path.stat().st_ino == guard_inode
+
+    # Multi-process race over a stale PID file must also admit exactly 1 winner
+    pid_path.write_text("99999999", encoding="utf-8")
+    src_dir = str(Path(__file__).resolve().parents[1] / "src")
+    env = dict(os.environ, PYTHONPATH=src_dir)
+    script = (
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "from ctx.init import _acquire_pid, _release_pid\n"
+        "root, ready, go = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])\n"
+        "ready.write_text('1')\n"
+        "while not go.exists():\n"
+        "    time.sleep(0.005)\n"
+        "if _acquire_pid(root):\n"
+        "    print('WON')\n"
+        "    time.sleep(0.15)\n"
+        "    _release_pid(root)\n"
+        "else:\n"
+        "    print('SKIPPED')\n"
+    )
+    go_flag = tmp_path / "hook_go"
+    procs = []
+    for idx in range(3):
+        ready_flag = tmp_path / f"hook_ready_{idx}"
+        procs.append(
+            (
+                ready_flag,
+                subprocess.Popen(
+                    [sys.executable, "-c", script, str(tmp_path), str(ready_flag), str(go_flag)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=env,
+                ),
+            )
+        )
+    deadline = time.time() + 5.0
+    while any(not r.exists() for r, _ in procs) and time.time() < deadline:
+        time.sleep(0.01)
+    go_flag.write_text("1", encoding="utf-8")
+    outputs = [p.communicate(timeout=10)[0].strip() for _, p in procs]
+    assert outputs.count("WON") == 1
+    assert outputs.count("SKIPPED") == 2
+    assert guard_path.stat().st_ino == guard_inode
 
 
 def test_shared_default_worktree_hooks_refresh_active_checkout_and_preserve_on_uninit(tmp_path: Path) -> None:
@@ -648,3 +694,250 @@ def test_nested_and_ancestor_gitignore_sdk_staleness_and_capsule_depth_zero(tmp_
     assert all(b["path"] == "AGENTS.md" for b in cap0.authority_boundaries)
     assert "file:src/cli.py" not in cap0.entrypoints
     assert "001-choice.md" not in cap0.capsule_markdown
+
+
+def test_transactional_tier2_to_tier1_transition_preserves_tier2_on_failure(tmp_path: Path) -> None:
+    """Failed `ctx init --force` on a Tier 2 repo must preserve working Tier 2 mode and exports."""
+    repo = _init_git_repo(tmp_path / "repo")
+    sub = repo / "src"
+    sub.mkdir()
+    (sub / "service.py").write_text("def serve() -> int:\n    return 200\n", encoding="utf-8")
+    init_project(repo, tier2=True)
+
+    meta_before = json.loads((repo / CTX_DIR / "metadata.json").read_text(encoding="utf-8"))
+    c0_before = (repo / CTX_DIR / "CONTEXT-0.md").read_text(encoding="utf-8")
+    assert meta_before["mode"] == "tier2"
+
+    # 1. Runtime/provider failure before generation must not touch metadata.json or exports
+    with patch("ctx.api._build_generation_runtime", side_effect=RuntimeError("provider unreachable")):
+        with pytest.raises(RuntimeError, match="provider unreachable"):
+            init_project(repo, force=True, tier2=False)
+
+    meta_after_conn_fail = json.loads((repo / CTX_DIR / "metadata.json").read_text(encoding="utf-8"))
+    assert meta_after_conn_fail["mode"] == "tier2"
+    assert (repo / CTX_DIR / "CONTEXT-0.md").read_text(encoding="utf-8") == c0_before
+    assert not (repo / "CONTEXT.md").exists()
+    assert CtxProject.load(repo, walk_parents=False).is_stale() is False
+
+    # 2. Partial generation failure (leaf succeeds, root fails) must roll back leaf CONTEXT.md and keep Tier 2
+    class _FailingRootClient(_SimpleFakeClient):
+        def summarize_directory(self, dir_path: Path, file_summaries: list, subdir_summaries: list) -> LLMResult:
+            if dir_path.resolve() == repo.resolve():
+                raise RuntimeError("root LLM summarization failed")
+            return super().summarize_directory(dir_path, file_summaries, subdir_summaries)
+
+    cfg = Config(provider="ollama", model="fake-qa-model", api_key="not-needed", cache_path="")
+    with patch(
+        "ctx.api._build_generation_runtime",
+        return_value=(cfg, load_ignore_patterns(repo), _FailingRootClient()),
+    ):
+        with pytest.raises(RuntimeError, match="root LLM summarization failed"):
+            init_project(repo, force=True, tier2=False)
+
+    meta_after_gen_fail = json.loads((repo / CTX_DIR / "metadata.json").read_text(encoding="utf-8"))
+    assert meta_after_gen_fail["mode"] == "tier2"
+    assert (repo / CTX_DIR / "CONTEXT-0.md").read_text(encoding="utf-8") == c0_before
+    assert not (repo / "CONTEXT.md").exists()
+    assert not (sub / "CONTEXT.md").exists()
+    assert CtxProject.load(repo, walk_parents=False).is_stale() is False
+
+
+def test_preflight_merges_conflicting_ctx_base_url_over_ctxconfig_base_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CTX_BASE_URL pointing to Ollama must override a cloud-proxy base_url in .ctxconfig."""
+    (tmp_path / ".ctxconfig").write_text(
+        "base_url: https://cloud-proxy.example.com/v1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CTX_BASE_URL", "http://127.0.0.1:11434/v1")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    cfg = load_config(tmp_path)
+    assert cfg.provider == "ollama"
+    assert cfg.base_url == "http://127.0.0.1:11434/v1"
+
+    with (
+        patch("ctx.preflight._probe_local_models", return_value=(True, None)),
+        patch("ctx.preflight.probe_model_quality", return_value=(True, None)),
+    ):
+        pf = run_preflight(str(tmp_path))
+
+    assert pf.ready is True
+    assert pf.provider == "ollama"
+
+
+def test_subtree_ignore_honors_wildcard_root_gitignore_and_tier2_subtree_dispatch(
+    tmp_path: Path,
+) -> None:
+    """Wildcard root rules (/src/*/private.txt) must hold on src/pkg, and Tier 2 subtree refresh must stay Tier 2."""
+    repo = _init_git_repo(tmp_path / "repo")
+    (repo / ".gitignore").write_text("/src/*/private.txt\n/src/**/generated/*.py\n", encoding="utf-8")
+    (repo / ".ctxignore").write_text("!/src/*/keep_private.txt\n", encoding="utf-8")
+    pkg = repo / "src" / "pkg"
+    (pkg / "generated").mkdir(parents=True)
+    (pkg / "private.txt").write_text("top secret\n", encoding="utf-8")
+    (pkg / "keep_private.txt").write_text("allowed\n", encoding="utf-8")
+    (pkg / "generated" / "auto.py").write_text("X = 1\n", encoding="utf-8")
+    (pkg / "public.py").write_text("def ok() -> int:\n    return 1\n", encoding="utf-8")
+
+    pkg_spec = load_ignore_patterns(pkg)
+    assert should_ignore(pkg / "private.txt", pkg_spec, pkg) is True
+    assert should_ignore(pkg / "generated" / "auto.py", pkg_spec, pkg) is True
+    assert should_ignore(pkg / "keep_private.txt", pkg_spec, pkg) is False
+    assert should_ignore(pkg / "public.py", pkg_spec, pkg) is False
+
+    # Tier 2 repository: running refresh/check/export on `repo / "src"` must dispatch Tier 2 at `repo`
+    init_project(repo, tier2=True)
+    (pkg / "public.py").write_text(
+        "def ok() -> int:\n    return 1\n\ndef added_via_subtree_refresh() -> None:\n    pass\n",
+        encoding="utf-8",
+    )
+    sub_refresh = api_module.refresh(repo / "src")
+    assert sub_refresh.strategy == "tier2"
+    assert not (repo / "src" / "CONTEXT.md").exists()
+    assert not (pkg / "CONTEXT.md").exists()
+    assert "added_via_subtree_refresh" in (repo / CTX_DIR / "CONTEXT-0.md").read_text(encoding="utf-8")
+
+    sub_check = api_module.check(repo / "src", verify=True)
+    assert sub_check.summary.get("tier2") is True
+    assert sub_check.summary["invalid"] == 0
+
+    sub_export = api_module.export_context(repo / "src", depth=0)
+    assert "added_via_subtree_refresh" in sub_export.content
+
+
+def test_repo_named_test_work_anchors_headings_consistently(tmp_path: Path) -> None:
+    """A real repository named `test-work` must anchor identically for root and subtree commands."""
+    repo = _init_git_repo(tmp_path / "test-work")
+    src_dir = repo / "src"
+    src_dir.mkdir()
+    (src_dir / "worker.py").write_text("def work() -> None:\n    pass\n", encoding="utf-8")
+
+    cfg = Config(provider="ollama", model="fake-qa-model", api_key="not-needed", cache_path="")
+    client = _SimpleFakeClient()
+    generate_tree(repo, cfg, client, load_ignore_patterns(repo))
+
+    src_manifest = read_manifest(src_dir)
+    assert src_manifest is not None and src_manifest.body.startswith("# src\n")
+    assert api_module.check(src_dir, verify=True).summary["invalid"] == 0
+    assert api_module.check(repo, verify=True).summary["invalid"] == 0
+
+
+def test_exact_batch_token_accounting_and_default_prompt_cache_invalidation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Multi-file batch hits credit exact totals only on full-batch hits, and default prompt edits invalidate disk cache."""
+
+    class _BatchProviderClient:
+        model = "gpt-4o-mini"
+        prompt_templates: dict[str, str] = {}
+
+        def __init__(self) -> None:
+            self.dir_calls = 0
+
+        def summarize_files(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
+            # Mimics AnthropicClient/OpenAIClient _build_batch_results: aggregate usage on index 0
+            results = [LLMResult(text=f"Summary {f['name']}.") for f in files]
+            if results:
+                results[0] = LLMResult(
+                    text=results[0].text,
+                    input_tokens=500,
+                    output_tokens=100,
+                )
+            return results
+
+        def summarize_directory(self, dir_path: Path, file_summaries: list, subdir_summaries: list) -> LLMResult:
+            self.dir_calls += 1
+            prompt = DEFAULT_PROMPT_TEMPLATES["directory_summary"][:12]
+            return LLMResult(text=f"# .\n\nDir ({prompt}) #{self.dir_calls}.\n", input_tokens=120, output_tokens=30)
+
+    cache_path = tmp_path / "batch_cache.json"
+    f_a = {"name": "a.py", "content": "a = 1"}
+    f_b = {"name": "b.py", "content": "b = 2" * 100}
+
+    c1 = CachingLLMClient(_BatchProviderClient(), cache_path=cache_path)
+    c1.summarize_files(tmp_path, [f_a, f_b])
+
+    # Partial batch hit (only f_a): must NOT report an estimated character-length allocation
+    c_partial = CachingLLMClient(_BatchProviderClient(), cache_path=cache_path)
+    c_partial.summarize_files(tmp_path, [f_a])
+    assert c_partial.cache_hits == 1
+    assert c_partial.tokens_saved == 0
+    assert c_partial.input_tokens_saved == 0
+    assert c_partial.output_tokens_saved == 0
+
+    # Full batch hit ([f_a, f_b]): avoids the exact measured batch call (500 in + 100 out = 600)
+    c_full = CachingLLMClient(_BatchProviderClient(), cache_path=cache_path)
+    c_full.summarize_files(tmp_path, [f_a, f_b])
+    assert c_full.cache_hits == 2
+    assert c_full.input_tokens_saved == 500
+    assert c_full.output_tokens_saved == 100
+    assert c_full.tokens_saved == 600
+
+    # Changing DEFAULT_PROMPT_TEMPLATES["directory_summary"] invalidates cached directory summary
+    fs = [FileSummary(name="a.py", summary="Summary a.py.")]
+    d_client_1 = _BatchProviderClient()
+    dc1 = CachingLLMClient(d_client_1, cache_path=cache_path)
+    d_res_1 = dc1.summarize_directory(tmp_path, fs, [], content_hash="sha256:fixed")
+    assert d_client_1.dir_calls == 1
+
+    monkeypatch.setitem(
+        DEFAULT_PROMPT_TEMPLATES,
+        "directory_summary",
+        "UPDATED DEFAULT DIRECTORY PROMPT: {json_payload}",
+    )
+    d_client_2 = _BatchProviderClient()
+    dc2 = CachingLLMClient(d_client_2, cache_path=cache_path)
+    d_res_2 = dc2.summarize_directory(tmp_path, fs, [], content_hash="sha256:fixed")
+    assert d_client_2.dir_calls == 1
+    assert d_res_2.text != d_res_1.text
+
+
+def test_config_entrypoints_exclude_test_fixtures_and_respect_capsule_depth(tmp_path: Path) -> None:
+    """package.json and pyproject.toml entrypoints must reject test/fixture targets and filter at capsule depth=0."""
+    fixture_js = tmp_path / "tests" / "fixtures"
+    fixture_js.mkdir(parents=True)
+    (fixture_js / "main.js").write_text("export function fixture() {}\n", encoding="utf-8")
+
+    deep_bin = tmp_path / "packages" / "cli" / "bin"
+    deep_bin.mkdir(parents=True)
+    (deep_bin / "run.js").write_text("export function run() {}\n", encoding="utf-8")
+
+    deep_py = tmp_path / "src" / "pkg" / "nested"
+    deep_py.mkdir(parents=True)
+    (deep_py / "tool.py").write_text("def main() -> None:\n    pass\n", encoding="utf-8")
+    (tmp_path / "root_entry.js").write_text("export function boot() {}\n", encoding="utf-8")
+
+    (tmp_path / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "demo-pkg",
+                "main": "tests/fixtures/main.js",
+                "bin": {
+                    "deep-js": "packages/cli/bin/run.js",
+                    "root-js": "./root_entry.js",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n[project.scripts]\nfixture-cli = "tests.fixtures.cli:main"\ndeep-py = "pkg.nested.tool:main"\n',
+        encoding="utf-8",
+    )
+
+    sk = extract_skeleton(tmp_path)
+    assert not any("tests/fixtures" in ep for ep in sk.entrypoints)
+    assert not any("fixture-cli" in ep for ep in sk.entrypoints)
+    assert "npm:bin:deep-js -> packages/cli/bin/run.js" in sk.entrypoints
+    assert "npm:bin:root-js -> ./root_entry.js" in sk.entrypoints
+    assert "cli:deep-py -> pkg.nested.tool:main" in sk.entrypoints
+
+    cap0 = api_module.build_fleet_capsule(tmp_path, depth=0)
+    assert "npm:bin:root-js -> ./root_entry.js" in cap0.entrypoints
+    assert "npm:bin:deep-js -> packages/cli/bin/run.js" not in cap0.entrypoints
+    assert "cli:deep-py -> pkg.nested.tool:main" not in cap0.entrypoints
+    assert "packages/cli/bin/run.js" not in cap0.capsule_markdown
+    assert "pkg.nested.tool:main" not in cap0.capsule_markdown

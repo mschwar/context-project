@@ -181,15 +181,30 @@ def _has_manifests(root: Path) -> bool:
     return bool(_iter_tree_manifests(root))
 
 
-def _is_tier2_repo(root: Path) -> bool:
-    """Return True when root is initialized in Tier 2 (.ctx/ mode: tier2)."""
-    meta_path = root / ".ctx" / "metadata.json"
-    if not meta_path.is_file():
-        return False
+def _resolve_tier2_root(root: Path) -> Path | None:
+    """Return the enclosing Tier 2 project root if *root* (or its project anchor) is in Tier 2 mode."""
+    from ctx.config import resolve_project_anchor
     from ctx.stats_board import load_json_safe
 
-    data = load_json_safe(meta_path, {})
-    return isinstance(data, dict) and data.get("mode") == "tier2"
+    candidates = [root]
+    if root.exists():
+        anchor = resolve_project_anchor(root)
+        if anchor not in candidates:
+            candidates.append(anchor)
+
+    for candidate in candidates:
+        meta_path = candidate / ".ctx" / "metadata.json"
+        if not meta_path.is_file():
+            continue
+        data = load_json_safe(meta_path, {})
+        if isinstance(data, dict) and data.get("mode") == "tier2":
+            return candidate
+    return None
+
+
+def _is_tier2_repo(root: Path) -> bool:
+    """Return True when *root* (or its enclosing project anchor) is initialized in Tier 2 (.ctx/ mode: tier2)."""
+    return _resolve_tier2_root(root) is not None
 
 
 def _refresh_tier2(
@@ -353,8 +368,11 @@ def _budget_guardrail_message(config: Config, stats: GenerateStats) -> str | Non
 
 def _sync_tier1_ctx_exports(root: Path) -> None:
     """Atomically synchronize .ctx/ exports and metadata while holding CtxLock."""
-    meta_path = root / ".ctx" / "metadata.json"
-    if not meta_path.is_file() or _is_tier2_repo(root):
+    from ctx.config import resolve_project_anchor
+
+    target_root = resolve_project_anchor(root) if root.exists() else root
+    meta_path = target_root / ".ctx" / "metadata.json"
+    if not meta_path.is_file() or _resolve_tier2_root(target_root) is not None:
         return
     try:
         from datetime import datetime, timezone
@@ -362,7 +380,7 @@ def _sync_tier1_ctx_exports(root: Path) -> None:
         from ctx.init import _populate_ctx_dir
         from ctx.stats_board import load_json_safe, save_json_atomic
 
-        _populate_ctx_dir(root, root / ".ctx")
+        _populate_ctx_dir(target_root, target_root / ".ctx")
         meta = load_json_safe(meta_path, {})
         if isinstance(meta, dict):
             meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
@@ -386,8 +404,11 @@ def refresh(
     base_url: str | None = None,
     cache_path: str | None = None,
     progress: ProgressCallback | None = None,
+    _force_tier1: bool = False,
+    _on_locked_success: Callable[[], None] | None = None,
 ) -> RefreshResult:
     """Run canonical refresh behavior with strategy selection."""
+    from ctx.config import resolve_project_anchor
     from ctx.git import get_changed_files
     from ctx.watcher import run_watch
 
@@ -396,14 +417,15 @@ def refresh(
     if dry_run and watch:
         raise ValueError("--dry-run and --watch cannot be used together.")
 
-    if _is_tier2_repo(root):
+    tier2_root = None if _force_tier1 else _resolve_tier2_root(root)
+    if tier2_root is not None:
         if setup or watch:
             unsupported = "--setup" if setup else "--watch"
             raise ValueError(
                 f"{unsupported} is not supported in Tier 2 (.ctx/-only) repositories. "
                 "Run 'ctx init --force' to switch to Tier 1 per-directory manifests."
             )
-        return _refresh_tier2(root, force=force, dry_run=dry_run, max_depth=max_depth)
+        return _refresh_tier2(tier2_root, force=force, dry_run=dry_run, max_depth=max_depth)
 
     setup_provider: str | None = None
     setup_model: str | None = None
@@ -519,17 +541,29 @@ def refresh(
     _apply_token_guardrail(config)
 
     cumulative_stats = GenerateStats()
+    lock_root = resolve_project_anchor(root) if root.exists() else root
+    preexisting_manifests = set(_iter_tree_manifests(root)) if _on_locked_success is not None else set()
+
+    def _rollback_new_manifests() -> None:
+        for manifest_path in _iter_tree_manifests(root):
+            if manifest_path not in preexisting_manifests:
+                manifest_path.unlink(missing_ok=True)
 
     while True:
         should_continue_cycles = False
-        with CtxLock(root, command="refresh"):
-            stats: GenerateStats
-            if strategy == "full" and cumulative_stats.dirs_processed == 0:
-                stats = generate_tree(root, config, client, spec, progress=progress)
-            elif strategy == "smart":
-                stats = update_tree(root, config, client, spec, progress=progress, changed_files=changed_files)
-            else:
-                stats = update_tree(root, config, client, spec, progress=progress)
+        with CtxLock(lock_root, command="refresh"):
+            try:
+                stats: GenerateStats
+                if strategy == "full" and cumulative_stats.dirs_processed == 0:
+                    stats = generate_tree(root, config, client, spec, progress=progress)
+                elif strategy == "smart":
+                    stats = update_tree(root, config, client, spec, progress=progress, changed_files=changed_files)
+                else:
+                    stats = update_tree(root, config, client, spec, progress=progress)
+            except Exception:
+                if _on_locked_success is not None:
+                    _rollback_new_manifests()
+                raise
 
             cumulative_stats.dirs_processed += stats.dirs_processed
             cumulative_stats.dirs_skipped += stats.dirs_skipped
@@ -570,7 +604,18 @@ def refresh(
                         should_continue_cycles = False
 
             if not should_continue_cycles and not dry_run:
-                _sync_tier1_ctx_exports(root)
+                if _on_locked_success is not None:
+                    if cumulative_stats.errors or not (root / "CONTEXT.md").is_file():
+                        _rollback_new_manifests()
+                        err_detail = (
+                            cumulative_stats.errors[0]
+                            if cumulative_stats.errors
+                            else f"Failed to generate root CONTEXT.md in {root}"
+                        )
+                        raise RuntimeError(err_detail)
+                    _on_locked_success()
+                else:
+                    _sync_tier1_ctx_exports(root)
 
         if not should_continue_cycles:
             break
@@ -791,9 +836,10 @@ def check(
     if sum(1 for enabled in modes if enabled) > 1:
         raise ValueError("Only one check mode may be selected.")
 
-    if _is_tier2_repo(root):
+    tier2_root = _resolve_tier2_root(root)
+    if tier2_root is not None:
         return _check_tier2(
-            root,
+            tier2_root,
             verify=verify,
             stats=stats,
             diff=diff,
@@ -969,9 +1015,11 @@ def export_context(
     output_file: str | None = None,
     filter_mode: str = "all",
     depth: int | None = None,
+    _force_tier1: bool = False,
 ) -> ExportResult:
     """Export manifests with filter/depth controls."""
-    if _is_tier2_repo(root):
+    tier2_root = None if _force_tier1 else _resolve_tier2_root(root)
+    if tier2_root is not None:
         from ctx.sdk import CtxProject
 
         if depth == 0:
@@ -980,9 +1028,9 @@ def export_context(
             target_name = "CONTEXT-1.md"
         else:
             target_name = "CONTEXT.md"
-        target_file = root / ".ctx" / target_name
+        target_file = tier2_root / ".ctx" / target_name
         label = f".ctx/{target_name}"
-        proj = CtxProject.load(root, walk_parents=False)
+        proj = CtxProject.load(tier2_root, walk_parents=False)
         is_stale_flag = proj.is_stale() if proj is not None else True
 
         if filter_mode == "missing":
@@ -1096,11 +1144,25 @@ def _file_within_capsule_depth(rel_path: str, depth: int | None) -> bool:
     return effective_depth <= depth
 
 
-def _entrypoint_within_capsule_depth(ep: str, depth: int | None) -> bool:
+def _entrypoint_within_capsule_depth(ep: str, depth: int | None, root: Path) -> bool:
     if depth is None:
         return True
     if ep.startswith("file:"):
         return _file_within_capsule_depth(ep[len("file:") :], depth)
+    if ep.startswith("npm:") and " -> " in ep:
+        _, raw_target = ep.split(" -> ", 1)
+        clean_rel = Path(raw_target.strip().lstrip("./")).as_posix()
+        return _file_within_capsule_depth(clean_rel, depth)
+    if ep.startswith("cli:") and " -> " in ep:
+        from ctx.skeleton import resolve_cli_entrypoint_target
+
+        _, raw_target = ep.split(" -> ", 1)
+        resolved_rel = resolve_cli_entrypoint_target(root, raw_target.strip())
+        if resolved_rel is not None:
+            return _file_within_capsule_depth(resolved_rel, depth)
+        module_name = raw_target.strip().split(":", 1)[0].strip()
+        mod_depth = max(0, len([seg for seg in module_name.split(".") if seg]) - 1)
+        return mod_depth <= depth
     return True
 
 
@@ -1129,7 +1191,9 @@ def build_fleet_capsule(
         doc for doc in skeleton.boundary_docs if _file_within_capsule_depth(doc.relative_path, depth)
     ]
     kept_entrypoints = [
-        ep for ep in skeleton.entrypoints if _entrypoint_within_capsule_depth(ep, depth)
+        ep
+        for ep in skeleton.entrypoints
+        if _entrypoint_within_capsule_depth(ep, depth, resolved_root)
     ]
 
     authority_boundaries = [
