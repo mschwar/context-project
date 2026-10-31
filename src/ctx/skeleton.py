@@ -407,7 +407,10 @@ def resolve_cli_entrypoint_target(root: Path, ep_target: str) -> str | None:
     module_name = ep_target.split(":", 1)[0].strip()
     if not module_name:
         return None
-    mod_rel = module_name.replace(".", "/")
+    segments = module_name.split(".")
+    if not all(seg and seg.isidentifier() for seg in segments):
+        return None
+    mod_rel = "/".join(segments)
     resolved_root = root.resolve()
     for rel_candidate in (
         f"src/{mod_rel}.py",
@@ -421,6 +424,24 @@ def resolve_cli_entrypoint_target(root: Path, ep_target: str) -> str | None:
     return None
 
 
+def resolve_config_target_path(root: Path, raw_target: str) -> Path | None:
+    """Resolve a relative package/config entrypoint target safely inside *root* without stripping '../' or '.bin/'."""
+    cleaned = raw_target.strip()
+    if not cleaned:
+        return None
+    raw_path = Path(cleaned)
+    if raw_path.is_absolute():
+        return None
+    resolved_root = root.resolve()
+    try:
+        target_path = (resolved_root / raw_path).resolve()
+    except OSError:
+        return None
+    if not (target_path.is_file() and target_path.is_relative_to(resolved_root)):
+        return None
+    return target_path
+
+
 def _is_valid_config_target_file(
     root: Path,
     raw_target: str,
@@ -428,13 +449,10 @@ def _is_valid_config_target_file(
     spec: object | None,
     max_depth: int | None,
 ) -> bool:
-    cleaned = raw_target.strip().lstrip("./")
-    if not cleaned:
+    target_path = resolve_config_target_path(root, raw_target)
+    if target_path is None:
         return False
     resolved_root = root.resolve()
-    target_path = (resolved_root / cleaned).resolve()
-    if not (target_path.is_file() and target_path.is_relative_to(resolved_root)):
-        return False
     rel_parts = target_path.relative_to(resolved_root).parts
     if any(
         part.lower() in _NON_OPERATIONAL_DIRS or part in _ALWAYS_SKIP_DIRS
@@ -479,9 +497,12 @@ def _detect_config_entrypoints(
                         k, v = stripped.split("=", 1)
                         cleaned_val = v.strip().strip("\"'")
                         module_name = cleaned_val.split(":", 1)[0].strip()
+                        mod_segments = module_name.split(".")
+                        if not module_name or not all(seg and seg.isidentifier() for seg in mod_segments):
+                            continue
                         if any(
                             seg.lower() in _NON_OPERATIONAL_DIRS
-                            for seg in module_name.split(".")
+                            for seg in mod_segments
                             if seg
                         ):
                             continue

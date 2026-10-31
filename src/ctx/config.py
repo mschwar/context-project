@@ -329,7 +329,7 @@ def resolve_project_anchor(target_path: Path) -> Path:
         home_dir = None
 
     for directory in candidates:
-        if (directory / ".git").exists() or (directory / ".ctx").is_dir():
+        if (directory / ".git").exists() or (directory / ".ctx" / "metadata.json").is_file():
             return directory
 
     for directory in candidates:

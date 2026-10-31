@@ -59,7 +59,7 @@ class CtxProject:
 
         for directory in candidates:
             ctx_dir = directory / ".ctx"
-            if ctx_dir.is_dir():
+            if (ctx_dir / "metadata.json").is_file():
                 return cls(root=directory, ctx_dir=ctx_dir)
 
         raise CtxProjectNotFoundError(

@@ -941,3 +941,521 @@ def test_config_entrypoints_exclude_test_fixtures_and_respect_capsule_depth(tmp_
     assert "cli:deep-py -> pkg.nested.tool:main" not in cap0.entrypoints
     assert "packages/cli/bin/run.js" not in cap0.capsule_markdown
     assert "pkg.nested.tool:main" not in cap0.capsule_markdown
+
+
+def test_mode_transition_publication_rollback_and_locked_mode_revalidation(tmp_path: Path) -> None:
+    """Mid-publication failures roll back leaf manifests + .ctx/, and waiting refreshes revalidate mode under CtxLock."""
+    import ctx.init as init_mod
+
+    repo = _init_git_repo(tmp_path / "repo")
+    (repo / "src").mkdir()
+    (repo / "src" / "service.py").write_text("def handle() -> int:\n    return 1\n", encoding="utf-8")
+    init_project(repo, tier2=True)
+
+    c0_before = (repo / CTX_DIR / "CONTEXT-0.md").read_bytes()
+    c1_before = (repo / CTX_DIR / "CONTEXT-1.md").read_bytes()
+    cfull_before = (repo / CTX_DIR / "CONTEXT.md").read_bytes()
+    meta_before = (repo / CTX_DIR / "metadata.json").read_bytes()
+
+    cfg = Config(provider="ollama", model="fake-qa-model", api_key="not-needed", cache_path="")
+
+    # 1. Fail mid-publication AFTER CONTEXT.md export was written, while writing metadata.json
+    real_write_text = init_mod.write_text_atomic
+    write_calls = 0
+
+    def _fail_on_third_export(path: Path, content: str) -> None:
+        nonlocal write_calls
+        write_calls += 1
+        if path.name == "CONTEXT-0.md":
+            raise OSError("disk full during Tier 1 export publication")
+        real_write_text(path, content)
+
+    with (
+        patch("ctx.api._build_generation_runtime", return_value=(cfg, load_ignore_patterns(repo), _SimpleFakeClient())),
+        patch("ctx.init.write_text_atomic", side_effect=_fail_on_third_export),
+    ):
+        with pytest.raises(OSError, match="disk full during Tier 1 export publication"):
+            init_project(repo, force=True, tier2=False)
+
+    assert write_calls >= 2
+    assert not (repo / "CONTEXT.md").exists()
+    assert not (repo / "src" / "CONTEXT.md").exists()
+    assert (repo / CTX_DIR / "CONTEXT-0.md").read_bytes() == c0_before
+    assert (repo / CTX_DIR / "CONTEXT-1.md").read_bytes() == c1_before
+    assert (repo / CTX_DIR / "CONTEXT.md").read_bytes() == cfull_before
+    assert (repo / CTX_DIR / "metadata.json").read_bytes() == meta_before
+    assert CtxProject.load(repo, walk_parents=False).is_stale() is False
+
+    # 2. Concurrent mode transition while a refresh that initially selected Tier 2 waits on CtxLock
+    entered_tier2_dispatch = threading.Event()
+    proceed_to_lock = threading.Event()
+    real_refresh_tier2 = api_module._refresh_tier2
+
+    def _delayed_refresh_tier2(root_arg: Path, **kwargs: object) -> api_module.RefreshResult:
+        entered_tier2_dispatch.set()
+        proceed_to_lock.wait(timeout=5.0)
+        return real_refresh_tier2(root_arg, **kwargs)
+
+    refresh_out: list[api_module.RefreshResult] = []
+    refresh_err: list[Exception] = []
+
+    with (
+        patch("ctx.api._build_generation_runtime", return_value=(cfg, load_ignore_patterns(repo), _SimpleFakeClient())),
+        patch("ctx.api._refresh_tier2", side_effect=_delayed_refresh_tier2),
+    ):
+        def _run_refresh() -> None:
+            try:
+                refresh_out.append(api_module.refresh(repo))
+            except Exception as exc:  # pragma: no cover
+                refresh_err.append(exc)
+
+        t = threading.Thread(target=_run_refresh)
+        t.start()
+        assert entered_tier2_dispatch.wait(timeout=5.0)
+
+        # While t is paused between Tier 2 selection and CtxLock acquisition, transition repo to standard Tier 1!
+        init_project(repo, force=True, tier2=False)
+        assert json.loads((repo / CTX_DIR / "metadata.json").read_text(encoding="utf-8"))["mode"] == "standard"
+
+        proceed_to_lock.set()
+        t.join(timeout=10.0)
+
+    assert refresh_err == []
+    assert len(refresh_out) == 1
+    assert refresh_out[0].strategy != "tier2"
+    assert json.loads((repo / CTX_DIR / "metadata.json").read_text(encoding="utf-8"))["mode"] == "standard"
+    assert (repo / "CONTEXT.md").is_file()
+    assert CtxProject.load(repo, walk_parents=False).is_stale() is False
+
+
+def test_global_stats_dot_ctx_never_hijacks_project_anchor_or_sdk_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """~/.ctx/run_stats.json (without metadata.json) must never anchor non-git projects under HOME."""
+    from ctx.config import resolve_project_anchor
+    from ctx.sdk import CtxProjectNotFoundError
+
+    fake_home = tmp_path / "fake_home"
+    global_ctx = fake_home / ".ctx"
+    global_ctx.mkdir(parents=True)
+    (global_ctx / "run_stats.json").write_text('{"repos": {}, "totals": {}}\n', encoding="utf-8")
+
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: fake_home))
+
+    demo = fake_home / "work" / "demo"
+    (demo / "src").mkdir(parents=True)
+    (demo / ".ctxconfig").write_text("provider: ollama\nmodel: fake-qa-model\n", encoding="utf-8")
+    (demo / "src" / "main.py").write_text("def run() -> int:\n    return 0\n", encoding="utf-8")
+
+    assert resolve_project_anchor(demo) == demo.resolve()
+    assert resolve_project_anchor(demo / "src") == demo.resolve()
+
+    with pytest.raises(CtxProjectNotFoundError):
+        CtxProject.load(demo / "src", walk_parents=True)
+
+    cfg = Config(provider="ollama", model="fake-qa-model", api_key="not-needed", cache_path="")
+    generate_tree(demo, cfg, _SimpleFakeClient(), load_ignore_patterns(demo))
+
+    root_manifest = read_manifest(demo)
+    src_manifest = read_manifest(demo / "src")
+    assert root_manifest is not None and root_manifest.body.startswith("# .\n")
+    assert src_manifest is not None and src_manifest.body.startswith("# src\n")
+    assert api_module.check(demo, verify=True).summary["invalid"] == 0
+    assert api_module.check(demo / "src", verify=True).summary["invalid"] == 0
+
+
+def test_descendant_gitignore_cannot_resurrect_excluded_parent_while_ctxignore_can(tmp_path: Path) -> None:
+    """A child .gitignore !negation beneath an excluded parent directory must stay ignored; .ctxignore ! overrides win."""
+    repo = _init_git_repo(tmp_path / "repo")
+    (repo / ".gitignore").write_text("/src/private/\n", encoding="utf-8")
+    priv = repo / "src" / "private"
+    priv.mkdir(parents=True)
+    (priv / ".gitignore").write_text("!secret.txt\n", encoding="utf-8")
+    secret = priv / "secret.txt"
+    secret.write_text("do not leak\n", encoding="utf-8")
+    other = priv / "other.txt"
+    other.write_text("also excluded\n", encoding="utf-8")
+
+    root_spec = load_ignore_patterns(repo)
+    src_spec = load_ignore_patterns(repo / "src")
+    priv_spec = load_ignore_patterns(priv)
+
+    assert should_ignore(priv, root_spec, repo) is True
+    assert should_ignore(secret, root_spec, repo) is True
+    assert should_ignore(priv, src_spec, repo / "src") is True
+    assert should_ignore(secret, src_spec, repo / "src") is True
+    assert should_ignore(secret, priv_spec, priv) is True
+    assert should_ignore(other, priv_spec, priv) is True
+
+    # Explicit .ctxignore override IS authorized to include a specific file while keeping siblings ignored
+    allowed = priv / "allowed.txt"
+    allowed.write_text("curated doc\n", encoding="utf-8")
+    (repo / ".ctxignore").write_text("!/src/private/allowed.txt\n", encoding="utf-8")
+
+    root_spec_override = load_ignore_patterns(repo)
+    priv_spec_override = load_ignore_patterns(priv)
+    assert should_ignore(priv, root_spec_override, repo) is False
+    assert should_ignore(allowed, root_spec_override, repo) is False
+    assert should_ignore(secret, root_spec_override, repo) is True
+    assert should_ignore(allowed, priv_spec_override, priv) is False
+    assert should_ignore(secret, priv_spec_override, priv) is True
+    assert should_ignore(other, priv_spec_override, priv) is True
+
+
+def test_uninit_coordinates_with_live_hook_and_preserves_persistent_hook_guard_inode(tmp_path: Path) -> None:
+    """uninit_project must refuse teardown while a live hook holds .ctx-cache/.hook.guard and preserve guard inode."""
+    from ctx.init import InitError, run_hook
+
+    repo = _init_git_repo(tmp_path / "repo")
+    init_project(repo, tier2=True)
+
+    src_dir = str(Path(__file__).resolve().parents[1] / "src")
+    env = dict(os.environ, PYTHONPATH=src_dir)
+    ready_file = tmp_path / "hook_holding"
+    release_file = tmp_path / "hook_release"
+    holder_script = (
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "from ctx.init import _acquire_pid, _release_pid\n"
+        "root, ready, rel = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])\n"
+        "assert _acquire_pid(root)\n"
+        "ready.write_text('1')\n"
+        "while not rel.exists():\n"
+        "    time.sleep(0.01)\n"
+        "_release_pid(root)\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", holder_script, str(repo), str(ready_file), str(release_file)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    try:
+        deadline = time.time() + 5.0
+        while not ready_file.exists() and time.time() < deadline:
+            time.sleep(0.01)
+        assert ready_file.exists()
+
+        guard_path = repo / HOOK_GUARD_FILE
+        assert guard_path.is_file()
+        assert ".ctx-cache" in guard_path.parts
+        guard_inode = guard_path.stat().st_ino
+
+        # Teardown while hook holds the persistent kernel guard must fail cleanly without unlinking guard or .ctx/
+        with pytest.raises(InitError, match="Cannot uninitialize while a background ctx hook is running"):
+            uninit_project(repo, wait_timeout=0.05)
+        assert (repo / CTX_DIR).is_dir()
+        assert guard_path.stat().st_ino == guard_inode
+
+        release_file.write_text("1", encoding="utf-8")
+        proc.communicate(timeout=5)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+
+    # Now teardown succeeds, .ctx/ is gone, persistent guard inode survives, and post-uninit hook is a no-op
+    uninit_project(repo)
+    assert not (repo / CTX_DIR).exists()
+    assert guard_path.is_file()
+    assert guard_path.stat().st_ino == guard_inode
+
+    run_hook(repo, "post-commit")
+    assert not (repo / CTX_DIR).exists()
+
+    init_project(repo, tier2=True)
+    assert guard_path.stat().st_ino == guard_inode
+
+
+def test_frozen_live_lock_owner_is_reclaimed_exclusively_after_stale_timeout(tmp_path: Path) -> None:
+    """A suspended/frozen live owner holding flock past STALE_TIMEOUT_SECONDS must be reclaimed safely by 1 winner."""
+    src_dir = str(Path(__file__).resolve().parents[1] / "src")
+    env = dict(os.environ, PYTHONPATH=src_dir)
+    repo = tmp_path / "repo"
+    frozen_ready = tmp_path / "frozen_ready"
+    frozen_wake = tmp_path / "frozen_wake"
+
+    frozen_script = (
+        "import os, sys, time\n"
+        "from pathlib import Path\n"
+        "from ctx.lock import CtxLock, STALE_TIMEOUT_SECONDS\n"
+        "root, ready, wake = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])\n"
+        "lock = CtxLock(root, command='frozen-holder', heartbeat_interval=3600.0)\n"
+        "lock.acquire()\n"
+        "lock._stop_heartbeat()\n"
+        "stale_ts = time.time() - STALE_TIMEOUT_SECONDS - 60.0\n"
+        "lock_file = root / '.ctx-cache' / 'lock'\n"
+        "guard_file = root / '.ctx-cache' / '.lock.guard'\n"
+        "lock_file.write_text(f'pid={os.getpid()}\\ntimestamp={stale_ts}\\ncommand=frozen-holder\\ntoken={lock._token}\\n')\n"
+        "os.utime(guard_file, (stale_ts, stale_ts))\n"
+        "ready.write_text('1')\n"
+        "while not wake.exists():\n"
+        "    time.sleep(0.01)\n"
+        "lock.release()\n"
+        "print('FROZEN_RELEASED')\n"
+    )
+    frozen_proc = subprocess.Popen(
+        [sys.executable, "-c", frozen_script, str(repo), str(frozen_ready), str(frozen_wake)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    try:
+        deadline = time.time() + 5.0
+        while not frozen_ready.exists() and time.time() < deadline:
+            time.sleep(0.01)
+        assert frozen_ready.exists()
+        assert frozen_proc.poll() is None  # Frozen process is alive and still holds open kernel flock fd!
+
+        reclaim_go = tmp_path / "reclaim_go"
+        reclaim_done = tmp_path / "reclaim_release_winner"
+        winner_holding = tmp_path / "winner_holding"
+        contender_script = (
+            "import sys, time\n"
+            "from pathlib import Path\n"
+            "from ctx.lock import CtxLock, LockHeldError\n"
+            "root, ready, go, holding, done = [Path(a) for a in sys.argv[1:6]]\n"
+            "ready.write_text('1')\n"
+            "while not go.exists():\n"
+            "    time.sleep(0.005)\n"
+            "try:\n"
+            "    with CtxLock(root, command='reclaimer'):\n"
+            "        holding.write_text('1')\n"
+            "        print('RECLAIMED')\n"
+            "        while not done.exists():\n"
+            "            time.sleep(0.01)\n"
+            "except LockHeldError:\n"
+            "    print('HELD')\n"
+        )
+        contenders = []
+        for idx in range(3):
+            c_ready = tmp_path / f"c_ready_{idx}"
+            contenders.append(
+                (
+                    c_ready,
+                    subprocess.Popen(
+                        [
+                            sys.executable,
+                            "-c",
+                            contender_script,
+                            str(repo),
+                            str(c_ready),
+                            str(reclaim_go),
+                            str(winner_holding),
+                            str(reclaim_done),
+                        ],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        env=env,
+                    ),
+                )
+            )
+        while any(not r.exists() for r, _ in contenders) and time.time() < deadline:
+            time.sleep(0.01)
+        reclaim_go.write_text("1", encoding="utf-8")
+
+        while not winner_holding.exists() and time.time() < deadline:
+            time.sleep(0.01)
+        assert winner_holding.exists()
+
+        # Wake the superseded frozen owner while the new winner holds the lock:
+        # its release() must fence itself off and NEVER delete the new winner's lock file!
+        frozen_wake.write_text("1", encoding="utf-8")
+        frozen_out, _ = frozen_proc.communicate(timeout=5)
+        assert "FROZEN_RELEASED" in frozen_out
+        active_lock_text = (repo / ".ctx-cache" / "lock").read_text(encoding="utf-8")
+        assert "command=reclaimer" in active_lock_text
+
+        reclaim_done.write_text("1", encoding="utf-8")
+        outputs = [p.communicate(timeout=10)[0].strip() for _, p in contenders]
+        assert outputs.count("RECLAIMED") == 1
+        assert outputs.count("HELD") == 2
+    finally:
+        if frozen_proc.poll() is None:
+            frozen_proc.kill()
+            frozen_proc.communicate()
+
+
+def test_partial_batch_hit_stats_board_records_zero_and_parallel_cache_writes_are_threadsafe(
+    tmp_path: Path,
+) -> None:
+    """Partial-batch refresh hits must record 0 saved tokens on the stats board, and concurrent cache writes must not race."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("A = 1\n", encoding="utf-8")
+    (repo / "b.py").write_text("B = 2\n", encoding="utf-8")
+
+    class _BatchOnlyUsageClient:
+        model = "gpt-4o-mini"
+        prompt_templates: dict[str, str] = {}
+
+        def summarize_files(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
+            out = [LLMResult(text=f"Summary of {f['name']}.") for f in files]
+            if out:
+                out[0] = LLMResult(text=out[0].text, input_tokens=400, output_tokens=100)
+            return out
+
+        def summarize_directory(self, dir_path: Path, file_summaries: list, subdir_summaries: list) -> LLMResult:
+            return LLMResult(text="# .\n\nBatch test root.\n", input_tokens=100, output_tokens=20)
+
+    cache_file = tmp_path / "cache" / "llm_cache.json"
+    cfg = Config(provider="openai", model="gpt-4o-mini", api_key="sk-test", cache_path=str(cache_file))
+
+    # Run 1: summarizes [a.py, b.py] as a 2-file batch
+    with patch(
+        "ctx.api._build_generation_runtime",
+        return_value=(cfg, load_ignore_patterns(repo), _BatchOnlyUsageClient()),
+    ):
+        r1 = api_module.refresh(repo, force=True)
+    assert r1.tokens_used == 620
+
+    # Run 2: modify b.py only -> a.py is a partial-batch cache hit (1 hit), b.py + directory are misses (2 misses)
+    (repo / "b.py").write_text("B = 999\n", encoding="utf-8")
+    with patch(
+        "ctx.api._build_generation_runtime",
+        return_value=(cfg, load_ignore_patterns(repo), _BatchOnlyUsageClient()),
+    ):
+        r2 = api_module.refresh(repo)
+
+    assert r2.cache_hits == 1
+    assert r2.cache_misses == 2
+    assert r2.tokens_saved == 0
+    assert r2.tokens_saved_exact is True
+
+    stats_ledger = json.loads((cache_file.parent / "run_stats.json").read_text(encoding="utf-8"))
+    latest_run = stats_ledger["runs"][-1]
+    assert latest_run["cache_hits"] == 1
+    assert latest_run["cache_misses"] == 2
+    assert latest_run["tokens_saved"] == 0
+    assert latest_run["cost_saved_usd"] == 0.0
+
+    # F7: Concurrent threads writing batches, evicting entries, and serializing sidecar token metadata
+    stress_cache = tmp_path / "stress" / "llm_cache.json"
+    shared_client = CachingLLMClient(_BatchOnlyUsageClient(), cache_path=stress_cache, max_cache_entries=10)
+    thread_errors: list[Exception] = []
+    err_lock = threading.Lock()
+    start_barrier = threading.Barrier(8)
+
+    def _worker(tid: int) -> None:
+        start_barrier.wait()
+        try:
+            for step in range(8):
+                batch = [
+                    {"name": f"f_{tid}_{step}_a.py", "content": f"x = {tid} + {step}"},
+                    {"name": f"f_{tid}_{step}_b.py", "content": f"y = {tid} * {step}"},
+                ]
+                shared_client.summarize_files(repo, batch)
+                shared_client.summarize_directory(
+                    repo,
+                    [FileSummary(name=batch[0]["name"], summary="s")],
+                    [],
+                    content_hash=f"sha256:{tid}:{step}",
+                )
+        except Exception as exc:  # pragma: no cover
+            with err_lock:
+                thread_errors.append(exc)
+
+    workers = [threading.Thread(target=_worker, args=(i,)) for i in range(8)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+
+    assert thread_errors == []
+    parsed_cache = json.loads(stress_cache.read_text(encoding="utf-8"))
+    assert len(parsed_cache) <= 10
+
+
+def test_config_entrypoints_reject_parent_traversal_and_preserve_dot_directories(tmp_path: Path) -> None:
+    """../missing.js must be rejected even if repo/missing.js exists, while .bin/tool.js resolves accurately."""
+    repo = tmp_path / "repo"
+    (repo / ".bin").mkdir(parents=True)
+    # Decoy file inside repo that a buggy .lstrip('./') on '../missing.js' would falsely match!
+    (repo / "missing.js").write_text("export const decoy = true;\n", encoding="utf-8")
+    (repo / ".bin" / "tool.js").write_text("export function runTool() {}\n", encoding="utf-8")
+
+    (repo / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "edge-pkg",
+                "main": "../missing.js",
+                "bin": {
+                    "dot-tool": ".bin/tool.js",
+                    "abs-escape": "/etc/passwd",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "edge"\n[project.scripts]\nbad-cli = "..outside:main"\n',
+        encoding="utf-8",
+    )
+
+    sk = extract_skeleton(repo)
+    assert "npm:main -> ../missing.js" not in sk.entrypoints
+    assert not any("abs-escape" in ep for ep in sk.entrypoints)
+    assert not any("bad-cli" in ep for ep in sk.entrypoints)
+    assert "npm:bin:dot-tool -> .bin/tool.js" in sk.entrypoints
+
+    cap0 = api_module.build_fleet_capsule(repo, depth=0)
+    assert "npm:bin:dot-tool -> .bin/tool.js" not in cap0.entrypoints
+    cap1 = api_module.build_fleet_capsule(repo, depth=1)
+    assert "npm:bin:dot-tool -> .bin/tool.js" in cap1.entrypoints
+
+
+def test_composite_action_checkout_detection_handles_git_dirs_worktrees_and_explicit_modes(
+    tmp_path: Path,
+) -> None:
+    """The composite action's checkout guard must skip checkout on normal .git dirs, worktrees, and subdirs."""
+    import yaml
+
+    action_path = Path(__file__).resolve().parents[1] / ".github" / "actions" / "ctx-check" / "action.yml"
+    action_data = yaml.safe_load(action_path.read_text(encoding="utf-8"))
+    assert "checkout" in action_data["inputs"]
+    detect_step = next(s for s in action_data["runs"]["steps"] if s.get("id") == "detect_checkout")
+    script = detect_step["run"]
+
+    def _eval_checkout(target_dir: Path, mode: str = "auto") -> subprocess.CompletedProcess[str]:
+        out_file = tmp_path / f"gh_out_{time.time_ns()}"
+        out_file.write_text("", encoding="utf-8")
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            env=dict(
+                os.environ,
+                CTX_TARGET_PATH=str(target_dir),
+                CTX_CHECKOUT_MODE=mode,
+                GITHUB_OUTPUT=str(out_file),
+            ),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        proc.stdout = out_file.read_text(encoding="utf-8").strip()
+        return proc
+
+    repo = _init_git_repo(tmp_path / "normal_repo")
+    (repo / "sub").mkdir()
+    (repo / "sub" / "mod.py").write_text("X = 1\n", encoding="utf-8")
+    wt = tmp_path / "linked_wt"
+    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-b", "wt-ci", str(wt)], capture_output=True, check=True)
+    empty_ws = tmp_path / "empty_ws"
+    empty_ws.mkdir()
+
+    # 1. Normal .git/ directory -> should_checkout=false
+    assert _eval_checkout(repo, "auto").stdout == "should_checkout=false"
+    # 2. Subdirectory inside existing git checkout -> should_checkout=false
+    assert _eval_checkout(repo / "sub", "auto").stdout == "should_checkout=false"
+    # 3. Git worktree (.git pointer file) -> should_checkout=false
+    assert _eval_checkout(wt, "auto").stdout == "should_checkout=false"
+    # 4. Empty workspace -> should_checkout=true
+    assert _eval_checkout(empty_ws, "auto").stdout == "should_checkout=true"
+    # 5. Explicit overrides + invalid input validation
+    assert _eval_checkout(empty_ws, "false").stdout == "should_checkout=false"
+    assert _eval_checkout(repo, "true").stdout == "should_checkout=true"
+    assert _eval_checkout(repo, "invalid-mode").returncode != 0

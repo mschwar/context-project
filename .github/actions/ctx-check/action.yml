@@ -5,6 +5,10 @@ inputs:
     description: 'Path to the ctx project root.'
     required: false
     default: '.'
+  checkout:
+    description: "Whether to run actions/checkout ('auto', 'true', or 'false'). 'auto' checks out only when no repository or project files exist at path."
+    required: false
+    default: 'auto'
   github_token:
     description: 'GitHub Token for checking out the repository.'
     required: false
@@ -16,8 +20,35 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Detect existing workspace checkout
+      id: detect_checkout
+      shell: bash
+      env:
+        CTX_TARGET_PATH: ${{ inputs.path }}
+        CTX_CHECKOUT_MODE: ${{ inputs.checkout }}
+      run: |
+        case "${CTX_CHECKOUT_MODE}" in
+          true|TRUE|1|yes)
+            echo "should_checkout=true" >> "${GITHUB_OUTPUT}"
+            ;;
+          false|FALSE|0|no)
+            echo "should_checkout=false" >> "${GITHUB_OUTPUT}"
+            ;;
+          auto|"")
+            if [ -e "${CTX_TARGET_PATH}/.git" ] || [ -n "$(ls -A "${CTX_TARGET_PATH}" 2>/dev/null)" ]; then
+              echo "should_checkout=false" >> "${GITHUB_OUTPUT}"
+            else
+              echo "should_checkout=true" >> "${GITHUB_OUTPUT}"
+            fi
+            ;;
+          *)
+            echo "::error::Invalid checkout input '${CTX_CHECKOUT_MODE}'. Expected 'auto', 'true', or 'false'."
+            exit 1
+            ;;
+        esac
+
     - name: Checkout repository
-      if: ${{ !hashFiles(format('{0}/.git', inputs.path)) }}
+      if: ${{ steps.detect_checkout.outputs.should_checkout == 'true' }}
       uses: actions/checkout@v4
       with:
         token: ${{ inputs.github_token }}

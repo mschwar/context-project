@@ -951,29 +951,29 @@ class CachingLLMClient:
         new_tokens: Optional[dict[str, tuple[int, int]]] = None,
         new_batches: Optional[dict[tuple[str, ...], tuple[int, int]]] = None,
     ) -> None:
-        """Write multiple new cache entries (and exact token metadata) to disk."""
+        """Write multiple new cache entries (and exact token metadata) to disk atomically."""
         if self._cache_path is None or not new_entries:
             return
         with self._disk_lock:
-            self._disk_cache.update(new_entries)
-            if new_tokens:
-                self._token_counts.update(new_tokens)
-            if new_batches:
-                self._batch_tokens.update(new_batches)
-            while len(self._disk_cache) > self._max_cache_entries:
-                evicted_key = next(iter(self._disk_cache))
-                del self._disk_cache[evicted_key]
-                self._token_counts.pop(evicted_key, None)
-                if self._batch_tokens:
-                    self._batch_tokens = {
-                        bk: bv for bk, bv in self._batch_tokens.items() if evicted_key not in bk
-                    }
-            try:
-                self._cache_path.parent.mkdir(parents=True, exist_ok=True)
-                self._cache_path.write_text(
-                    json.dumps(self._disk_cache, indent=2),
-                    encoding="utf-8",
-                )
+            # Synchronize all mutations and snapshot serialization under self._lock
+            # so concurrent directory worker threads never mutate dictionaries during iteration.
+            with self._lock:
+                self._disk_cache.update(new_entries)
+                if new_tokens:
+                    self._token_counts.update(new_tokens)
+                if new_batches:
+                    self._batch_tokens.update(new_batches)
+                while len(self._disk_cache) > self._max_cache_entries:
+                    evicted_key = next(iter(self._disk_cache))
+                    del self._disk_cache[evicted_key]
+                    self._cache.pop(evicted_key, None)
+                    self._token_counts.pop(evicted_key, None)
+                    if self._batch_tokens:
+                        self._batch_tokens = {
+                            bk: bv for bk, bv in self._batch_tokens.items() if evicted_key not in bk
+                        }
+                cache_json = json.dumps(self._disk_cache, indent=2)
+                tokens_json: str | None = None
                 if self._token_counts or self._batch_tokens:
                     serialized_tokens: dict[str, object] = {
                         k: {"in": in_t, "out": out_t}
@@ -986,10 +986,14 @@ class CachingLLMClient:
                             for bk, (in_t, out_t) in self._batch_tokens.items()
                             if all(k in self._disk_cache for k in bk)
                         ]
-                    _tokens_sidecar_path(self._cache_path).write_text(
-                        json.dumps(serialized_tokens, indent=2, sort_keys=True),
-                        encoding="utf-8",
-                    )
+                    tokens_json = json.dumps(serialized_tokens, indent=2, sort_keys=True)
+
+            try:
+                from ctx.stats_board import write_text_atomic
+
+                write_text_atomic(self._cache_path, cache_json)
+                if tokens_json is not None:
+                    write_text_atomic(_tokens_sidecar_path(self._cache_path), tokens_json)
             except OSError as exc:
                 logger.warning("Failed to write LLM cache to %s: %s", self._cache_path, exc)
 

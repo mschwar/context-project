@@ -40,7 +40,7 @@ BitNet is deprecated in this repo. Attempting to use it raises an informative er
 | `preflight.py` | Preflight onboarding gate (`ctx setup --check`). Validates provider detection, config resolution, live connectivity, sample model summary quality, and target directory readiness. |
 | `stats_board.py` | Persistent run-stats ledger. Records every `ctx refresh` invocation with retention pruning (`prune_runs`); exposes per-repo and global aggregates for `ctx stats --board`. Also exposes `load_json_safe` and `save_json_atomic` helpers used by `init.py`. |
 | `mcp_server.py` | Stdio JSON-RPC 2.0 MCP server exposing `api.py` functions as tools and `.ctx/` exports/metadata/hook telemetry as read-only MCP resources. |
-| `lock.py` | Cross-process `.ctx-cache/lock` exclusive write mutex (`O_CREAT | O_EXCL`) with serialized stale-lock reclamation, PID-liveness checks, and background heartbeat renewal for long runs. |
+| `lock.py` | Cross-process `.ctx-cache/lock` exclusive write mutex backed by persistent OS kernel guard locks (`fcntl.flock` / `msvcrt.locking`), atomic metadata heartbeat renewal, and serialized frozen-owner reclamation. |
 | `ignore.py` | `.gitignore`-style filtering using `pathspec`, merging built-in `.ctxignore.default`, ancestor/root/nested `.gitignore` files, and `.ctxignore` overrides. |
 | `git.py` | Git-aware changed-file detection (staged, unstaged, and untracked files) for selective refresh. |
 | `watcher.py` | File watching and debounced incremental refresh. |

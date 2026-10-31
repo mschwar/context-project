@@ -1,11 +1,11 @@
 ---
-generated: '2026-10-31T22:32:08Z'
+generated: '2026-10-31T23:04:21Z'
 generator: ctx/1.1.0
-model: qwen2.5:7b-instruct
-content_hash: sha256:05a656eb44078ab6737a5bac43aa6ba11ecb8908e3236617b4f96d092c6fcf05
+model: qwen2.5-coder-7b-instruct
+content_hash: sha256:9cbce9227bdd1dffd29c26fc65af98ca793ea33ae47db7b878671e5a3e314866
 files: 22
 dirs: 0
-tokens_total: 22283
+tokens_total: 22293
 ---
 # archive/reflections
 

@@ -1,8 +1,8 @@
 ---
-generated: '2026-10-31T19:47:59Z'
+generated: '2026-10-31T23:04:21Z'
 generator: ctx/1.1.0
-model: qwen2.5:7b-instruct
-content_hash: sha256:2ad7a0f1bc06e974005d5cf3bd26470361f9afccb2036ff77a514add7a668dda
+model: qwen2.5-coder-7b-instruct
+content_hash: sha256:af69b3197689b3d617d58d71e351415af31b289706edeaa74c01c2eb20fe9f8f
 files: 0
 dirs: 2
 tokens_total: 0

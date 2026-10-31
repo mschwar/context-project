@@ -142,11 +142,12 @@ def _build_run_record(result, config) -> dict:
     explicit_saved = int(getattr(result, "tokens_saved", 0) or 0)
     in_saved = int(getattr(result, "input_tokens_saved", 0) or 0)
     out_saved = int(getattr(result, "output_tokens_saved", 0) or 0)
+    exact_saved = bool(getattr(result, "tokens_saved_exact", False))
     if explicit_saved > 0:
         tokens_saved = explicit_saved
     elif (in_saved + out_saved) > 0:
         tokens_saved = in_saved + out_saved
-    elif hits > 0 and misses > 0:
+    elif not exact_saved and hits > 0 and misses > 0:
         tokens_saved = round((result.tokens_used / misses) * hits)
     else:
         tokens_saved = 0

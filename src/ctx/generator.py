@@ -65,6 +65,7 @@ class GenerateStats:
     tokens_saved: int = 0
     input_tokens_saved: int = 0
     output_tokens_saved: int = 0
+    tokens_saved_exact: bool = False
     errors: list[str] = field(default_factory=list)
 
 
@@ -794,6 +795,7 @@ def _run_generation(
     stats.tokens_saved = int(getattr(client, "tokens_saved", 0) or 0)
     stats.input_tokens_saved = int(getattr(client, "input_tokens_saved", 0) or 0)
     stats.output_tokens_saved = int(getattr(client, "output_tokens_saved", 0) or 0)
+    stats.tokens_saved_exact = isinstance(client, CachingLLMClient)
     return stats
 
 
