@@ -242,7 +242,10 @@ def _resolve_python_file_edges(
 
 
 def _probe_js_ts_candidate(candidate_rel: str, all_files: set[str]) -> str | None:
-    norm = Path(candidate_rel).as_posix().lstrip("./")
+    norm = Path(candidate_rel).as_posix()
+    while norm.startswith("./"):
+        norm = norm[2:]
+    norm = norm.lstrip("/")
     bases = [norm]
     for ext in (".js", ".jsx", ".mjs", ".cjs"):
         if norm.endswith(ext):
@@ -449,51 +452,64 @@ def _resolve_other_lang_edges(
 
 
 def _tarjan_cycles(adjacency: dict[str, list[str]]) -> list[list[str]]:
-    """Return canonicalized strongly-connected cycles (size >= 2 or explicit self-loop)."""
+    """Return canonicalized strongly-connected cycles (size >= 2) using an iterative DFS stack."""
     index_counter = 0
     indices: dict[str, int] = {}
     lowlink: dict[str, int] = {}
-    stack: list[str] = []
+    scc_stack: list[str] = []
     on_stack: set[str] = set()
     cycles: list[list[str]] = []
 
-    def _strongconnect(node: str) -> None:
-        nonlocal index_counter
-        indices[node] = index_counter
-        lowlink[node] = index_counter
+    for root_node in sorted(adjacency.keys()):
+        if root_node in indices:
+            continue
+        indices[root_node] = index_counter
+        lowlink[root_node] = index_counter
         index_counter += 1
-        stack.append(node)
-        on_stack.add(node)
+        scc_stack.append(root_node)
+        on_stack.add(root_node)
+        call_stack: list[tuple[str, list[str], int]] = [
+            (root_node, list(adjacency.get(root_node, [])), 0)
+        ]
 
-        for succ in adjacency.get(node, []):
-            if succ not in indices:
-                _strongconnect(succ)
-                lowlink[node] = min(lowlink[node], lowlink[succ])
-            elif succ in on_stack:
-                lowlink[node] = min(lowlink[node], indices[succ])
-
-        if lowlink[node] == indices[node]:
-            scc: list[str] = []
-            while True:
-                w = stack.pop()
-                on_stack.remove(w)
-                scc.append(w)
-                if w == node:
-                    break
-            if len(scc) > 1:
-                ordered = sorted(scc)
-                cycles.append(ordered)
-
-    for v in sorted(adjacency.keys()):
-        if v not in indices:
-            _strongconnect(v)
+        while call_stack:
+            node, succs, idx = call_stack[-1]
+            if idx < len(succs):
+                succ = succs[idx]
+                call_stack[-1] = (node, succs, idx + 1)
+                if succ not in indices:
+                    indices[succ] = index_counter
+                    lowlink[succ] = index_counter
+                    index_counter += 1
+                    scc_stack.append(succ)
+                    on_stack.add(succ)
+                    call_stack.append((succ, list(adjacency.get(succ, [])), 0))
+                elif succ in on_stack:
+                    if indices[succ] < lowlink[node]:
+                        lowlink[node] = indices[succ]
+            else:
+                call_stack.pop()
+                if call_stack:
+                    parent = call_stack[-1][0]
+                    if lowlink[node] < lowlink[parent]:
+                        lowlink[parent] = lowlink[node]
+                if lowlink[node] == indices[node]:
+                    scc: list[str] = []
+                    while True:
+                        w = scc_stack.pop()
+                        on_stack.remove(w)
+                        scc.append(w)
+                        if w == node:
+                            break
+                    if len(scc) > 1:
+                        cycles.append(sorted(scc))
 
     cycles.sort()
     return cycles
 
 
 def _compute_topological_layers(adjacency: dict[str, list[str]]) -> tuple[list[list[str]], dict[str, int]]:
-    """Compute condensed DAG topological layers where Layer 0 has 0 internal outbound deps."""
+    """Compute condensed DAG topological layers iteratively where Layer 0 has 0 internal outbound deps."""
     nodes = sorted(adjacency.keys())
     if not nodes:
         return [], {}
@@ -517,32 +533,41 @@ def _compute_topological_layers(adjacency: dict[str, list[str]]) -> tuple[list[l
             comp_members[cid] = [n]
 
     comp_out: dict[int, set[int]] = {cid: set() for cid in comp_members}
+    comp_rev: dict[int, list[int]] = {cid: [] for cid in comp_members}
     for n, deps in adjacency.items():
         cn = node_to_comp[n]
         for d in deps:
             if d in node_to_comp:
                 cd = node_to_comp[d]
-                if cd != cn:
+                if cd != cn and cd not in comp_out[cn]:
                     comp_out[cn].add(cd)
+                    comp_rev[cd].append(cn)
 
-    memo: dict[int, int] = {}
+    rem_out: dict[int, int] = {cid: len(deps) for cid, deps in comp_out.items()}
+    comp_layer: dict[int, int] = {}
+    ready: deque[int] = deque()
+    for cid, count in rem_out.items():
+        if count == 0:
+            comp_layer[cid] = 0
+            ready.append(cid)
 
-    def _layer_of(cid: int) -> int:
-        if cid in memo:
-            return memo[cid]
-        deps = comp_out.get(cid, set())
-        if not deps:
-            memo[cid] = 0
-            return 0
-        lvl = 1 + max(_layer_of(dep_cid) for dep_cid in deps)
-        memo[cid] = lvl
-        return lvl
+    while ready:
+        cd = ready.popleft()
+        base_lvl = comp_layer[cd]
+        for cn in comp_rev[cd]:
+            cand_lvl = base_lvl + 1
+            if cand_lvl > comp_layer.get(cn, 0):
+                comp_layer[cn] = cand_lvl
+            rem_out[cn] -= 1
+            if rem_out[cn] == 0:
+                ready.append(cn)
 
     max_lvl = 0
     file_layers: dict[str, int] = {}
     for cid, members in comp_members.items():
-        lvl = _layer_of(cid)
-        max_lvl = max(max_lvl, lvl)
+        lvl = comp_layer.get(cid, 0)
+        if lvl > max_lvl:
+            max_lvl = lvl
         for m in members:
             file_layers[m] = lvl
 
@@ -855,7 +880,11 @@ def analyze_impact(
             .removesuffix(".test")
             .removesuffix(".spec")
         )
-        if stripped_tname in seed_stems or any(st in tname for st in seed_stems if len(st) >= 4):
+        if stripped_tname in seed_stems or any(
+            re.search(rf"(?:^|[_.-]){re.escape(st)}(?:$|[_.-])", stripped_tname) is not None
+            for st in seed_stems
+            if len(st) >= 3
+        ):
             coupled_map[f.relative_path] = {
                 "path": f.relative_path,
                 "distance": None,

@@ -319,6 +319,45 @@ def _iter_config_dirs(start_dir: Path) -> list[Path]:
     return [start_dir, *start_dir.parents]
 
 
+def resolve_tier2_synthesize_preference(
+    start_dir: Path,
+    *,
+    explicit_flag: bool = False,
+    persisted_meta: dict[str, object] | None = None,
+) -> bool:
+    """Resolve Tier 2 invariant synthesis setting with explicit disable support.
+
+    Precedence:
+    1. Explicit CLI/API `synthesize=True` flag (`explicit_flag`)
+    2. Explicit `CTX_TIER2_SYNTHESIZE` environment variable (`0`/`false` disables!)
+    3. Explicit `tier2_synthesize` key in `.ctxconfig` (`false` disables!)
+    4. Persisted `.ctx/metadata.json` `synthesize_invariants` boolean
+    """
+    if explicit_flag:
+        return True
+    env_val = _env_text("CTX_TIER2_SYNTHESIZE")
+    if env_val is not None:
+        return env_val.lower() in {"1", "true", "yes", "on"}
+    resolved_start = start_dir.resolve() if start_dir.exists() else start_dir
+    if resolved_start.is_file():
+        resolved_start = resolved_start.parent
+    for directory in _iter_config_dirs(resolved_start):
+        config_path = directory / ".ctxconfig"
+        if not config_path.is_file():
+            continue
+        try:
+            data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            break
+        if isinstance(data, dict) and "tier2_synthesize" in data and data["tier2_synthesize"] is not None:
+            raw = data["tier2_synthesize"]
+            if isinstance(raw, bool):
+                return raw
+            return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+        break
+    return bool((persisted_meta or {}).get("synthesize_invariants", False))
+
+
 def resolve_project_anchor(target_path: Path) -> Path:
     """Resolve the canonical project root anchor for *target_path*.
 

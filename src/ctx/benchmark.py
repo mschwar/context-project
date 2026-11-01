@@ -501,9 +501,7 @@ def _build_independent_oracle(root: Path) -> _IndependentOracle:
             continue
         is_index = 1 if Path(rel).name in {"__init__.py", "index.ts", "index.js", "mod.rs"} else 0
         prod_in = sum(1 for src in inbound.get(rel, set()) if not _oracle_is_test(src))
-        total_in = len(inbound.get(rel, set()))
         candidates.append((-prod_in, is_index, rel))
-        _ = total_in
     if candidates:
         candidates.sort()
         focal_target = candidates[0][2]
@@ -666,7 +664,11 @@ class ConditionMetrics:
     recall_arch_orientation: float
     recall_surface_discovery: float
     recall_blast_radius: float
+    precision_blast_radius: float
+    f1_blast_radius: float
     recall_coupled_tests: float
+    precision_coupled_tests: float
+    f1_coupled_tests: float
     mean_recall: float
     maint_llm_tokens_impl_commit: int
     maint_llm_tokens_minor_struct_commit: int
@@ -695,6 +697,40 @@ def _ratio(found: int, total: int) -> float:
     return (found / total) if total > 0 else 1.0
 
 
+def _precision_and_f1(predicted: set[str], truth: set[str]) -> tuple[float, float, float]:
+    """Return `(recall, precision, f1)` for *predicted* against ground-truth *truth*."""
+    tp = len(predicted & truth)
+    recall = _ratio(tp, len(truth))
+    if not predicted:
+        precision = 1.0 if not truth else 0.0
+    else:
+        precision = tp / len(predicted)
+    f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    return recall, precision, f1
+
+
+def _extract_top_level_symbol_names(content: str, suffix: str, limit: int = 4) -> list[str]:
+    """Extract exported top-level symbol identifiers from a focal module for Condition B grep."""
+    names: list[str] = []
+    if suffix == ".py":
+        try:
+            tree = ast.parse(content)
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    if not node.name.startswith("_") and len(node.name) >= 4:
+                        names.append(node.name)
+        except SyntaxError:
+            pass
+    else:
+        for m in re.finditer(
+            r"^\s*(?:export\s+)?(?:pub\s+)?(?:async\s+)?(?:class|def|fn|func|interface|struct)\s+([A-Za-z][A-Za-z0-9_]{3,})",
+            content,
+            re.MULTILINE,
+        ):
+            names.append(m.group(1))
+    return names[:limit]
+
+
 def benchmark_repository(root: Path) -> RepoBenchmarkResult:
     """Run deterministic static-oracle A/B/C navigation benchmark on *root*."""
     started = time.perf_counter()
@@ -705,17 +741,43 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
     focal_stem = Path(focal_target).stem
 
     # ── Condition A: raw_grep (real file reads + real regex grep, no ctx) ────
+    a_steps: list[tuple[str, str]] = []
     tree_listing = "\n".join(sorted(oracle.files.keys()))
+    a_steps.append(("list_tree", tree_listing))
+
     root_doc_paths = [
         rel
         for rel in sorted(oracle.files)
         if "/" not in rel and rel.lower() in {"readme.md", "readme.rst", "agents.md", "claude.md"}
     ]
-    root_doc_texts = [oracle.files[rel][:16384] for rel in root_doc_paths]
+    # Condition A also inspects up to 2 architecture/governance docs discovered in the file-tree listing
+    discovered_arch_Candidates = sorted(
+        (
+            rel
+            for rel in oracle.files
+            if rel not in root_doc_paths
+            and Path(rel).name.lower() in {"architecture.md", "schema.md", "current.md", "state.md", "security.md"}
+        ),
+        key=lambda p: (len(Path(p).parts), p),
+    )[:2]
+    a_doc_paths = [*root_doc_paths, *discovered_arch_Candidates]
+    a_doc_texts: list[str] = []
+    for rel in a_doc_paths:
+        txt = oracle.files[rel][:16384]
+        a_doc_texts.append(txt)
+        a_steps.append((f"read_doc:{rel}", txt))
 
     ep_candidates = _select_candidate_entrypoints(oracle.files, limit=4)
-    ep_texts = [oracle.files[rel][:24576] for rel in ep_candidates]
-    focal_text = oracle.files.get(focal_target, "")[:16384]
+    ep_texts: list[str] = []
+    for rel in ep_candidates:
+        txt = oracle.files[rel][:24576]
+        ep_texts.append(txt)
+        a_steps.append((f"read_entrypoint:{rel}", txt))
+
+    focal_raw = oracle.files.get(focal_target, "")
+    focal_text = focal_raw[:16384]
+    if focal_text:
+        a_steps.append((f"read_focal:{focal_target}", focal_text))
 
     grep_re = re.compile(rf"\b{re.escape(focal_stem)}\b") if focal_stem else re.compile(r"$^")
     prod_grep_out, a_grep_prod_files = _execute_regex_grep(
@@ -726,6 +788,7 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
         max_lines=120,
     )
     a_grep_prod_files.discard(focal_target)
+    a_steps.append(("grep_prod", prod_grep_out))
 
     test_grep_out, a_grep_test_files = _execute_regex_grep(
         oracle.files,
@@ -734,36 +797,33 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
         only_tests=True,
         max_lines=80,
     )
+    a_steps.append(("grep_tests", test_grep_out))
     if focal_stem:
         low_stem = focal_stem.lower()
         for rel in oracle.files:
-            if _oracle_is_test(rel) and low_stem in Path(rel).name.lower():
-                a_grep_test_files.add(rel)
+            if _oracle_is_test(rel):
+                t_stripped = (
+                    Path(rel).stem.lower()
+                    .removeprefix("test_")
+                    .removesuffix("_test")
+                    .removesuffix(".test")
+                    .removesuffix(".spec")
+                )
+                if re.search(rf"(?:^|[_.-]){re.escape(low_stem)}(?:$|[_.-])", t_stripped):
+                    a_grep_test_files.add(rel)
 
-    cond_a_turns = 1 + len(root_doc_paths) + len(ep_candidates) + (1 if focal_text else 0) + 2
-    cond_a_tokens = (
-        _approx_tokens(tree_listing)
-        + sum(_approx_tokens(t) for t in root_doc_texts)
-        + sum(_approx_tokens(t) for t in ep_texts)
-        + _approx_tokens(focal_text)
-        + _approx_tokens(prod_grep_out)
-        + _approx_tokens(test_grep_out)
-    )
+    cond_a_turns = len(a_steps)
+    cond_a_tokens = sum(_approx_tokens(payload) for _, payload in a_steps)
 
-    a_ingested_texts = [*root_doc_texts, *ep_texts]
-    a_bdocs_found = set(root_doc_paths) & oracle.boundary_docs
-    for d in oracle.boundary_docs:
-        if any(d in txt or Path(d).name in txt for txt in root_doc_texts):
-            # Linked boundary docs are discovered by path reference only if root doc links them,
-            # though unread; score half-weight for uninspected link vs full-weight for ingested doc.
-            pass
+    a_ingested_texts = [*a_doc_texts, *ep_texts]
+    a_bdocs_found = set(a_doc_paths) & oracle.boundary_docs
     a_arch_recall = _ratio(len(a_bdocs_found), len(oracle.boundary_docs))
     a_surf_found = sum(
         1 for (_k, tok, _f) in oracle.public_surfaces if _surface_present_in_texts(tok, a_ingested_texts)
     )
     a_surf_recall = _ratio(a_surf_found, len(oracle.public_surfaces))
-    a_blast_recall = _ratio(len(a_grep_prod_files & oracle.prod_transitive), len(oracle.prod_transitive))
-    a_test_recall = _ratio(len(a_grep_test_files & oracle.coupled_tests), len(oracle.coupled_tests))
+    a_blast_recall, a_blast_prec, a_blast_f1 = _precision_and_f1(a_grep_prod_files, oracle.prod_transitive)
+    a_test_recall, a_test_prec, a_test_f1 = _precision_and_f1(a_grep_test_files, oracle.coupled_tests)
     a_mean = (a_arch_recall + a_surf_recall + a_blast_recall + a_test_recall) / 4.0
 
     cond_a = ConditionMetrics(
@@ -773,23 +833,51 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
         recall_arch_orientation=round(a_arch_recall, 4),
         recall_surface_discovery=round(a_surf_recall, 4),
         recall_blast_radius=round(a_blast_recall, 4),
+        precision_blast_radius=round(a_blast_prec, 4),
+        f1_blast_radius=round(a_blast_f1, 4),
         recall_coupled_tests=round(a_test_recall, 4),
+        precision_coupled_tests=round(a_test_prec, 4),
+        f1_coupled_tests=round(a_test_f1, 4),
         mean_recall=round(a_mean, 4),
         maint_llm_tokens_impl_commit=0,
         maint_llm_tokens_minor_struct_commit=0,
         maint_jev_tokens_minor_struct_commit=0,
     )
 
-    # ── Condition B: tier1_manifests (depth-0/1 CONTEXT.md + 1 entrypoint + grep) ──
+    # ── Condition B: tier1_manifests (`ctx export --depth 1` + 1 entrypoint + symbol-aware grep) ──
+    b_steps: list[tuple[str, str]] = []
     t1_manifest_texts = _load_or_synthesize_tier1_depth1_manifests(resolved, oracle.files)
+    t1_export_blob = "\n\n".join(t1_manifest_texts)
+    b_steps.append(("ctx_export_depth1", t1_export_blob))
+
     b_ep_texts = ep_texts[:1]
-    cond_b_turns = min(len(t1_manifest_texts), 4) + len(b_ep_texts) + 2
-    cond_b_tokens = (
-        sum(_approx_tokens(m) for m in t1_manifest_texts)
-        + sum(_approx_tokens(t) for t in b_ep_texts)
-        + _approx_tokens(prod_grep_out)
-        + _approx_tokens(test_grep_out)
+    for idx, txt in enumerate(b_ep_texts):
+        b_steps.append((f"read_entrypoint:{idx}", txt))
+
+    focal_syms = _extract_top_level_symbol_names(focal_raw, Path(focal_target).suffix.lower(), limit=4)
+    b_terms = [re.escape(t) for t in ([focal_stem, *focal_syms] if focal_stem else focal_syms) if t]
+    b_grep_re = re.compile(rf"\b(?:{'|'.join(b_terms)})\b") if b_terms else re.compile(r"$^")
+    b_prod_grep_out, b_grep_prod_files = _execute_regex_grep(
+        oracle.files,
+        b_grep_re,
+        include_tests=False,
+        only_tests=False,
+        max_lines=120,
     )
+    b_grep_prod_files.discard(focal_target)
+    b_steps.append(("grep_prod_symbols", b_prod_grep_out))
+
+    b_test_grep_out, b_grep_test_files = _execute_regex_grep(
+        oracle.files,
+        b_grep_re,
+        include_tests=True,
+        only_tests=True,
+        max_lines=80,
+    )
+    b_steps.append(("grep_tests_symbols", b_test_grep_out))
+
+    cond_b_turns = len(b_steps)
+    cond_b_tokens = sum(_approx_tokens(payload) for _, payload in b_steps)
 
     b_ingested_texts = [*t1_manifest_texts, *b_ep_texts]
     b_bdocs_found = {
@@ -803,15 +891,15 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
         1 for (_k, tok, _f) in oracle.public_surfaces if _surface_present_in_texts(tok, b_ingested_texts)
     )
     b_surf_recall = _ratio(b_surf_found, len(oracle.public_surfaces))
-    b_blast_recall = a_blast_recall
-    b_test_recall = a_test_recall
+    b_blast_recall, b_blast_prec, b_blast_f1 = _precision_and_f1(b_grep_prod_files, oracle.prod_transitive)
+    b_test_recall, b_test_prec, b_test_f1 = _precision_and_f1(b_grep_test_files, oracle.coupled_tests)
     b_mean = (b_arch_recall + b_surf_recall + b_blast_recall + b_test_recall) / 4.0
 
-    # Empirical Tier 1 incremental refresh cost for modifying `focal_target`:
+    # Modeled analytical Tier 1 incremental refresh cost for modifying `focal_target`:
     # 1 file summary call (truncated at 8,000 max_file_tokens + prompt wrapper) + directory cascade
     focal_dir = Path(focal_target).parent.as_posix()
     focal_siblings = sum(1 for rel in oracle.files if Path(rel).parent.as_posix() == focal_dir)
-    focal_file_tok = min(8000, _approx_tokens(oracle.files.get(focal_target, "")))
+    focal_file_tok = min(8000, _approx_tokens(focal_raw))
     t1_maint_tokens = focal_file_tok + 360 + focal_siblings * 28
 
     cond_b = ConditionMetrics(
@@ -821,7 +909,11 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
         recall_arch_orientation=round(b_arch_recall, 4),
         recall_surface_discovery=round(b_surf_recall, 4),
         recall_blast_radius=round(b_blast_recall, 4),
+        precision_blast_radius=round(b_blast_prec, 4),
+        f1_blast_radius=round(b_blast_f1, 4),
         recall_coupled_tests=round(b_test_recall, 4),
+        precision_coupled_tests=round(b_test_prec, 4),
+        f1_coupled_tests=round(b_test_f1, 4),
         mean_recall=round(b_mean, 4),
         maint_llm_tokens_impl_commit=t1_maint_tokens,
         maint_llm_tokens_minor_struct_commit=t1_maint_tokens,
@@ -829,16 +921,20 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
     )
 
     # ── Condition C: tier2_plus_impact (CONTEXT-0.md + `ctx impact <focal_target>`) ──
+    c_steps: list[tuple[str, str]] = []
     sk = extract_skeleton(resolved)
     c0_md = render_context_0(sk, generated="2026-11-01T00:00:00Z")
+    c_steps.append(("read_context_0", c0_md))
+
     impact = analyze_impact(resolved, focal_target, skeleton=sk)
     impact_dict = asdict(impact)
     impact_json = json.dumps(impact_dict)
+    c_steps.append(("ctx_impact", impact_json))
 
-    cond_c_turns = 2
-    cond_c_tokens = _approx_tokens(c0_md) + _approx_tokens(impact_json)
+    cond_c_turns = len(c_steps)
+    cond_c_tokens = sum(_approx_tokens(payload) for _, payload in c_steps)
 
-    # Strictly evaluate Condition C outputs against the independent static oracle (no hardcoded 1.0s)
+    # Evaluate Condition C outputs against the static reference oracle (both recall and precision/F1)
     c_gov_set = set(impact.governing_docs)
     c_bdocs_found = {d for d in oracle.boundary_docs if d in c0_md or d in c_gov_set}
     c_arch_recall = _ratio(len(c_bdocs_found), len(oracle.boundary_docs))
@@ -849,24 +945,17 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
     c_surf_recall = _ratio(c_surf_found, len(oracle.public_surfaces))
 
     c_impact_prod = {rec["path"] for rec in impact.transitive_inbound_dependents if not rec["is_test"]}
-    c_blast_recall = _ratio(len(c_impact_prod & oracle.prod_transitive), len(oracle.prod_transitive))
+    c_blast_recall, c_blast_prec, c_blast_f1 = _precision_and_f1(c_impact_prod, oracle.prod_transitive)
 
     c_impact_tests = {rec["path"] for rec in impact.coupled_tests}
-    c_test_recall = _ratio(len(c_impact_tests & oracle.coupled_tests), len(oracle.coupled_tests))
+    c_test_recall, c_test_prec, c_test_f1 = _precision_and_f1(c_impact_tests, oracle.coupled_tests)
     c_mean = (c_arch_recall + c_surf_recall + c_blast_recall + c_test_recall) / 4.0
 
-    # Measure actual System-One Jev delta payload tokens for a 1-symbol minor structural delta
+    # Modeled System-One Jev delta payload tokens for a 1-symbol minor structural delta
     prev_snap = build_skeleton_snapshot(sk)
     if prev_snap.get("symbols"):
         prev_snap["symbols"] = prev_snap["symbols"][:-1]
-    sample_delta = compute_structural_delta(
-        {
-            "structural_hash": "sha256:prev",
-            "boundary_doc_hash": sk.boundary_doc_hash,
-            "snapshot": prev_snap,
-        },
-        sk,
-    )
+    sample_delta = compute_structural_delta(prev_snap, sk)
     jev_delta_tokens = _approx_tokens(json.dumps(sample_delta, sort_keys=True)) + 145
 
     cond_c = ConditionMetrics(
@@ -876,7 +965,11 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
         recall_arch_orientation=round(c_arch_recall, 4),
         recall_surface_discovery=round(c_surf_recall, 4),
         recall_blast_radius=round(c_blast_recall, 4),
+        precision_blast_radius=round(c_blast_prec, 4),
+        f1_blast_radius=round(c_blast_f1, 4),
         recall_coupled_tests=round(c_test_recall, 4),
+        precision_coupled_tests=round(c_test_prec, 4),
+        f1_coupled_tests=round(c_test_f1, 4),
         mean_recall=round(c_mean, 4),
         maint_llm_tokens_impl_commit=0,
         maint_llm_tokens_minor_struct_commit=0,
@@ -936,8 +1029,12 @@ def run_navigation_benchmark(paths: list[Path]) -> dict[str, Any]:
             "mean_recall": round(sum(m.mean_recall for m in metrics_list) / n, 4),
             "mean_arch_orientation_recall": round(sum(m.recall_arch_orientation for m in metrics_list) / n, 4),
             "mean_blast_radius_recall": round(sum(m.recall_blast_radius for m in metrics_list) / n, 4),
+            "mean_blast_radius_precision": round(sum(m.precision_blast_radius for m in metrics_list) / n, 4),
+            "mean_blast_radius_f1": round(sum(m.f1_blast_radius for m in metrics_list) / n, 4),
             "mean_surface_discovery_recall": round(sum(m.recall_surface_discovery for m in metrics_list) / n, 4),
             "mean_coupled_tests_recall": round(sum(m.recall_coupled_tests for m in metrics_list) / n, 4),
+            "mean_coupled_tests_precision": round(sum(m.precision_coupled_tests for m in metrics_list) / n, 4),
+            "mean_coupled_tests_f1": round(sum(m.f1_coupled_tests for m in metrics_list) / n, 4),
             "maint_llm_tokens_impl_commit": round(
                 sum(m.maint_llm_tokens_impl_commit for m in metrics_list) / n, 1
             ),
@@ -955,8 +1052,9 @@ def run_navigation_benchmark(paths: list[Path]) -> dict[str, Any]:
     c_turns = aggregates["tier2_plus_impact"]["mean_tool_turns"]
 
     return {
-        "benchmark_version": "phase-27.1-v2-static-oracle",
+        "benchmark_version": "phase-27.1-v3-static-oracle-f1",
         "methodology": "deterministic_static_oracle_retrieval",
+        "maintenance_cost_basis": "modeled_analytical_estimate",
         "generator": f"ctx/{__version__}",
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "repos_evaluated": len(repo_results),
@@ -965,6 +1063,11 @@ def run_navigation_benchmark(paths: list[Path]) -> dict[str, Any]:
             "turn_reduction_vs_raw_grep_pct": round((1.0 - (c_turns / raw_turns)) * 100.0, 1),
             "recall_gain_vs_raw_grep_pct": round(
                 (aggregates["tier2_plus_impact"]["mean_recall"] - aggregates["raw_grep"]["mean_recall"]) * 100.0,
+                1,
+            ),
+            "blast_f1_gain_vs_raw_grep_pct": round(
+                (aggregates["tier2_plus_impact"]["mean_blast_radius_f1"] - aggregates["raw_grep"]["mean_blast_radius_f1"])
+                * 100.0,
                 1,
             ),
             "aggregates": aggregates,
@@ -977,44 +1080,62 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
     """Render a reproducible GitHub-Flavored Markdown report for Phase 27.1 A/B/C benchmark results."""
     summary = report["summary"]
     aggs = summary["aggregates"]
+    blast_f1_delta = summary.get(
+        "blast_f1_gain_vs_raw_grep_pct",
+        round(
+            (aggs["tier2_plus_impact"].get("mean_blast_radius_f1", 0.0) - aggs["raw_grep"].get("mean_blast_radius_f1", 0.0))
+            * 100.0,
+            1,
+        ),
+    )
     lines = [
         "# Phase 27.1 — Deterministic Static-Oracle Navigation & Blast-Radius Benchmark",
         "",
         f"- **Generated:** `{report['generated']}`",
         f"- **Generator:** `{report['generator']}` (`{report['benchmark_version']}`)",
         f"- **Methodology:** `{report.get('methodology', 'deterministic_static_oracle_retrieval')}`",
+        f"- **Maintenance Cost Basis:** `{report.get('maintenance_cost_basis', 'modeled_analytical_estimate')}`",
         f"- **Repositories Evaluated:** {report['repos_evaluated']}",
         "- **Reproduce:** `ctx benchmark <repo1> [repo2 ...] --out-file docs/benchmarks/phase27-1-navigation-benchmark.md`",
         "",
         "## Methodology & Scope",
         "",
-        "This benchmark deterministically evaluates retrieval context-token efficiency and recall across three fixed "
-        "navigation workflows (`raw_grep`, `tier1_manifests`, and `tier2_plus_impact`) against an **independent static "
-        "AST/filesystem ground-truth oracle** built directly from raw files on disk (without calling `ctx.skeleton` or "
-        "`ctx.impact`). Condition A executes real file reads and real line-by-line regex grep (`\\b<stem>\\b`) over "
-        "repository files; Condition B reads depth-0/1 `CONTEXT.md` manifests plus regex grep; Condition C reads "
-        "rendered `.ctx/CONTEXT-0.md` plus `ctx impact <focal_target> --output json`. All four recall scores are "
-        "computed strictly by set intersection / identifier presence against the independent oracle (no stochastic LLM "
-        "agent rollouts and no hardcoded recall constants).",
+        "This benchmark deterministically evaluates retrieval context-token efficiency, recall, precision, and F1 across "
+        "three scripted retrieval workflows (`raw_grep`, `tier1_manifests`, and `tier2_plus_impact`) against a "
+        "separate static AST/filesystem reference oracle built directly from raw files on disk:",
+        "",
+        "- **Condition A (`raw_grep`):** Lists the file tree, reads root docs (`README.md`, `AGENTS.md`, `CLAUDE.md`) plus "
+        "up to 2 architecture/governance docs discovered in the file tree, reads candidate entrypoints and the focal module, "
+        "and runs line-by-line regex grep (`\\b<stem>\\b`) over production and test files.",
+        "- **Condition B (`tier1_manifests`):** Reads depth-0/1 `CONTEXT.md` manifests (`ctx export --depth 1`), reads the "
+        "primary entrypoint, and runs symbol-augmented regex grep (`\\b(?:<stem>|<exported_symbols>)\\b`).",
+        "- **Condition C (`tier2_plus_impact`):** Reads `.ctx/CONTEXT-0.md` and `ctx impact <focal_target> --output json`.",
+        "",
+        "**Scope Disclosures:** Both the reference oracle and `ctx.impact` evaluate static import graphs (measuring "
+        "static-graph retrieval recall/precision vs lexical grep rather than dynamic runtime dispatch), and per-commit "
+        "maintenance token figures in the rightmost column are **modeled analytical estimates** rather than live billing logs.",
         "",
         "## Executive Summary",
         "",
-        f"Across **{report['repos_evaluated']}** repositories and **4** static-oracle retrieval tasks "
+        f"Across **{report['repos_evaluated']}** repositories and **4** static-oracle retrieval dimensions "
         "(Authority & Architecture Orientation, Public Operational Surface Discovery, Multi-Hop Blast-Radius Tracing, "
         "and Coupled Test Selection), **Condition C (`tier2_plus_impact`: `.ctx/CONTEXT-0.md` + `ctx impact`)** achieves:",
         "",
-        f"- **{summary['token_reduction_vs_raw_grep_pct']}% fewer context tokens ingested** vs `raw_grep` "
+        f"- **{summary['token_reduction_vs_raw_grep_pct']:.1f}% context-token reduction** vs `raw_grep` "
         f"(`{aggs['tier2_plus_impact']['mean_context_tokens_read']}` vs `{aggs['raw_grep']['mean_context_tokens_read']}` mean tokens)",
-        f"- **{summary['turn_reduction_vs_raw_grep_pct']}% fewer retrieval turns** vs `raw_grep` "
-        f"(`{aggs['tier2_plus_impact']['mean_tool_turns']}` vs `{aggs['raw_grep']['mean_tool_turns']}` mean turns)",
-        f"- **+{summary['recall_gain_vs_raw_grep_pct']} percentage points higher static-oracle recall** "
-        f"(`{aggs['tier2_plus_impact']['mean_recall']:.4f}` vs `{aggs['raw_grep']['mean_recall']:.4f}`), driven by multi-hop transitive reverse-dependency & operational surface extraction",
-        f"- **0 Type-II LLM maintenance tokens** on implementation-only commits (`should_invoke_llm() == False`) and non-material structural tweaks gated by Type 1 Jev (`invariant_drift_material`, ~{aggs['tier2_plus_impact']['maint_jev_tokens_minor_struct_commit']:.0f} System-One input tokens @ `$0.042/1M`)",
+        f"- **{summary['turn_reduction_vs_raw_grep_pct']:.1f}% retrieval-step reduction** vs `raw_grep` "
+        f"(`{aggs['tier2_plus_impact']['mean_tool_turns']}` vs `{aggs['raw_grep']['mean_tool_turns']}` mean steps)",
+        f"- **{summary['recall_gain_vs_raw_grep_pct']:+.1f} percentage points static-oracle mean recall delta** "
+        f"(`{aggs['tier2_plus_impact']['mean_recall']:.4f}` vs `{aggs['raw_grep']['mean_recall']:.4f}`) and "
+        f"**{blast_f1_delta:+.1f} percentage points blast-radius F1 delta** "
+        f"(`{aggs['tier2_plus_impact'].get('mean_blast_radius_f1', 0.0):.4f}` vs `{aggs['raw_grep'].get('mean_blast_radius_f1', 0.0):.4f}`)",
+        f"- **0 modeled Type-II LLM maintenance tokens** on implementation-only commits (`should_invoke_llm() == False`) "
+        f"and non-material structural tweaks gated by Type 1 Jev (`invariant_drift_material`, ~{aggs['tier2_plus_impact']['maint_jev_tokens_minor_struct_commit']:.0f} modeled System-One input tokens @ `$0.042/1M`)",
         "",
         "## Aggregate Condition Comparison",
         "",
-        "| Condition | Mean Turns | Mean Context Tokens | Mean Overall Recall | Blast-Radius Recall | Surface Recall | Maint. Type-II LLM Tokens (Impl / Minor Struct) |",
-        "|-----------|-----------:|--------------------:|--------------------:|--------------------:|---------------:|------------------------------------------------:|",
+        "| Condition | Mean Steps | Mean Context Tokens | Mean Recall | Blast Recall / Prec / F1 | Surface Recall | Modeled Maint. Tokens (Impl / Minor Struct) |",
+        "|-----------|-----------:|--------------------:|------------:|-------------------------:|---------------:|--------------------------------------------:|",
     ]
 
     labels = {
@@ -1027,9 +1148,14 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
         maint = f"{a['maint_llm_tokens_impl_commit']:.0f} / {a['maint_llm_tokens_minor_struct_commit']:.0f}"
         if a["maint_jev_tokens_minor_struct_commit"] > 0:
             maint += f" (+{a['maint_jev_tokens_minor_struct_commit']:.0f} Jev T1)"
+        blast_triple = (
+            f"{a['mean_blast_radius_recall']:.3f} / "
+            f"{a.get('mean_blast_radius_precision', 0.0):.3f} / "
+            f"{a.get('mean_blast_radius_f1', 0.0):.3f}"
+        )
         lines.append(
             f"| {labels[key]} | {a['mean_tool_turns']:.2f} | {a['mean_context_tokens_read']:.1f} | "
-            f"{a['mean_recall']:.4f} | {a['mean_blast_radius_recall']:.4f} | "
+            f"{a['mean_recall']:.4f} | {blast_triple} | "
             f"{a['mean_surface_discovery_recall']:.4f} | {maint} |"
         )
 
@@ -1043,15 +1169,17 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
             f"{repo['focal_transitive_dependents']} transitive prod dependents, "
             f"{repo['focal_coupled_tests']} coupled test suites)",
             "",
-            "| Condition | Turns | Context Tokens | Arch Recall | Surface Recall | Blast-Radius Recall | Coupled-Test Recall | Mean Recall |",
-            "|-----------|------:|---------------:|------------:|---------------:|--------------------:|--------------------:|------------:|",
+            "| Condition | Steps | Context Tokens | Arch Recall | Surface Recall | Blast R / P / F1 | Test R / P / F1 | Mean Recall |",
+            "|-----------|------:|---------------:|------------:|---------------:|-----------------:|----------------:|------------:|",
         ])
         for key in ("raw_grep", "tier1_manifests", "tier2_plus_impact"):
             c = repo["conditions"][key]
+            b_rpf = f"{c['recall_blast_radius']:.3f} / {c.get('precision_blast_radius', 0.0):.3f} / {c.get('f1_blast_radius', 0.0):.3f}"
+            t_rpf = f"{c['recall_coupled_tests']:.3f} / {c.get('precision_coupled_tests', 0.0):.3f} / {c.get('f1_coupled_tests', 0.0):.3f}"
             lines.append(
                 f"| `{key}` | {c['tool_turns']} | {c['context_tokens_read']} | "
                 f"{c['recall_arch_orientation']:.4f} | {c['recall_surface_discovery']:.4f} | "
-                f"{c['recall_blast_radius']:.4f} | {c['recall_coupled_tests']:.4f} | "
+                f"{b_rpf} | {t_rpf} | "
                 f"**{c['mean_recall']:.4f}** |"
             )
         lines.append("")

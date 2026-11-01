@@ -474,21 +474,33 @@ def validate_head(head: Any, expected_id: str | None = None) -> list[str]:
     return errors
 
 
+_HEAD_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
 def list_head_ids(root: Path | None = None) -> list[str]:
     ids = set(BUILTIN_HEADS.keys())
     if root is not None:
         custom_dir = root.resolve() / ".ctx" / "heads"
         if custom_dir.is_dir():
             for p in custom_dir.glob("*.json"):
-                ids.add(p.stem)
+                if _HEAD_ID_RE.fullmatch(p.stem):
+                    ids.add(p.stem)
     return sorted(ids)
 
 
 def load_head(head_id: str, root: Path | None = None) -> dict[str, Any]:
+    if not isinstance(head_id, str) or not _HEAD_ID_RE.fullmatch(head_id):
+        raise ValueError(
+            f"Invalid Jev head ID {head_id!r}: must match ^[A-Za-z0-9_-]+$"
+        )
     if root is not None:
-        custom = root.resolve() / ".ctx" / "heads" / f"{head_id}.json"
-        if custom.is_file():
-            raw = json.loads(custom.read_text(encoding="utf-8"))
+        custom_dir = (root.resolve() / ".ctx" / "heads").resolve()
+        custom = (custom_dir / f"{head_id}.json").resolve()
+        if custom.parent == custom_dir and custom.is_file():
+            try:
+                raw = json.loads(custom.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"Malformed custom head {head_id}: {exc}") from exc
             errs = validate_head(raw, expected_id=head_id)
             if errs:
                 raise ValueError(f"Invalid head {head_id}: {'; '.join(errs)}")
@@ -500,6 +512,20 @@ def load_head(head_id: str, root: Path | None = None) -> dict[str, Any]:
     if errs:
         raise ValueError(f"Invalid builtin head {head_id}: {'; '.join(errs)}")
     return head
+
+
+def list_heads_safe(root: Path | None = None) -> tuple[list[dict[str, Any]], list[str]]:
+    """Load all governed Jev heads safely, skipping or falling back on malformed custom files."""
+    heads: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for hid in list_head_ids(root):
+        try:
+            heads.append(load_head(hid, root))
+        except ValueError as exc:
+            warnings.append(str(exc))
+            if hid in BUILTIN_HEADS:
+                heads.append(load_head(hid, None))
+    return heads, warnings
 
 
 def check_state(head: dict[str, Any], state: Any) -> None:

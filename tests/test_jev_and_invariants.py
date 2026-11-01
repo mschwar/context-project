@@ -339,7 +339,8 @@ def test_tier2_hybrid_invariant_synthesis_three_stage_gating(
     no_key_cache = load_cached_invariants(tmp_path)
     assert no_key_cache is not None
     assert no_key_cache["attempted"] is True
-    assert no_key_cache["gate_action"] == "llm_unavailable_fallback"
+    assert no_key_cache["gate_action"] == "no_provider_configured"
+    assert init_res.get("warnings")
 
     # Second refresh on unchanged commit with no API key MUST skip (`dirs_processed == 0`) instead of looping on missing_synth_cache
     repeat_refresh = api_refresh(tmp_path)
@@ -543,3 +544,129 @@ def test_structured_output_json_schema_capability_and_400_fallback() -> None:
         )
     assert res3[0].text == "Forced structured summary."
     assert "response_format" in forced_calls[0]
+
+
+def test_round2_qa_invariants_retry_cumulative_drift_disable_and_head_confinement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression coverage for Round-2 QA findings 1, 2, 3, and 6."""
+    from ctx.api import refresh as api_refresh
+    from ctx.jev import load_head
+
+    monkeypatch.setenv("CTX_JEV", "off")
+    subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
+    (tmp_path / "AGENTS.md").write_text("# AGENTS\n\nRule 1: Keep locks fenced.\n", encoding="utf-8")
+    pkg = tmp_path / "src" / "core"
+    pkg.mkdir(parents=True)
+    (pkg / "engine.py").write_text("class Engine:\n    def run(self) -> int:\n        return 1\n", encoding="utf-8")
+
+    # Finding 6: Jev head_id path traversal MUST be rejected before touching disk
+    outside_secret = tmp_path.parent / "outside_secret_probe.json"
+    outside_secret.write_text('{"secret": true}\n', encoding="utf-8")
+    try:
+        with pytest.raises(ValueError, match="Invalid Jev head ID"):
+            load_head("../../../outside_secret_probe", tmp_path)
+        with pytest.raises(ValueError, match="Invalid Jev head ID"):
+            load_head("../outside_secret_probe", tmp_path)
+    finally:
+        outside_secret.unlink(missing_ok=True)
+
+    # Finding 6b: Malformed custom head file does NOT crash `ctx jev heads` or Tier 2 synthesis
+    custom_heads = tmp_path / ".ctx" / "heads"
+    custom_heads.mkdir(parents=True)
+    (custom_heads / "broken_custom.json").write_text("{not valid json", encoding="utf-8")
+    (custom_heads / "invariant_drift_material.json").write_text('{"id": "wrong"}', encoding="utf-8")
+
+    runner = CliRunner()
+    heads_res = runner.invoke(cli, ["jev", "heads", str(tmp_path)])
+    assert heads_res.exit_code == 0, heads_res.output
+    assert "Warning: Skipped invalid custom Jev head" in heads_res.output
+    assert "invariant_drift_material" in heads_res.output  # fell back to valid builtin head!
+    (custom_heads / "invariant_drift_material.json").unlink()
+
+    # Set up Tier 2 repo and test Finding 1 (transient failure retry + cumulative multi-commit drift),
+    # Finding 2 (surfaced warnings), and Finding 3 (turning synthesis OFF).
+    call_counter = {"count": 0, "should_fail": False}
+
+    class _ControllableLLM:
+        model = "gpt-4o-mini"
+
+        def complete_json(self, system_prompt: str, user_prompt: str, **kwargs) -> LLMResult:
+            call_counter["count"] += 1
+            if call_counter["should_fail"]:
+                raise RuntimeError("HTTP 503 upstream overloaded")
+            payload = {
+                "invariants": [
+                    {
+                        "category": "invariant",
+                        "scope": "src/core",
+                        "statement": f"Synthesized invariant generation #{call_counter['count']} covers current baseline.",
+                    }
+                ]
+            }
+            return LLMResult(text=json.dumps(payload), input_tokens=100, output_tokens=50)
+
+    fake_cfg = Config(provider="openai", model="gpt-4o-mini", api_key="sk-test")
+    with (
+        patch("ctx.invariants.load_config", return_value=fake_cfg),
+        patch("ctx.llm.create_client", return_value=_ControllableLLM()),
+    ):
+        init_project(tmp_path, force=True, tier2=True, synthesize=True)
+        assert call_counter["count"] == 1
+
+        # Material edit to AGENTS.md, but Type-II LLM suffers a transient 503 failure
+        (tmp_path / "AGENTS.md").write_text(
+            "# AGENTS\n\nRule 1: Keep locks fenced.\nRule 2: Retry transient synthesis failures.\n",
+            encoding="utf-8",
+        )
+        call_counter["should_fail"] = True
+        failed_ref = api_refresh(tmp_path)
+        assert call_counter["count"] == 2
+        assert len(failed_ref.warnings) == 1
+        assert "HTTP 503" in failed_ref.warnings[0]
+
+        # Next refresh with NO new code changes MUST retry because checked_structural_hash was NOT advanced!
+        call_counter["should_fail"] = False
+        recovered_ref = api_refresh(tmp_path)
+        assert call_counter["count"] == 3
+        assert recovered_ref.warnings == []
+        assert "generation #3" in (tmp_path / ".ctx" / "CONTEXT-0.md").read_text(encoding="utf-8")
+
+        # Cumulative slow drift across 2 small commits (+2 symbols then +2 symbols = +4 total vs synthesized_snapshot):
+        # Commit A (+2 symbols < 4): skipped by Jev judge as non-material
+        (pkg / "engine.py").write_text(
+            "class Engine:\n    def run(self) -> int:\n        return 1\n"
+            "def helper_one() -> int:\n    return 1\n"
+            "def helper_two() -> int:\n    return 2\n",
+            encoding="utf-8",
+        )
+        c1_ref = api_refresh(tmp_path)
+        assert call_counter["count"] == 3
+        assert c1_ref.tokens_used == 0
+
+        # Commit B (+2 more symbols => +4 cumulative symbols vs generation #3 baseline!): MUST trigger rebuild!
+        (pkg / "engine.py").write_text(
+            "class Engine:\n    def run(self) -> int:\n        return 1\n"
+            "def helper_one() -> int:\n    return 1\n"
+            "def helper_two() -> int:\n    return 2\n"
+            "def helper_three() -> int:\n    return 3\n"
+            "def helper_four() -> int:\n    return 4\n",
+            encoding="utf-8",
+        )
+        c2_ref = api_refresh(tmp_path)
+        assert call_counter["count"] == 4
+        assert c2_ref.tokens_used == 150
+        assert "generation #4" in (tmp_path / ".ctx" / "CONTEXT-0.md").read_text(encoding="utf-8")
+
+        # Finding 3: Disabling synthesis via `CTX_TIER2_SYNTHESIZE=0` turns synthesis OFF even though
+        # metadata["synthesize_invariants"] was previously True, and strips synthesized section!
+        monkeypatch.setenv("CTX_TIER2_SYNTHESIZE", "0")
+        off_ref = api_refresh(tmp_path)
+        assert call_counter["count"] == 4
+        assert off_ref.dirs_processed >= 1
+        meta_after_off = json.loads((tmp_path / ".ctx" / "metadata.json").read_text(encoding="utf-8"))
+        assert meta_after_off["synthesize_invariants"] is False
+        assert "## Synthesized Cross-Module Invariants & Footguns" not in (
+            tmp_path / ".ctx" / "CONTEXT-0.md"
+        ).read_text(encoding="utf-8")

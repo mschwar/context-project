@@ -399,3 +399,56 @@ def test_cli_impact_mcp_impact_and_enriched_fleet_capsule(
     assert capsule.dependency_summary["internal_edge_count"] >= 5
     assert capsule.dependency_summary["cycle_count"] == 0
     assert any(sub.get("arch_role") for sub in capsule.subsystems)
+
+
+def test_round2_qa_iterative_tarjan_deep_graphs_dotdir_js_and_test_token_boundaries(
+    tmp_path: Path,
+) -> None:
+    """Regression coverage for Round-2 QA findings 4, 5 (test substring), and 7 (dot-dir JS)."""
+    from ctx.impact import _compute_topological_layers, _tarjan_cycles
+
+    # Finding 4: 1,600-node deep dependency chain + 1,600-node cycle MUST complete iteratively without RecursionError
+    chain_adj = {f"n{i:04d}.py": ([f"n{i + 1:04d}.py"] if i < 1599 else []) for i in range(1600)}
+    assert _tarjan_cycles(chain_adj) == []
+    layers, file_layers = _compute_topological_layers(chain_adj)
+    assert len(layers) == 1600
+    assert file_layers["n1599.py"] == 0
+    assert file_layers["n0000.py"] == 1599
+
+    ring_adj = {f"c{i:04d}.py": [f"c{(i + 1) % 1600:04d}.py"] for i in range(1600)}
+    ring_cycles = _tarjan_cycles(ring_adj)
+    assert len(ring_cycles) == 1
+    assert len(ring_cycles[0]) == 1600
+    ring_layers, _ = _compute_topological_layers(ring_adj)
+    assert len(ring_layers) == 1
+
+    # Finding 7 & Finding 5: JS dot-directory imports (`.storybook/preview.ts`) + `init.py` vs `test_uninit.py`
+    repo = tmp_path / "dot_and_test_repo"
+    (repo / ".storybook").mkdir(parents=True)
+    (repo / ".storybook" / "preview.ts").write_text("export const decorators = [];\n", encoding="utf-8")
+    (repo / ".storybook" / "main.ts").write_text(
+        'import { decorators } from "./preview";\nexport default { decorators };\n',
+        encoding="utf-8",
+    )
+    (repo / "src" / "app").mkdir(parents=True)
+    (repo / "src" / "app" / "boot.ts").write_text(
+        'import cfg from "../../.storybook/main";\nexport const c = cfg;\n',
+        encoding="utf-8",
+    )
+    (repo / "src" / "pkg").mkdir(parents=True)
+    (repo / "src" / "pkg" / "init.py").write_text("def bootstrap() -> bool:\n    return True\n", encoding="utf-8")
+    (repo / "src" / "pkg" / "uninit.py").write_text("def teardown() -> bool:\n    return True\n", encoding="utf-8")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_init.py").write_text("def test_init_smoke(): assert True\n", encoding="utf-8")
+    (repo / "tests" / "test_init_hooks.py").write_text("def test_hooks(): assert True\n", encoding="utf-8")
+    (repo / "tests" / "test_uninit.py").write_text("def test_uninit_smoke(): assert True\n", encoding="utf-8")
+
+    graph = build_dependency_graph(repo)
+    assert ".storybook/preview.ts" in graph.outbound_files[".storybook/main.ts"]
+    assert ".storybook/main.ts" in graph.outbound_files["src/app/boot.ts"]
+
+    init_impact = analyze_impact(repo, "src/pkg/init.py")
+    coupled_paths = {t["path"] for t in init_impact.coupled_tests}
+    assert "tests/test_init.py" in coupled_paths
+    assert "tests/test_init_hooks.py" in coupled_paths
+    assert "tests/test_uninit.py" not in coupled_paths

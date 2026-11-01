@@ -116,6 +116,7 @@ Common flags:
 - `--setup` — detect provider and write `.ctxconfig` before refreshing
 - `--watch` — refresh once, then watch for changes
 - `--until-complete` — loop automatically until all directories are covered (useful for large trees that exceed rate limits or token budgets)
+- `--synthesize` — run gated Tier 2 semantic cross-module invariant synthesis (`code -> Type 1 Jev judge -> Type-II LLM deliberate`) when refreshing a Tier 2 `.ctx/` repo
 - `--dry-run` — report stale directories without writing
 - `--output json` — emit the JSON envelope only
 

@@ -159,3 +159,22 @@ def test_pyproject_optional_extras_and_deduplicated_reset_clean(tmp_path: Path) 
     env = json.loads(real.output)
     assert env["data"]["manifests_removed"] == 2
     assert not (repo / "CONTEXT.md").exists()
+
+    # Round-2 QA Finding 8: legacy `ctx clean` on a 0-manifest tree without `--yes` in `--output json`
+    # succeeds with exit 0 and does not acquire lock or create `.ctx-cache/`.
+    empty_repo = tmp_path / "empty_clean_repo"
+    empty_repo.mkdir()
+    clean_empty = runner.invoke(cli, ["clean", str(empty_repo), "--output", "json"])
+    assert clean_empty.exit_code == 0, clean_empty.output
+    clean_env = json.loads(clean_empty.output)
+    assert clean_env["status"] == "success"
+    assert clean_env["data"] == {"manifests_removed": 0, "paths": []}
+    assert not (empty_repo / ".ctx-cache").exists()
+
+    # Round-2 QA Finding 9: negative recall/F1 deltas never render `+-` in benchmark Markdown
+    sample_report = run_navigation_benchmark([_build_benchmark_fixture(tmp_path / "neg_delta_repo")])
+    sample_report["summary"]["recall_gain_vs_raw_grep_pct"] = -3.4
+    sample_report["summary"]["blast_f1_gain_vs_raw_grep_pct"] = -1.2
+    neg_md = render_benchmark_markdown(sample_report)
+    assert "+-" not in neg_md
+    assert "-3.4 percentage points" in neg_md

@@ -83,6 +83,7 @@ class RefreshResult:
     input_tokens_saved: int = 0
     output_tokens_saved: int = 0
     tokens_saved_exact: bool = False
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -233,10 +234,10 @@ def _refresh_tier2_locked(
     """
     from datetime import datetime, timezone
 
+    from ctx.config import resolve_tier2_synthesize_preference
     from ctx.init import _restore_dir_snapshot, _snapshot_dir
     from ctx.invariants import (
         has_cached_synthesis_for_hashes,
-        load_cached_invariants,
         synthesize_tier2_invariants,
     )
     from ctx.skeleton import (
@@ -257,12 +258,13 @@ def _refresh_tier2_locked(
     if not (meta_exists and isinstance(meta, dict) and meta.get("mode") == "tier2"):
         return None
 
-    should_synth = synthesize or bool(meta.get("synthesize_invariants"))
-    if not should_synth:
-        try:
-            should_synth = load_config(root, require_api_key=False).tier2_synthesize
-        except Exception:
-            should_synth = False
+    prev_synth_flag = bool(meta.get("synthesize_invariants", False))
+    should_synth = resolve_tier2_synthesize_preference(
+        root,
+        explicit_flag=synthesize,
+        persisted_meta=meta,
+    )
+    synth_toggled = should_synth != prev_synth_flag
 
     skeleton = extract_skeleton(root, max_depth=max_depth)
     exports_missing = any(
@@ -274,7 +276,13 @@ def _refresh_tier2_locked(
         skeleton.structural_hash,
         skeleton.boundary_doc_hash,
     )
-    needs_update = force or exports_missing or missing_synth_cache or should_invoke_llm(meta, skeleton)
+    needs_update = (
+        force
+        or exports_missing
+        or synth_toggled
+        or missing_synth_cache
+        or should_invoke_llm(meta, skeleton)
+    )
     subsystem_count = max(1, len(skeleton.subsystems))
 
     if not needs_update:
@@ -298,6 +306,7 @@ def _refresh_tier2_locked(
     in_tok = 0
     out_tok = 0
     est_cost = 0.0
+    refresh_warnings: list[str] = []
     try:
         fenced_mkdir(ctx_dir, parents=True, exist_ok=True)
         synthesized_invs: list[dict[str, str]] | None = None
@@ -316,14 +325,16 @@ def _refresh_tier2_locked(
             in_tok = inv_res.input_tokens
             out_tok = inv_res.output_tokens
             est_cost = inv_res.est_cost_usd
-            if synthesize:
-                meta["synthesize_invariants"] = True
+            meta["synthesize_invariants"] = True
             meta["invariants_gate_action"] = inv_res.gate_action
+            if inv_res.warning:
+                meta["invariants_warning"] = inv_res.warning
+                refresh_warnings.append(inv_res.warning)
+            else:
+                meta.pop("invariants_warning", None)
         else:
-            cached_inv_doc = load_cached_invariants(root)
-            if isinstance(cached_inv_doc, dict) and isinstance(cached_inv_doc.get("invariants"), list):
-                if cached_inv_doc.get("structural_hash") == skeleton.structural_hash:
-                    synthesized_invs = cached_inv_doc["invariants"] or None
+            meta["synthesize_invariants"] = False
+            meta.pop("invariants_warning", None)
 
         rendered_c0 = render_context_0(skeleton, synthesized_invariants=synthesized_invs)
         rendered_c1 = render_context_1(skeleton, synthesized_invariants=synthesized_invs)
@@ -354,6 +365,7 @@ def _refresh_tier2_locked(
         stale_directories=[],
         input_tokens=in_tok,
         output_tokens=out_tok,
+        warnings=refresh_warnings,
     )
 
 
@@ -1374,13 +1386,17 @@ def reset(
     if not yes:
         raise ConfirmationRequiredError("--yes flag required in non-interactive mode")
 
+    if not _iter_tree_manifests(root):
+        return ResetResult(manifests_removed=0, paths=[])
+
     lock_root = resolve_project_anchor(root) if root.exists() else root
     with CtxLock(lock_root, command="reset"):
         manifests = _iter_tree_manifests(root)
         paths = [_path_relative(manifest, root) for manifest in manifests]
-        for manifest in manifests:
-            fenced_unlink(manifest, missing_ok=True)
-        _sync_tier1_ctx_exports(root)
+        if manifests:
+            for manifest in manifests:
+                fenced_unlink(manifest, missing_ok=True)
+            _sync_tier1_ctx_exports(root)
 
     return ResetResult(manifests_removed=len(manifests), paths=paths)
 
@@ -1444,7 +1460,10 @@ def build_fleet_capsule(
 
     resolved_root = root.resolve()
     skeleton = extract_skeleton(resolved_root)
-    dep_graph = build_dependency_graph(resolved_root, skeleton=skeleton)
+    try:
+        dep_graph = build_dependency_graph(resolved_root, skeleton=skeleton)
+    except Exception:
+        dep_graph = None
     repo_id = f"sha256:{hashlib.sha256(str(resolved_root).encode('utf-8')).hexdigest()}"
 
     kept_boundary_docs = [
@@ -1503,20 +1522,24 @@ def build_fleet_capsule(
         }
         for surf in kept_surfaces[:60]
     ]
-    dependency_summary: dict[str, object] = {
-        "internal_edge_count": dep_graph.internal_edge_count,
-        "cycle_count": len(dep_graph.cycles),
-        "subsystem_cycle_count": len(dep_graph.subsystem_cycles),
-        "topological_layers_count": len(dep_graph.topological_layers),
-        "top_hubs": [
-            {"path": p, "inbound_count": len(callers)}
-            for p, callers in sorted(
-                dep_graph.inbound_files.items(),
-                key=lambda kv: (-len(kv[1]), kv[0]),
-            )[:5]
-            if callers
-        ],
-    }
+    dependency_summary: dict[str, object] = (
+        {
+            "internal_edge_count": dep_graph.internal_edge_count,
+            "cycle_count": len(dep_graph.cycles),
+            "subsystem_cycle_count": len(dep_graph.subsystem_cycles),
+            "topological_layers_count": len(dep_graph.topological_layers),
+            "top_hubs": [
+                {"path": p, "inbound_count": len(callers)}
+                for p, callers in sorted(
+                    dep_graph.inbound_files.items(),
+                    key=lambda kv: (-len(kv[1]), kv[0]),
+                )[:5]
+                if callers
+            ],
+        }
+        if dep_graph is not None
+        else {}
+    )
 
     render_skeleton = replace(
         skeleton,
@@ -1575,9 +1598,19 @@ def analyze_impact(
 
 def jev_list_heads(root: Path | None = None) -> list[dict[str, object]]:
     """Return validated Jev System-One decision head specifications."""
-    from ctx.jev import list_head_ids, load_head
+    from ctx.jev import list_heads_safe
 
-    return [load_head(hid, root) for hid in list_head_ids(root)]
+    heads, _warnings = list_heads_safe(root)
+    return heads
+
+
+def jev_list_heads_with_warnings(
+    root: Path | None = None,
+) -> tuple[list[dict[str, object]], list[str]]:
+    """Return validated Jev heads plus warnings for any malformed custom head files."""
+    from ctx.jev import list_heads_safe
+
+    return list_heads_safe(root)
 
 
 def jev_decide(

@@ -110,9 +110,10 @@ def init_project(
     gitignore_path = root / ".gitignore"
     hooks_installed: list[str] = []
     invariants_synthesized = 0
+    init_warnings: list[str] = []
 
     if tier2:
-        from ctx.config import load_config
+        from ctx.config import resolve_tier2_synthesize_preference
         from ctx.invariants import synthesize_tier2_invariants
         from ctx.skeleton import (
             extract_skeleton,
@@ -121,12 +122,7 @@ def init_project(
             render_context_full,
         )
 
-        should_synth = synthesize
-        if not should_synth:
-            try:
-                should_synth = load_config(root, require_api_key=False).tier2_synthesize
-            except Exception:
-                should_synth = False
+        should_synth = resolve_tier2_synthesize_preference(root, explicit_flag=synthesize)
 
         with CtxLock(root, command="init"):
             if ctx_dir.is_dir() and not force:
@@ -154,6 +150,9 @@ def init_project(
                         invariants_synthesized = len(inv_res.invariants)
                         metadata["synthesize_invariants"] = True
                         metadata["invariants_gate_action"] = inv_res.gate_action
+                        if inv_res.warning:
+                            metadata["invariants_warning"] = inv_res.warning
+                            init_warnings.append(inv_res.warning)
                     rendered_c0 = render_context_0(skeleton, synthesized_invariants=synthesized_invs)
                     rendered_c1 = render_context_1(skeleton, synthesized_invariants=synthesized_invs)
                     rendered_full = render_context_full(skeleton, synthesized_invariants=synthesized_invs)
@@ -265,6 +264,8 @@ def init_project(
     if tier2:
         result["mode"] = "tier2"
         result["invariants_synthesized"] = invariants_synthesized
+    if init_warnings:
+        result["warnings"] = init_warnings
     return result
 
 

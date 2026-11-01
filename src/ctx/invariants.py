@@ -200,13 +200,15 @@ def has_cached_synthesis_for_hashes(
     structural_hash: str,
     boundary_doc_hash: str,
 ) -> bool:
-    """Return True if `.ctx/invariants.json` already recorded a synthesis attempt for these hashes."""
+    """Return True if `.ctx/invariants.json` already recorded a valid check/synthesis for these hashes."""
     cached = load_cached_invariants(root)
     if not isinstance(cached, dict):
         return False
+    checked_struct = cached.get("checked_structural_hash") or cached.get("structural_hash")
+    checked_bdoc = cached.get("checked_boundary_doc_hash") or cached.get("boundary_doc_hash")
     return (
-        cached.get("structural_hash") == structural_hash
-        and cached.get("boundary_doc_hash") == boundary_doc_hash
+        checked_struct == structural_hash
+        and checked_bdoc == boundary_doc_hash
         and bool(cached.get("attempted", bool(cached.get("invariants"))))
     )
 
@@ -322,17 +324,29 @@ def _persist_invariants_cache(
     model: str,
     tokens_used: int,
     gate_action: str,
+    synthesized_snapshot: dict[str, Any] | None = None,
+    synthesized_structural_hash: str | None = None,
+    synthesized_boundary_doc_hash: str | None = None,
 ) -> None:
     cache_file = invariants_cache_path(root)
-    record = {
+    curr_snap = build_skeleton_snapshot(skeleton)
+    baseline_snap = curr_snap if gate_action == "synthesized" else synthesized_snapshot
+    synth_struct = skeleton.structural_hash if gate_action == "synthesized" else synthesized_structural_hash
+    synth_bdoc = skeleton.boundary_doc_hash if gate_action == "synthesized" else synthesized_boundary_doc_hash
+    record: dict[str, Any] = {
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "attempted": True,
         "structural_hash": skeleton.structural_hash,
         "boundary_doc_hash": skeleton.boundary_doc_hash,
+        "checked_structural_hash": skeleton.structural_hash,
+        "checked_boundary_doc_hash": skeleton.boundary_doc_hash,
+        "synthesized_structural_hash": synth_struct,
+        "synthesized_boundary_doc_hash": synth_bdoc,
         "model": model,
         "tokens_used": tokens_used,
         "gate_action": gate_action,
-        "snapshot": build_skeleton_snapshot(skeleton),
+        "synthesized_snapshot": baseline_snap,
+        "snapshot": baseline_snap if baseline_snap is not None else curr_snap,
         "invariants": invariants,
     }
     save_json_atomic(cache_file, record)
@@ -355,9 +369,34 @@ def synthesize_tier2_invariants(
     cached_invs = _normalize_invariants_list(cached.get("invariants")) if cached else []
     cached_model = str(cached.get("model") or "") if cached else ""
     already_attempted = bool(cached.get("attempted", bool(cached_invs))) if cached else False
+    baseline_snapshot: dict[str, Any] | None = None
+    synth_struct_hash: str | None = None
+    synth_bdoc_hash: str | None = None
+    if cached:
+        raw_base = cached.get("synthesized_snapshot")
+        if not isinstance(raw_base, dict) and cached_invs and isinstance(cached.get("snapshot"), dict):
+            raw_base = cached["snapshot"]
+        if isinstance(raw_base, dict):
+            baseline_snapshot = raw_base
+        synth_struct_hash = (
+            str(cached["synthesized_structural_hash"])
+            if cached.get("synthesized_structural_hash")
+            else (str(cached["structural_hash"]) if cached_invs and cached.get("structural_hash") else None)
+        )
+        synth_bdoc_hash = (
+            str(cached["synthesized_boundary_doc_hash"])
+            if cached.get("synthesized_boundary_doc_hash")
+            else (str(cached["boundary_doc_hash"]) if cached_invs and cached.get("boundary_doc_hash") else None)
+        )
 
-    # Stage 1 (`code`): exact structural_hash + boundary_doc_hash match -> 0 tokens
-    hash_source = cached if (cached and cached.get("structural_hash")) else prev_metadata
+    # Stage 1 (`code`): exact checked_structural_hash + checked_boundary_doc_hash match -> 0 tokens
+    if cached and (cached.get("checked_structural_hash") or cached.get("structural_hash")):
+        hash_source: dict[str, Any] | None = {
+            "structural_hash": cached.get("checked_structural_hash") or cached.get("structural_hash"),
+            "boundary_doc_hash": cached.get("checked_boundary_doc_hash") or cached.get("boundary_doc_hash"),
+        }
+    else:
+        hash_source = prev_metadata
     if not force and already_attempted and not should_invoke_llm(hash_source, skeleton):
         return InvariantSynthesisResult(
             invariants=cached_invs,
@@ -368,13 +407,17 @@ def synthesize_tier2_invariants(
         )
 
     # Stage 2 (`judge` — Type 1 Jev `invariant_drift_material`):
-    # When structural signatures changed and we have a prior snapshot + invariants, let Jev judge materiality.
+    # Compare strictly against `baseline_snapshot` (the structure at the last successful LLM synthesis)
+    # so cumulative small commits eventually exceed materiality thresholds and trigger a rebuild.
     jev_tokens = 0
     jev_cost = 0.0
-    if not force and cached_invs and cached and isinstance(cached.get("snapshot"), dict):
-        delta = compute_structural_delta(cached["snapshot"], skeleton)
-        jev_res = jev_decide(["invariant_drift_material"], delta, root=resolved_root)
-        decisions = jev_res.get("decisions") or []
+    if not force and cached_invs and baseline_snapshot is not None:
+        delta = compute_structural_delta(baseline_snapshot, skeleton)
+        try:
+            jev_res = jev_decide(["invariant_drift_material"], delta, root=resolved_root)
+            decisions = jev_res.get("decisions") or []
+        except (ValueError, OSError):
+            decisions = []
         if decisions:
             dec = decisions[0]
             jev_tokens = int(dec.get("input_tokens") or 0)
@@ -387,6 +430,9 @@ def synthesize_tier2_invariants(
                     model=cached_model,
                     tokens_used=0,
                     gate_action="jev_skipped_non_material",
+                    synthesized_snapshot=baseline_snapshot,
+                    synthesized_structural_hash=synth_struct_hash,
+                    synthesized_boundary_doc_hash=synth_bdoc_hash,
                 )
                 return InvariantSynthesisResult(
                     invariants=cached_invs,
@@ -415,9 +461,9 @@ def synthesize_tier2_invariants(
             client = create_client(cfg)
             resolved_provider = cfg.provider
             resolved_model_name = cfg.resolved_model()
-        except (MissingApiKeyError, ModuleNotFoundError, ImportError, Exception) as exc:
-            if isinstance(exc, LockSupersededError):
-                raise
+        except (MissingApiKeyError, ModuleNotFoundError, ImportError) as exc:
+            # Unconfigured repo / missing optional SDK: mark checked hashes so git hooks don't spin,
+            # while preserving `baseline_snapshot` from any prior successful synthesis.
             try:
                 _persist_invariants_cache(
                     resolved_root,
@@ -425,18 +471,34 @@ def synthesize_tier2_invariants(
                     cached_invs,
                     model=cached_model,
                     tokens_used=0,
-                    gate_action="llm_unavailable_fallback",
+                    gate_action="no_provider_configured",
+                    synthesized_snapshot=baseline_snapshot,
+                    synthesized_structural_hash=synth_struct_hash,
+                    synthesized_boundary_doc_hash=synth_bdoc_hash,
                 )
             except OSError:
                 pass
             return InvariantSynthesisResult(
                 invariants=cached_invs,
-                gate_action="llm_unavailable_fallback",
+                gate_action="no_provider_configured",
                 tokens_used=0,
                 jev_input_tokens=jev_tokens,
                 est_cost_usd=round(jev_cost, 9),
                 model=cached_model,
                 warning=f"Semantic invariant synthesis skipped ({exc}); using deterministic Tier 2 map.",
+            )
+        except Exception as exc:
+            if isinstance(exc, LockSupersededError):
+                raise
+            # Transient/config error when a provider was expected: do NOT advance checked hashes.
+            return InvariantSynthesisResult(
+                invariants=cached_invs,
+                gate_action="llm_call_failed_fallback",
+                tokens_used=0,
+                jev_input_tokens=jev_tokens,
+                est_cost_usd=round(jev_cost, 9),
+                model=cached_model,
+                warning=f"Semantic invariant synthesis failed ({exc}); will retry on next refresh.",
             )
     else:
         resolved_model_name = resolved_model_name or getattr(client, "model", "custom-llm")
@@ -453,25 +515,16 @@ def synthesize_tier2_invariants(
     except LockSupersededError:
         raise
     except Exception as exc:
-        try:
-            _persist_invariants_cache(
-                resolved_root,
-                skeleton,
-                cached_invs,
-                model=cached_model,
-                tokens_used=0,
-                gate_action="llm_unavailable_fallback",
-            )
-        except OSError:
-            pass
+        # Transient runtime/API/parse failure: do NOT advance checked hashes in `.ctx/invariants.json`
+        # so the very next `ctx refresh` retries synthesis against the true baseline.
         return InvariantSynthesisResult(
             invariants=cached_invs,
-            gate_action="llm_unavailable_fallback",
+            gate_action="llm_call_failed_fallback",
             tokens_used=0,
             jev_input_tokens=jev_tokens,
             est_cost_usd=round(jev_cost, 9),
             model=cached_model,
-            warning=f"Semantic invariant synthesis failed ({exc}); using deterministic Tier 2 map.",
+            warning=f"Semantic invariant synthesis failed ({exc}); will retry on next refresh.",
         )
 
     in_tok = int(getattr(llm_res, "input_tokens", 0) or 0)

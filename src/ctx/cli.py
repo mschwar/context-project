@@ -416,6 +416,8 @@ def refresh(
                     broker.add_error("partial_failure", error)
 
         if not json_mode:
+            for warning_msg in result.warnings:
+                click.echo(f"Warning: {warning_msg}", err=True)
             if result.setup_provider:
                 click.echo(f"Detected: {result.setup_provider} ({result.setup_detected_via or result.setup_provider})")
             if result.config_written:
@@ -497,6 +499,8 @@ def init(
         else:
             broker.set_data(result)
             if not json_mode:
+                for warning_msg in result.get("warnings", []):
+                    click.echo(f"Warning: {warning_msg}", err=True)
                 click.echo(f"Initialized ctx in {result['root']}")
                 click.echo(f"  .ctx/ created with {len(result['exports'])} exports")
                 click.echo(f"  Hooks installed: {', '.join(result['hooks_installed'])}")
@@ -1538,8 +1542,15 @@ def _execute_reset_command(
     json_mode: bool,
     broker: OutputBroker,
     confirm_error_code: str = "confirmation_required",
+    legacy_empty_noop: bool = False,
 ) -> None:
     """Shared implementation for `ctx reset` and legacy `ctx clean` delegating to `api.reset`."""
+    if legacy_empty_noop and not dry_run and not api._iter_tree_manifests(root):
+        broker.set_data({"manifests_removed": 0, "paths": []})
+        if not json_mode:
+            click.echo("No CONTEXT.md files found.")
+        return
+
     if json_mode and not yes and not dry_run:
         broker.add_error(
             confirm_error_code,
@@ -1575,7 +1586,7 @@ def _execute_reset_command(
                     click.echo(f"{len(result.paths)} CONTEXT.md file(s) would be deleted:")
                     for path_item in result.paths:
                         click.echo(f"  {path_item}")
-            elif result.manifests_removed == 0 and not result.paths:
+            elif legacy_empty_noop and result.manifests_removed == 0 and not result.paths:
                 click.echo("No CONTEXT.md files found.")
             else:
                 click.echo(f"Removed {result.manifests_removed} CONTEXT.md file(s).")
@@ -1632,6 +1643,7 @@ def clean(
             json_mode=json_mode,
             broker=broker,
             confirm_error_code="unknown_error",
+            legacy_empty_noop=True,
         )
     _exit_for_broker(broker, json_mode=json_mode)
 
@@ -1953,9 +1965,14 @@ def jev_heads_cmd(
     """List governed Type 1 Jev decision heads."""
     json_mode = _resolve_json_mode(ctx, sub_output_mode)
     with OutputBroker(command="jev.heads", json_mode=json_mode) as broker:
-        heads = api.jev_list_heads(Path(path))
-        broker.set_data({"heads": heads, "count": len(heads)})
+        heads, warnings = api.jev_list_heads_with_warnings(Path(path))
+        payload: dict[str, object] = {"heads": heads, "count": len(heads)}
+        if warnings:
+            payload["warnings"] = warnings
+        broker.set_data(payload)
         if not json_mode:
+            for w in warnings:
+                click.echo(f"Warning: Skipped invalid custom Jev head ({w})", err=True)
             click.echo(f"Governed Type 1 Jev heads ({len(heads)}):")
             for h in heads:
                 auth_flag = " [authority ceiling: ADVISORY]" if h.get("authority") else ""
