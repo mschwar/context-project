@@ -61,15 +61,22 @@ def try_acquire_os_lock(guard_path: Path) -> int | None:
                 pass
             return None
 
-        if _same_guard_inode(fd, guard_path):
-            try:
-                os.utime(fd, None)
-            except OSError:
+        try:
+            if _same_guard_inode(fd, guard_path):
                 try:
-                    os.utime(guard_path, None)
-                except OSError:
-                    pass
-            return fd
+                    if os.utime in os.supports_fd:
+                        os.utime(fd, None)
+                    else:
+                        os.utime(guard_path, None)
+                except (OSError, TypeError, NotImplementedError):
+                    try:
+                        os.utime(guard_path, None)
+                    except OSError:
+                        pass
+                return fd
+        except BaseException:
+            release_os_lock(fd)
+            raise
         release_os_lock(fd)
 
     return None
@@ -394,8 +401,13 @@ class CtxLock:
         return time.time() - info.timestamp > STALE_TIMEOUT_SECONDS
 
     def _is_frozen_guard_holder(self, info: LockInfo | None) -> bool:
-        """Return True only when BOTH lock metadata and the active guard inode exceed STALE_TIMEOUT_SECONDS."""
-        if info is None:
+        """Return True on POSIX when BOTH lock metadata and the active guard inode exceed STALE_TIMEOUT_SECONDS.
+
+        Live-process guard-inode rotation requires POSIX st_dev/st_ino identity and atomic os.replace()
+        over open descriptors; on Windows, live lock holders report LockHeldError until the process exits
+        (when the OS kernel automatically releases the msvcrt byte-range lock).
+        """
+        if os.name == "nt" or info is None:
             return False
         now = time.time()
         if (now - info.timestamp) <= STALE_TIMEOUT_SECONDS:
@@ -408,6 +420,8 @@ class CtxLock:
 
     def _reclaim_frozen_owner(self, initial_existing: LockInfo) -> int:
         """Atomically rotate the kernel guard inode when a live owner's heartbeat exceeds STALE_TIMEOUT_SECONDS."""
+        if os.name == "nt":
+            raise LockHeldError(initial_existing)
         reclaim_fd = try_acquire_os_lock(self._reclaim_guard_path)
         if reclaim_fd is None:
             raise LockHeldError(initial_existing)
@@ -416,7 +430,7 @@ class CtxLock:
         tmp_guard = self._lock_path.parent / f".lock.guard.{os.getpid()}.{uuid.uuid4().hex}"
         try:
             # Brief yield under reclaim_fd ensures any fresh winner that acquired flock nanoseconds
-            # ago has completed os.utime(fd, None) and metadata publication before we re-check.
+            # ago has completed os.utime and metadata publication before we re-check.
             time.sleep(0.002)
 
             # Re-try normal acquisition first in case the frozen holder exited while we acquired reclaim_fd.
@@ -444,7 +458,10 @@ class CtxLock:
             if new_os_fd is None:
                 raise LockHeldError(recheck or initial_existing)
 
-            os.replace(tmp_guard, self._guard_path)
+            try:
+                os.replace(tmp_guard, self._guard_path)
+            except PermissionError as exc:
+                raise LockHeldError(recheck or initial_existing) from exc
             with self._state_lock:
                 self._os_fd = new_os_fd
                 self._held = True
@@ -522,7 +539,15 @@ class CtxLock:
                 existing or LockInfo(pid=0, timestamp=time.time(), command="active")
             )
 
+        reclaim_fd: int | None = None
         try:
+            reclaim_fd = acquire_os_lock_blocking(self._reclaim_guard_path)
+            if not _same_guard_inode(os_fd, self._guard_path):
+                release_os_lock(os_fd)
+                existing = self._read_lock()
+                raise LockHeldError(
+                    existing or LockInfo(pid=0, timestamp=time.time(), command="active")
+                )
             existing = self._read_lock()
             if existing is not None and not self._is_stale(existing):
                 release_os_lock(os_fd)
@@ -544,6 +569,9 @@ class CtxLock:
                 self._owner_thread_id = None
             release_os_lock(os_fd)
             raise
+        finally:
+            if reclaim_fd is not None:
+                release_os_lock(reclaim_fd)
 
         try:
             self._start_heartbeat()

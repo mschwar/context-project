@@ -394,24 +394,52 @@ _SHARED_HOOKS_THREAD_LOCKS: dict[Path, threading.Lock] = {}
 _SHARED_HOOKS_THREAD_LOCKS_GUARD = threading.Lock()
 
 
-def _shared_hooks_guard_path(hooks_dir: Path) -> Path:
+def _resolve_git_common_dir(root: Path) -> Path | None:
+    """Resolve the repository's shared git common metadata directory (.git or .git/modules/<name>)."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            candidate = Path(result.stdout.strip())
+            resolved = candidate if candidate.is_absolute() else (root / candidate).resolve()
+            if resolved.is_dir():
+                return resolved.resolve()
+    except (subprocess.SubprocessError, OSError):
+        pass
+
+    git_entry = root / ".git"
+    if git_entry.is_dir():
+        return git_entry.resolve()
+    return None
+
+
+def _shared_hooks_guard_path(root: Path, hooks_dir: Path) -> Path:
     """Return a deterministic kernel lock path for *hooks_dir* outside working-tree source dirs."""
     resolved_hooks = hooks_dir.resolve()
+    digest = hashlib.sha256(str(resolved_hooks).encode("utf-8")).hexdigest()[:24]
+    common_dir = _resolve_git_common_dir(root)
+    if common_dir is not None:
+        return common_dir / f"ctx-hooks-{digest}.guard"
     if (
         resolved_hooks.name == "hooks"
         and resolved_hooks.parent.name == ".git"
         and resolved_hooks.parent.is_dir()
     ):
-        return resolved_hooks.parent / "ctx-hooks.guard"
+        return resolved_hooks.parent / f"ctx-hooks-{digest}.guard"
     uid = getattr(os, "getuid", lambda: 0)()
-    digest = hashlib.sha256(str(resolved_hooks).encode("utf-8")).hexdigest()[:24]
     return Path(tempfile.gettempdir()) / f"ctx-shared-hooks-{uid}-{digest}.guard"
 
 
 @contextmanager
 def _shared_hooks_lock(root: Path, *, timeout_seconds: float = 60.0) -> Iterator[None]:
     """Serialize hook installation, rollback, and removal across git worktrees sharing a hooks dir."""
-    guard_path = _shared_hooks_guard_path(_resolve_hooks_dir(root))
+    guard_path = _shared_hooks_guard_path(root, _resolve_hooks_dir(root))
     with _SHARED_HOOKS_THREAD_LOCKS_GUARD:
         thread_lock = _SHARED_HOOKS_THREAD_LOCKS.setdefault(guard_path, threading.Lock())
 

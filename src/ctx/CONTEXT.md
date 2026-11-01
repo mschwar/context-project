@@ -1,11 +1,11 @@
 ---
-generated: '2026-10-31T23:52:01Z'
+generated: '2026-11-01T00:00:50Z'
 generator: ctx/1.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:04c054ab4bf6f317cf1909383115c6b38b7060442ac887d9accfd73d8a5df715
+content_hash: sha256:8a466989de50a86b4066ab21d160a6c8df5c5941fa06867343d4c7faf81b042c
 files: 23
 dirs: 1
-tokens_total: 81139
+tokens_total: 81391
 ---
 # src/ctx
 

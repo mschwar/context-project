@@ -2273,3 +2273,64 @@ def test_r6_concurrent_worktree_init_and_peer_uninit_preserve_shared_hooks_and_c
         assert not (shared_hooks_dir / hook_name).exists()
 
 
+def test_n1_windows_utime_without_fd_support_and_shared_hooks_common_dir_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """try_acquire_os_lock must never pass an int fd to os.utime when os.utime not in os.supports_fd (Windows)."""
+    from ctx.init import _resolve_hooks_dir, _shared_hooks_guard_path, run_hook
+    from ctx.lock import LockInfo, STALE_TIMEOUT_SECONDS
+
+    real_utime = os.utime
+
+    def _windows_like_utime(path_or_fd: object, times: tuple[float, float] | None = None) -> None:
+        if isinstance(path_or_fd, int):
+            raise TypeError("utime: path should be string, bytes or os.PathLike, not int")
+        real_utime(path_or_fd, times)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "supports_fd", frozenset(), raising=False)
+    monkeypatch.setattr(os, "utime", _windows_like_utime)
+
+    repo = _init_git_repo(tmp_path / "win_repo")
+    (repo / "service.py").write_text("def serve() -> int:\n    return 200\n", encoding="utf-8")
+
+    # Full lifecycle (init -> run_hook -> refresh -> uninit) under Windows-like os.utime
+    init_project(repo, tier2=True)
+    run_hook(repo, "post-commit")
+    res = api_module.refresh(repo)
+    assert res.strategy == "tier2"
+    uninit_project(repo)
+    assert not (repo / CTX_DIR).exists()
+
+    # Verify _shared_hooks_guard_path lives inside shared git common dir (.git) independent of TMPDIR,
+    # even when core.hooksPath points to an external shared directory!
+    ext_hooks = tmp_path / "external_shared_hooks"
+    ext_hooks.mkdir()
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "core.hooksPath", str(ext_hooks)],
+        capture_output=True,
+        check=True,
+    )
+    wt = tmp_path / "win_wt"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-b", "win-wt", str(wt)],
+        capture_output=True,
+        check=True,
+    )
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp_one"))
+    guard_a = _shared_hooks_guard_path(repo, _resolve_hooks_dir(repo))
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp_two"))
+    guard_b = _shared_hooks_guard_path(wt, _resolve_hooks_dir(wt))
+    assert guard_a == guard_b
+    assert ".git" in guard_a.parts
+    assert not guard_a.is_relative_to(ext_hooks)
+
+    # Verify Windows live-owner guard check reports False (no PermissionError crash)
+    stale_info = LockInfo(pid=os.getpid(), timestamp=time.time() - STALE_TIMEOUT_SECONDS - 60, command="refresh")
+    probe_lock = CtxLock(repo, command="probe")
+    with patch("ctx.lock.os.name", "nt"):
+        assert probe_lock._is_frozen_guard_holder(stale_info) is False
+        with pytest.raises(LockHeldError):
+            probe_lock._reclaim_frozen_owner(stale_info)
+
+
+
