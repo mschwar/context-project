@@ -1,11 +1,11 @@
 ---
-generated: '2026-10-30T14:59:15Z'
+generated: '2026-11-01T03:21:14Z'
 generator: ctx/1.1.0
-model: qwen2.5:7b-instruct
-content_hash: sha256:a4d2ec969127294671f7549492deeda6b1a1fcefc5a99f035c9b4228bded2ca1
+model: claude-haiku-4-5-20251001
+content_hash: sha256:96b177557ba4c82c8b2092b2eb7b3bc4571bcf728c23d97235492b3298a35e02
 files: 2
-dirs: 2
-tokens_total: 4223
+dirs: 3
+tokens_total: 9748
 ---
 # docs
 
@@ -17,6 +17,7 @@ Tracks and aggregates context refresh run statistics for analytics and public le
 
 ## Subdirectories
 - **afo/** — Architecture and design specifications for the ctx command-line tool, covering JSON output conventions, API unification, concurrency safety, MCP server integration, and agent workflows.
+- **benchmarks/** — Empirical agent navigation, token-efficiency, and blast-radius benchmark reports for ctx.
 - **designs/** — Documents and plans for the design and implementation of new features in the `ctx` tool, including integration of export layers and Git hooks.
 
 ## Notes

@@ -349,6 +349,28 @@ def run_preflight(path: str = ".") -> PreflightResult:
                 status="ok",
                 detail=f"{model_name} returned valid summary",
             ))
+            if resolved_provider in LOCAL_PROVIDERS or resolved_provider == "openai":
+                from ctx.llm import get_structured_output_capability
+
+                cap = get_structured_output_capability(config)
+                if cap is True:
+                    checks.append(PreflightCheck(
+                        name="structured_outputs",
+                        status="ok",
+                        detail=f"{model_name} supports json_schema structured outputs",
+                    ))
+                elif cap is False:
+                    checks.append(PreflightCheck(
+                        name="structured_outputs",
+                        status="info",
+                        detail=f"{model_name} uses plain-JSON prompt fallback (json_schema unsupported by server)",
+                    ))
+                else:
+                    checks.append(PreflightCheck(
+                        name="structured_outputs",
+                        status="info",
+                        detail="auto-probe enabled (json_schema with automatic plain-JSON fallback)",
+                    ))
         elif err_q == "timeout":
             checks.append(PreflightCheck(
                 name="model_quality",

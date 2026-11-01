@@ -31,7 +31,13 @@ from ctx.config import LOCAL_PROVIDERS, Config
 def _load_anthropic_module():
     mod = globals().get("anthropic")
     if mod is None:
-        mod = importlib.import_module("anthropic")
+        try:
+            mod = importlib.import_module("anthropic")
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "Anthropic provider requires the 'anthropic' package. "
+                'Install with: pip install "ctx-tool[anthropic]"'
+            ) from exc
         globals()["anthropic"] = mod
     return mod
 
@@ -39,7 +45,13 @@ def _load_anthropic_module():
 def _load_openai_module():
     mod = globals().get("openai")
     if mod is None:
-        mod = importlib.import_module("openai")
+        try:
+            mod = importlib.import_module("openai")
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "OpenAI / local provider requires the 'openai' package. "
+                'Install with: pip install "ctx-tool[openai]"'
+            ) from exc
         globals()["openai"] = mod
     return mod
 
@@ -264,6 +276,83 @@ def _find_json_array(text: str) -> object | None:
     return None
 
 
+_STRUCTURED_OUTPUT_CAPABILITY_CACHE: dict[tuple[str, str], bool] = {}
+_STRUCTURED_OUTPUT_CACHE_LOCK = threading.Lock()
+_UNSUPPORTED_SCHEMA_ERROR_TOKENS = (
+    "response_format",
+    "json_schema",
+    "structured output",
+    "structured_output",
+    "unsupported format",
+    "response format",
+)
+
+
+def build_file_summaries_json_schema(expected_count: int) -> dict[str, object]:
+    """Build an OpenAI-compatible constrained `json_schema` `response_format` for batch file summaries."""
+    count = max(1, int(expected_count))
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "ctx_file_summaries",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["summaries"],
+                "properties": {
+                    "summaries": {
+                        "type": "array",
+                        "minItems": count,
+                        "maxItems": count,
+                        "items": {"type": "string"},
+                    }
+                },
+            },
+        },
+    }
+
+
+def _structured_output_cache_key(config: Config, model: str | None = None) -> tuple[str, str]:
+    base = (config.base_url or "https://api.openai.com/v1").rstrip("/")
+    resolved = model or config.resolved_model()
+    return (base, resolved)
+
+
+def get_structured_output_capability(config: Config, model: str | None = None) -> bool | None:
+    key = _structured_output_cache_key(config, model)
+    with _STRUCTURED_OUTPUT_CACHE_LOCK:
+        return _STRUCTURED_OUTPUT_CAPABILITY_CACHE.get(key)
+
+
+def _set_structured_output_capability(config: Config, model: str, supported: bool) -> None:
+    key = _structured_output_cache_key(config, model)
+    with _STRUCTURED_OUTPUT_CACHE_LOCK:
+        _STRUCTURED_OUTPUT_CAPABILITY_CACHE[key] = supported
+
+
+def clear_structured_output_capability_cache() -> None:
+    with _STRUCTURED_OUTPUT_CACHE_LOCK:
+        _STRUCTURED_OUTPUT_CAPABILITY_CACHE.clear()
+
+
+def _should_use_structured_outputs(config: Config, model: str) -> bool:
+    mode = str(getattr(config, "structured_outputs", "auto") or "auto").strip().lower()
+    if mode in {"off", "false", "0", "disabled", "none"}:
+        return False
+    cached = get_structured_output_capability(config, model)
+    if cached is False:
+        return False
+    if mode in {"on", "true", "1", "yes"}:
+        return True
+    return True
+
+
+def _is_unsupported_response_format_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(tok in msg for tok in _UNSUPPORTED_SCHEMA_ERROR_TOKENS)
+
+
 def _extract_json_array(text: str) -> list[str]:
     stripped = text.strip()
     payload: object
@@ -274,6 +363,9 @@ def _extract_json_array(text: str) -> list[str]:
         payload = _find_json_array(stripped)
         if payload is None:
             raise ValueError("LLM response did not contain a JSON array.") from None
+
+    if isinstance(payload, dict) and isinstance(payload.get("summaries"), list):
+        payload = payload["summaries"]
 
     if not isinstance(payload, list):
         raise ValueError("LLM response was not a JSON array.")
@@ -604,6 +696,30 @@ class AnthropicClient:
         output_tokens = int(getattr(getattr(response, "usage", None), "output_tokens", 0) or 0)
         return LLMResult(text=text, input_tokens=input_tokens, output_tokens=output_tokens)
 
+    def complete_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        json_schema: dict[str, object] | None = None,
+        max_tokens: int = 2048,
+    ) -> LLMResult:
+        _ = json_schema
+        response = _call_with_retries(
+            "Anthropic",
+            lambda: self.client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                temperature=0,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            ),
+        )
+        text = _extract_anthropic_text(response)
+        input_tokens = int(getattr(getattr(response, "usage", None), "input_tokens", 0) or 0)
+        output_tokens = int(getattr(getattr(response, "usage", None), "output_tokens", 0) or 0)
+        return LLMResult(text=text, input_tokens=input_tokens, output_tokens=output_tokens)
+
 
 class OpenAIClient:
     """OpenAI implementation of LLMClient.
@@ -694,24 +810,81 @@ class OpenAIClient:
             return self.config.files_per_call
         return min(DEFAULT_LOCAL_FILES_PER_CALL, file_count)
 
+    def _create_chat_completion_with_optional_schema(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        max_completion_tokens: int,
+        response_format: dict[str, object] | None,
+    ) -> object:
+        is_local = self.config.provider in LOCAL_PROVIDERS
+        openai_mod = _load_openai_module()
+        schema_errors: tuple[type[Exception], ...] = tuple(
+            cls
+            for cls in (
+                getattr(openai_mod, "BadRequestError", None),
+                getattr(openai_mod, "UnprocessableEntityError", None),
+            )
+            if isinstance(cls, type) and issubclass(cls, Exception)
+        )
+
+        if response_format is not None and _should_use_structured_outputs(self.config, self.model):
+            try:
+                resp = _call_with_retries(
+                    "OpenAI",
+                    lambda: self.client.chat.completions.create(
+                        model=self.model,
+                        temperature=0,
+                        max_completion_tokens=max_completion_tokens,
+                        messages=messages,
+                        response_format=response_format,
+                    ),
+                    is_local=is_local,
+                )
+                _set_structured_output_capability(self.config, self.model, True)
+                return resp
+            except Exception as exc:
+                is_4xx_schema_err = (
+                    (schema_errors and isinstance(exc, schema_errors))
+                    or getattr(exc, "status_code", None) in (400, 422)
+                )
+                if is_4xx_schema_err and _is_unsupported_response_format_error(exc):
+                    logger.info(
+                        "Provider %s (%s) does not support json_schema response_format (%s); "
+                        "caching fallback to plain JSON mode.",
+                        self.config.provider,
+                        self.model,
+                        exc,
+                    )
+                    _set_structured_output_capability(self.config, self.model, False)
+                else:
+                    raise
+
+        return _call_with_retries(
+            "OpenAI",
+            lambda: self.client.chat.completions.create(
+                model=self.model,
+                temperature=0,
+                max_completion_tokens=max_completion_tokens,
+                messages=messages,
+            ),
+            is_local=is_local,
+        )
+
     def _summarize_files_chunk(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
         payload_content = _format_files_json_payload(dir_path, files)
         user_prompt = self.prompt_templates.get("file_summary", DEFAULT_PROMPT_TEMPLATES["file_summary"]).format(json_payload=payload_content)
         system_prompt = self.prompt_templates.get("file_summary_system", DEFAULT_PROMPT_TEMPLATES["file_summary_system"])
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
 
         try:
-            response = _call_with_retries(
-                "OpenAI",
-                lambda: self.client.chat.completions.create(
-                    model=self.model,
-                    temperature=0,
-                    max_completion_tokens=_file_summary_output_budget(len(files)),
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                ),
-                is_local=self.config.provider in LOCAL_PROVIDERS,
+            response = self._create_chat_completion_with_optional_schema(
+                messages=messages,
+                max_completion_tokens=_file_summary_output_budget(len(files)),
+                response_format=build_file_summaries_json_schema(len(files)),
             )
         except _load_openai_module().BadRequestError as exc:
             if self.config.provider in LOCAL_PROVIDERS:
@@ -738,6 +911,27 @@ class OpenAIClient:
 
         input_tokens, output_tokens = self._usage_from_response(response)
         return _build_batch_results(summaries, input_tokens, output_tokens)
+
+    def complete_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        json_schema: dict[str, object] | None = None,
+        max_tokens: int = 2048,
+    ) -> LLMResult:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        response = self._create_chat_completion_with_optional_schema(
+            messages=messages,
+            max_completion_tokens=max_tokens,
+            response_format=json_schema,
+        )
+        text = _extract_openai_text(response)
+        input_tokens, output_tokens = self._usage_from_response(response)
+        return LLMResult(text=text, input_tokens=input_tokens, output_tokens=output_tokens)
 
     def summarize_files(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
         if not files:
@@ -1182,6 +1376,56 @@ class CachingLLMClient:
             if not fut.done():
                 fut.set_exception(exc)
             raise
+
+    def complete_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        json_schema: dict[str, object] | None = None,
+        max_tokens: int = 2048,
+    ) -> LLMResult:
+        inner_fn = getattr(self._client, "complete_json", None)
+        if callable(inner_fn):
+            return inner_fn(
+                system_prompt,
+                user_prompt,
+                json_schema=json_schema,
+                max_tokens=max_tokens,
+            )
+        raise NotImplementedError("Underlying LLM client does not implement complete_json")
+
+
+def probe_structured_output_support(config: Config) -> tuple[bool, str]:
+    """Probe whether an OpenAI/local endpoint supports `response_format={'type': 'json_schema', ...}`."""
+    if config.provider == "anthropic":
+        return False, "Anthropic uses native JSON array prompting"
+    cached = get_structured_output_capability(config)
+    if cached is True:
+        return True, "json_schema structured outputs supported (cached)"
+    if cached is False:
+        return False, "plain JSON prompt fallback (cached)"
+
+    client = create_client(config)
+    if not isinstance(client, OpenAIClient):
+        return False, f"structured output probe not applicable to {config.provider}"
+
+    try:
+        client._create_chat_completion_with_optional_schema(
+            messages=[
+                {"role": "system", "content": "Return JSON matching the schema."},
+                {"role": "user", "content": 'Summarize: {"name": "ping.py", "content": "x = 1"}'},
+            ],
+            max_completion_tokens=64,
+            response_format=build_file_summaries_json_schema(1),
+        )
+    except Exception as exc:
+        return False, f"probe failed ({exc})"
+
+    after = get_structured_output_capability(config)
+    if after is True:
+        return True, "json_schema structured outputs supported"
+    return False, "server fell back to plain JSON prompt mode"
 
 
 def create_client(config: Config) -> AnthropicClient | OpenAIClient:

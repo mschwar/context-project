@@ -7,7 +7,7 @@ import os
 import subprocess
 import time as _time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -127,6 +127,8 @@ class FleetCapsuleResult:
     authority_boundaries: list[dict[str, object]]
     subsystems: list[dict[str, object]]
     capsule_markdown: str
+    operational_surfaces: list[dict[str, object]] = field(default_factory=list)
+    dependency_summary: dict[str, object] = field(default_factory=dict)
 
 
 def _build_generation_runtime(
@@ -220,6 +222,10 @@ def _refresh_tier2_locked(
     force: bool = False,
     max_depth: int | None = None,
     touch_last_refresh: bool = False,
+    synthesize: bool = False,
+    provider: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
 ) -> RefreshResult | None:
     """Refresh Tier 2 (.ctx/) maps while the caller already holds CtxLock(root).
 
@@ -228,6 +234,7 @@ def _refresh_tier2_locked(
     from datetime import datetime, timezone
 
     from ctx.init import _restore_dir_snapshot, _snapshot_dir
+    from ctx.invariants import load_cached_invariants, synthesize_tier2_invariants
     from ctx.skeleton import (
         extract_skeleton,
         render_context_0,
@@ -246,12 +253,23 @@ def _refresh_tier2_locked(
     if not (meta_exists and isinstance(meta, dict) and meta.get("mode") == "tier2"):
         return None
 
+    should_synth = synthesize or bool(meta.get("synthesize_invariants"))
+    if not should_synth:
+        try:
+            should_synth = load_config(root, require_api_key=False).tier2_synthesize
+        except Exception:
+            should_synth = False
+
     skeleton = extract_skeleton(root, max_depth=max_depth)
     exports_missing = any(
         not (ctx_dir / name).is_file() or (ctx_dir / name).stat().st_size == 0
         for name in expected_exports
     )
-    needs_update = force or exports_missing or should_invoke_llm(meta, skeleton)
+    cached_inv_doc = load_cached_invariants(root)
+    missing_synth_cache = should_synth and not (
+        isinstance(cached_inv_doc, dict) and bool(cached_inv_doc.get("invariants"))
+    )
+    needs_update = force or exports_missing or missing_synth_cache or should_invoke_llm(meta, skeleton)
     subsystem_count = max(1, len(skeleton.subsystems))
 
     if not needs_update:
@@ -271,11 +289,38 @@ def _refresh_tier2_locked(
         )
 
     prior_snapshot = _snapshot_dir(ctx_dir)
+    tokens_used = 0
+    in_tok = 0
+    out_tok = 0
+    est_cost = 0.0
     try:
-        rendered_c0 = render_context_0(skeleton)
-        rendered_c1 = render_context_1(skeleton)
-        rendered_full = render_context_full(skeleton)
         fenced_mkdir(ctx_dir, parents=True, exist_ok=True)
+        synthesized_invs: list[dict[str, str]] | None = None
+        if should_synth:
+            inv_res = synthesize_tier2_invariants(
+                root,
+                skeleton,
+                prev_metadata=meta,
+                force=force,
+                provider=provider,
+                model=model,
+                base_url=base_url,
+            )
+            synthesized_invs = inv_res.invariants or None
+            tokens_used = inv_res.tokens_used
+            in_tok = inv_res.input_tokens
+            out_tok = inv_res.output_tokens
+            est_cost = inv_res.est_cost_usd
+            if synthesize:
+                meta["synthesize_invariants"] = True
+            meta["invariants_gate_action"] = inv_res.gate_action
+        elif isinstance(cached_inv_doc, dict) and isinstance(cached_inv_doc.get("invariants"), list):
+            if cached_inv_doc.get("structural_hash") == skeleton.structural_hash:
+                synthesized_invs = cached_inv_doc["invariants"] or None
+
+        rendered_c0 = render_context_0(skeleton, synthesized_invariants=synthesized_invs)
+        rendered_c1 = render_context_1(skeleton, synthesized_invariants=synthesized_invs)
+        rendered_full = render_context_full(skeleton, synthesized_invariants=synthesized_invs)
         write_text_atomic(ctx_dir / "CONTEXT-0.md", rendered_c0)
         write_text_atomic(ctx_dir / "CONTEXT-1.md", rendered_c1)
         write_text_atomic(ctx_dir / "CONTEXT.md", rendered_full)
@@ -294,12 +339,14 @@ def _refresh_tier2_locked(
         dirs_processed=subsystem_count,
         dirs_skipped=0,
         files_processed=skeleton.total_files,
-        tokens_used=0,
+        tokens_used=tokens_used,
         errors=[],
         budget_exhausted=False,
         strategy="tier2",
-        est_cost_usd=0.0,
+        est_cost_usd=est_cost,
         stale_directories=[],
+        input_tokens=in_tok,
+        output_tokens=out_tok,
     )
 
 
@@ -310,6 +357,10 @@ def _refresh_tier2(
     dry_run: bool = False,
     max_depth: int | None = None,
     touch_last_refresh: bool = False,
+    synthesize: bool = False,
+    provider: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
     _allow_fallback: bool = True,
     _from_hook: bool = False,
     _mode_hops: int = 0,
@@ -352,6 +403,10 @@ def _refresh_tier2(
             force=force,
             max_depth=max_depth,
             touch_last_refresh=touch_last_refresh,
+            synthesize=synthesize,
+            provider=provider,
+            model=model,
+            base_url=base_url,
         )
         if locked_result is not None:
             return locked_result
@@ -483,6 +538,7 @@ def refresh(
     watch: bool = False,
     dry_run: bool = False,
     until_complete: bool = False,
+    synthesize: bool = False,
     provider: str | None = None,
     model: str | None = None,
     max_depth: int | None = None,
@@ -499,7 +555,6 @@ def refresh(
     """Run canonical refresh behavior with strategy selection."""
     from ctx.config import resolve_project_anchor
     from ctx.git import get_changed_files
-    from ctx.watcher import run_watch
 
     if setup and watch:
         raise ValueError("--setup and --watch cannot be used together.")
@@ -508,6 +563,7 @@ def refresh(
 
     fallback_kwargs: dict[str, object] = {
         "until_complete": until_complete,
+        "synthesize": synthesize,
         "provider": provider,
         "model": model,
         "token_budget": token_budget,
@@ -529,6 +585,10 @@ def refresh(
             force=force,
             dry_run=dry_run,
             max_depth=max_depth,
+            synthesize=synthesize,
+            provider=provider,
+            model=model,
+            base_url=base_url,
             _allow_fallback=_mode_hops < 4,
             _mode_hops=_mode_hops,
             _fallback_kwargs=fallback_kwargs,
@@ -681,6 +741,10 @@ def refresh(
                             locked_tier2_root,
                             force=force,
                             max_depth=max_depth,
+                            synthesize=synthesize,
+                            provider=provider,
+                            model=model,
+                            base_url=base_url,
                         )
                         if inline_tier2 is not None:
                             return inline_tier2
@@ -795,6 +859,10 @@ def refresh(
             force=force,
             dry_run=dry_run,
             max_depth=max_depth,
+            synthesize=synthesize,
+            provider=provider,
+            model=model,
+            base_url=base_url,
             _allow_fallback=_mode_hops < 4,
             _mode_hops=_mode_hops + 1,
             _fallback_kwargs=fallback_kwargs,
@@ -806,6 +874,8 @@ def refresh(
         errors.append(budget_guardrail)
 
     if watch and not errors:
+        from ctx.watcher import run_watch
+
         run_watch(root, config, client, spec)
 
     if cumulative_stats.cache_hits or cumulative_stats.cache_misses:
@@ -1357,6 +1427,7 @@ def build_fleet_capsule(
     import hashlib
     import json
     from dataclasses import asdict, replace
+    from ctx.impact import build_dependency_graph
     from ctx.skeleton import (
         extract_skeleton,
         render_context_0,
@@ -1366,6 +1437,7 @@ def build_fleet_capsule(
 
     resolved_root = root.resolve()
     skeleton = extract_skeleton(resolved_root)
+    dep_graph = build_dependency_graph(resolved_root, skeleton=skeleton)
     repo_id = f"sha256:{hashlib.sha256(str(resolved_root).encode('utf-8')).hexdigest()}"
 
     kept_boundary_docs = [
@@ -1375,6 +1447,11 @@ def build_fleet_capsule(
         ep
         for ep in skeleton.entrypoints
         if _entrypoint_within_capsule_depth(ep, depth, resolved_root)
+    ]
+    kept_surfaces = [
+        surf
+        for surf in skeleton.operational_surfaces
+        if _file_within_capsule_depth(surf.file, depth)
     ]
 
     authority_boundaries = [
@@ -1401,6 +1478,7 @@ def build_fleet_capsule(
         filtered_subsystems.append(
             {
                 "path": sub.path,
+                "arch_role": sub.arch_role,
                 "file_count": sub.file_count,
                 "languages": list(sub.languages),
                 "key_symbols": list(sub.key_symbols[:10]),
@@ -1409,11 +1487,36 @@ def build_fleet_capsule(
             }
         )
 
+    operational_surfaces_payload: list[dict[str, object]] = [
+        {
+            "kind": surf.kind,
+            "name": surf.name,
+            "file": surf.file,
+            "detail": surf.detail,
+        }
+        for surf in kept_surfaces[:60]
+    ]
+    dependency_summary: dict[str, object] = {
+        "internal_edge_count": dep_graph.internal_edge_count,
+        "cycle_count": len(dep_graph.cycles),
+        "subsystem_cycle_count": len(dep_graph.subsystem_cycles),
+        "topological_layers_count": len(dep_graph.topological_layers),
+        "top_hubs": [
+            {"path": p, "inbound_count": len(callers)}
+            for p, callers in sorted(
+                dep_graph.inbound_files.items(),
+                key=lambda kv: (-len(kv[1]), kv[0]),
+            )[:5]
+            if callers
+        ],
+    }
+
     render_skeleton = replace(
         skeleton,
         subsystems=kept_subsystem_objs,
         boundary_docs=kept_boundary_docs,
         entrypoints=kept_entrypoints,
+        operational_surfaces=kept_surfaces,
     )
     capsule_md = render_context_0(render_skeleton)
     if depth is None or depth >= 1:
@@ -1437,6 +1540,8 @@ def build_fleet_capsule(
         authority_boundaries=authority_boundaries,
         subsystems=filtered_subsystems,
         capsule_markdown=capsule_md,
+        operational_surfaces=operational_surfaces_payload,
+        dependency_summary=dependency_summary,
     )
 
     if output_file:
@@ -1447,4 +1552,85 @@ def build_fleet_capsule(
             out_path.write_text(capsule_md, encoding="utf-8")
 
     return result
+
+
+def analyze_impact(
+    root: Path,
+    target: str,
+    *,
+    max_depth: int | None = None,
+):
+    """Analyze directed reverse-dependency blast radius, coupled tests, and governing docs."""
+    from ctx.impact import analyze_impact as _analyze_impact
+
+    return _analyze_impact(root, target, max_depth=max_depth)
+
+
+def jev_list_heads(root: Path | None = None) -> list[dict[str, object]]:
+    """Return validated Jev System-One decision head specifications."""
+    from ctx.jev import list_head_ids, load_head
+
+    return [load_head(hid, root) for hid in list_head_ids(root)]
+
+
+def jev_decide(
+    head_ids: list[str],
+    state: dict[str, object],
+    *,
+    root: Path | None = None,
+    provider: str | None = None,
+    allow_vault: bool = False,
+    record_trace: bool = True,
+) -> dict[str, object]:
+    """Run one or more governed Type 1 Jev heads on *state*."""
+    from ctx.jev import decide as _decide
+
+    return _decide(
+        head_ids,
+        state,
+        root=root,
+        provider=provider,
+        allow_vault=allow_vault,
+        record_trace=record_trace,
+    )
+
+
+def evaluate_jev_heads(
+    root: Path | None = None,
+    *,
+    provider: str = "code",
+    head_ids: list[str] | None = None,
+    allow_vault: bool = False,
+    skip_pre_rule_for_jev: bool = False,
+) -> dict[str, object]:
+    """Evaluate governed Type 1 Jev heads against the gold evaluation corpus."""
+    from ctx.jev import evaluate_heads as _evaluate_heads
+
+    return _evaluate_heads(
+        root,
+        provider=provider,
+        head_ids=head_ids,
+        allow_vault=allow_vault,
+        skip_pre_rule_for_jev=skip_pre_rule_for_jev,
+    )
+
+
+def run_benchmark(
+    paths: list[Path],
+    *,
+    output_file: str | None = None,
+) -> dict[str, object]:
+    """Run the Phase 27.1 A/B/C agent navigation benchmark across *paths*."""
+    import json
+    from ctx.benchmark import render_benchmark_markdown, run_navigation_benchmark
+
+    report = run_navigation_benchmark(paths)
+    if output_file:
+        out_path = Path(output_file)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        if out_path.suffix.lower() == ".json":
+            out_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        else:
+            out_path.write_text(render_benchmark_markdown(report), encoding="utf-8")
+    return report
 

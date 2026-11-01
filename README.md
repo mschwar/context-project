@@ -47,6 +47,9 @@ For MCP clients, copy [`mcp.json`](./mcp.json) into `.mcp.json` / `.cursor/mcp.j
 | `ctx export <path>` | Concatenate manifests or emit `--capsule` structural payload |
 | `ctx stats [path]` | Show coverage or `--board` refresh/cost telemetry (`--global`, `--trend`) |
 | `ctx setup [path]` | Detect provider, write `.ctxconfig`, or run `--check` preflight gate |
+| `ctx impact <target>` | Analyze reverse-dependency blast radius, coupled tests, and governing docs |
+| `ctx jev <subcmd>` | List, execute (`decide`), or evaluate (`eval`) Type 1 Jev System-One heads |
+| `ctx benchmark [paths]` | Run Phase 27.1 A/B/C agent navigation & blast-radius benchmark |
 | `ctx reset <path>` | Remove generated `CONTEXT.md` manifests |
 | `ctx serve --mcp` | Expose tools and `.ctx/` resources via MCP (stdio JSON-RPC) |
 

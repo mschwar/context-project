@@ -58,6 +58,10 @@ cache_path: .ctx-cache/llm_cache.json
 | `CTX_WATCH_DEBOUNCE` | `0.5` | Watch debounce seconds |
 | `CTX_EXTENSIONS` | all text files | Comma-separated extension allowlist |
 | `CTX_GLOBAL_STATS_PATH` | `~/.ctx/run_stats.json` | Global running-board ledger path override |
+| `CTX_TIER2_SYNTHESIZE` | `false` | Enable gated Tier 2 semantic invariant synthesis |
+| `CTX_STRUCTURED_OUTPUTS` | `auto` | OpenAI-compatible `json_schema` mode: `auto`, `on`, or `off` |
+| `CTX_JEV` | `auto` | Type 1 Jev System-One mode: `auto`, `off`, `shadow`, `advisory`, `routing`, `actuating` |
+| `TYPESAFE_API_KEY` | unset | TypeSafe System-One (`jev-1.13.0`) API credential |
 
 ## Commands
 ### `ctx init [path]`
@@ -74,6 +78,7 @@ What it does:
 Common flags:
 - `--force` — reinitialize even if `.ctx/` already exists
 - `--tier2` — synthesize a gitignored `.ctx/` architectural & invariant map (`CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`) deterministically with zero LLM calls and without writing per-directory `CONTEXT.md` files
+- `--synthesize` — layer gated Type-II LLM semantic cross-module invariants onto Tier 2 `.ctx/` maps (`code -> Type 1 Jev judge -> Type-II LLM deliberate`, cached in `.ctx/invariants.json`)
 
 After init, manifests auto-refresh on every git commit, checkout, and merge via background hooks. No manual `ctx refresh` needed.
 
@@ -270,10 +275,35 @@ Common flags:
 
 ### `ctx setup [path]`
 
-Auto-detect an available LLM provider and write `.ctxconfig`, or run the 7-check preflight readiness gate.
+Auto-detect an available LLM provider and write `.ctxconfig`, or run the preflight readiness gate.
 
 Common flags:
-- `--check` — run preflight checks (configured/detected provider, `.ctxconfig` syntax, live endpoint connectivity, sample model summary quality, target directory write permissions, git detection, ignore rules) without writing `.ctxconfig`
+- `--check` — run preflight checks (configured/detected provider, `.ctxconfig` syntax, live endpoint connectivity, sample model summary quality, constrained `json_schema` structured-output capability, target directory write permissions, git detection, ignore rules) without writing `.ctxconfig`
+- `--output json` — emit the JSON envelope only
+
+### `ctx impact <target> [path]`
+
+Analyze the directed reverse-dependency blast radius, coupled tests, affected operational surfaces, and governing authority documents for a file, subsystem/directory, or symbol target with zero LLM calls.
+
+Common flags:
+- `--depth <n>` — cap reverse-dependency BFS hops (`>= 1`)
+- `--output json` — emit the JSON envelope only
+
+### `ctx jev <heads|decide|eval> [path]`
+
+Inspect, execute, or benchmark governed Type 1 Jev (`jev-1.13.0` via `POST https://api.typesafe.ai/v1/systemone`) System-One decision heads (`invariant_drift_material`, `subsystem_arch_role`, `operational_surface_exposure` with permanent `ADVISORY` authority ceiling and deterministic `code` fallback).
+
+Subcommands:
+- `ctx jev heads [path]` — list validated Jev head contracts
+- `ctx jev decide [path] --head <id> --state <json-or-@file> [--provider code|jev] [--live] [--no-trace]` — execute governed head(s)
+- `ctx jev eval [path] [--provider code|jev] [--head <id>] [--live] [--skip-pre-rule]` — evaluate against the 14-case gold corpus
+
+### `ctx benchmark [paths...]`
+
+Run the reproducible Phase 27.1 A/B/C agent navigation & blast-radius benchmark (`raw_grep` vs `tier1_manifests` vs `tier2_plus_impact`).
+
+Common flags:
+- `--out-file <file>` (or `-o <file>`) — write Markdown or `.json` benchmark report
 - `--output json` — emit the JSON envelope only
 
 ## Exit Codes
@@ -324,6 +354,8 @@ Available MCP tools exposed by `ctx serve --mcp`:
 | `ctx_reset` | Remove generated manifests |
 | `ctx_board` | Read the per-repo running board (refresh history, cost analytics, per-model breakdown) |
 | `ctx_global_board` | Read the global running board across all repos |
+| `ctx_impact` | Analyze directed reverse-dependency blast radius, coupled tests, affected surfaces, and governing docs |
+| `ctx_jev` | List, execute (`decide`), or evaluate (`eval`) governed Type 1 Jev System-One decision heads |
 
 Available read-only MCP resources exposed by `ctx serve --mcp` (after `ctx init`):
 

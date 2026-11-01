@@ -9,8 +9,13 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from watchdog.events import FileSystemEvent, FileSystemEventHandler
-from watchdog.observers import Observer
+try:
+    from watchdog.events import FileSystemEvent, FileSystemEventHandler
+    from watchdog.observers import Observer
+except ModuleNotFoundError as exc:
+    raise ModuleNotFoundError(
+        'Watch mode requires the watchdog package. Install with: pip install "ctx-tool[watch]"'
+    ) from exc
 
 from ctx.config import Config
 from ctx.ignore import should_ignore

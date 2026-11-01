@@ -8,6 +8,9 @@ Commands:
     ctx export <path>     Concatenate manifests for agent ingestion.
     ctx reset <path>      Remove generated manifests.
     ctx stats [path]      Show coverage summary or refresh history.
+    ctx impact <target>   Analyze reverse-dependency blast radius and coupled tests.
+    ctx jev <subcommand>  Run or evaluate governed Type 1 Jev System-One heads.
+    ctx benchmark [paths] Run Phase 27.1 A/B/C agent navigation benchmark.
 """
 
 from __future__ import annotations
@@ -352,6 +355,7 @@ def cli(ctx: click.Context, output_mode: str | None) -> None:
 @click.option("--watch", "do_watch", is_flag=True, help="After refresh, watch for changes and re-refresh.")
 @click.option("--dry-run", is_flag=True, help="Preview what would be regenerated.")
 @click.option("--until-complete", is_flag=True, help="Loop until all directories are covered, pausing between cycles.")
+@click.option("--synthesize", is_flag=True, help="Synthesize semantic cross-module invariants in Tier 2 (.ctx/) mode.")
 @click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "lmstudio"]), default=None)
 @click.option("--model", default=None)
 @click.option("--max-depth", type=int, default=None)
@@ -368,6 +372,7 @@ def refresh(
     do_watch: bool,
     dry_run: bool,
     until_complete: bool,
+    synthesize: bool,
     provider: Optional[str],
     model: Optional[str],
     max_depth: Optional[int],
@@ -380,6 +385,9 @@ def refresh(
     json_mode = _resolve_json_mode(ctx, sub_output_mode)
     with OutputBroker(command="refresh", json_mode=json_mode) as broker:
         state = ProgressState(start_time=time.time())
+        refresh_extra: dict[str, object] = {}
+        if synthesize:
+            refresh_extra["synthesize"] = True
         result = api.refresh(
             Path(path),
             force=force,
@@ -394,6 +402,7 @@ def refresh(
             base_url=base_url,
             cache_path=cache_path,
             progress=_progress_callback(state, json_mode=json_mode),
+            **refresh_extra,
         )
         broker.set_data(asdict(result))
         broker.set_tokens(result.tokens_used, result.est_cost_usd)
@@ -452,6 +461,11 @@ def refresh(
     is_flag=True,
     help="Synthesize a gitignored .ctx/ architectural & invariant map without writing per-directory CONTEXT.md files.",
 )
+@click.option(
+    "--synthesize",
+    is_flag=True,
+    help="Layer LLM-synthesized cross-module invariants onto Tier 2 (.ctx/) maps.",
+)
 @_subcommand_output_option
 @click.pass_context
 def init(
@@ -459,6 +473,7 @@ def init(
     path: str,
     force: bool,
     tier2: bool = False,
+    synthesize: bool = False,
     sub_output_mode: Optional[str] = None,
 ) -> None:
     """Bootstrap self-maintaining .ctx/ infrastructure in a git repo."""
@@ -470,6 +485,8 @@ def init(
             init_kwargs: dict[str, object] = {"force": force}
             if tier2:
                 init_kwargs["tier2"] = True
+            if synthesize:
+                init_kwargs["synthesize"] = True
             result = init_project(Path(path), **init_kwargs)
         except InitError as exc:
             if json_mode:
@@ -1513,6 +1530,57 @@ def stats(ctx: click.Context, path: str, verbose: bool, output_format: str, boar
     _exit_for_broker(broker, json_mode=json_mode)
 
 
+def _execute_reset_command(
+    root: Path,
+    *,
+    yes: bool,
+    dry_run: bool,
+    json_mode: bool,
+    broker: OutputBroker,
+    confirm_error_code: str = "confirmation_required",
+) -> None:
+    """Shared implementation for `ctx reset` and legacy `ctx clean` delegating to `api.reset`."""
+    if json_mode and not yes and not dry_run:
+        broker.add_error(
+            confirm_error_code,
+            "--yes flag required in non-interactive mode",
+            hint="Use: ctx reset . --yes --output json",
+        )
+        broker.set_data({"manifests_removed": 0, "paths": []})
+        return
+
+    aborted = False
+    if not yes and not dry_run and not json_mode:
+        manifests = api._iter_tree_manifests(root)
+        if manifests:
+            confirmed = click.confirm(
+                f"Found {len(manifests)} CONTEXT.md file(s). Delete all?",
+                default=False,
+            )
+            if not confirmed:
+                click.echo("Aborted.")
+                broker.set_data({"manifests_removed": 0, "paths": []})
+                aborted = True
+        if not aborted:
+            yes = True
+
+    if not aborted:
+        result = api.reset(root, dry_run=dry_run, yes=yes)
+        broker.set_data(asdict(result))
+        if not json_mode:
+            if dry_run:
+                if not result.paths:
+                    click.echo("No CONTEXT.md files found.")
+                else:
+                    click.echo(f"{len(result.paths)} CONTEXT.md file(s) would be deleted:")
+                    for path_item in result.paths:
+                        click.echo(f"  {path_item}")
+            elif result.manifests_removed == 0 and not result.paths:
+                click.echo("No CONTEXT.md files found.")
+            else:
+                click.echo(f"Removed {result.manifests_removed} CONTEXT.md file(s).")
+
+
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
@@ -1529,38 +1597,14 @@ def reset(
     """Remove all CONTEXT.md files from the directory tree."""
     json_mode = _resolve_json_mode(ctx, sub_output_mode)
     with OutputBroker(command="reset", json_mode=json_mode) as broker:
-        root = Path(path).resolve()
-        if json_mode and not yes and not dry_run:
-            broker.add_error("confirmation_required", "--yes flag required in non-interactive mode", hint="Re-run with --yes.")
-        else:
-            aborted = False
-            if not yes and not dry_run and not json_mode:
-                manifests = api._iter_tree_manifests(root)
-                if manifests:
-                    confirmed = click.confirm(
-                        f"Found {len(manifests)} CONTEXT.md file(s). Delete all?", default=False
-                    )
-                    if not confirmed:
-                        click.echo("Aborted.")
-                        broker.set_data({"manifests_removed": 0, "paths": []})
-                        aborted = True
-                if not aborted:
-                    yes = True
-
-            if not aborted:
-                result = api.reset(root, dry_run=dry_run, yes=yes)
-                broker.set_data(asdict(result))
-
-                if not json_mode:
-                    if dry_run:
-                        if not result.paths:
-                            click.echo("No CONTEXT.md files found.")
-                        else:
-                            click.echo(f"{len(result.paths)} CONTEXT.md file(s) would be deleted:")
-                            for path_item in result.paths:
-                                click.echo(f"  {path_item}")
-                    else:
-                        click.echo(f"Removed {result.manifests_removed} CONTEXT.md file(s).")
+        _execute_reset_command(
+            Path(path).resolve(),
+            yes=yes,
+            dry_run=dry_run,
+            json_mode=json_mode,
+            broker=broker,
+            confirm_error_code="confirmation_required",
+        )
     _exit_for_broker(broker, json_mode=json_mode)
 
 
@@ -1581,45 +1625,14 @@ def clean(
     json_mode = _resolve_json_mode(ctx, sub_output_mode)
     _echo_legacy_warning("clean", "reset", json_mode=json_mode)
     with OutputBroker(command="reset", json_mode=json_mode) as broker:
-        root = Path(path).resolve()
-        manifests = api._iter_tree_manifests(root)
-
-        if not manifests:
-            click.echo("No CONTEXT.md files found.")
-            broker.set_data({"manifests_removed": 0, "paths": []})
-        else:
-            rel_paths = [m.relative_to(root).as_posix() for m in manifests]
-            if dry_run:
-                click.echo(f"{len(manifests)} CONTEXT.md file(s) would be deleted:")
-                for rel in rel_paths:
-                    click.echo(f"  {rel}")
-                broker.set_data({"manifests_removed": 0, "paths": rel_paths})
-            elif json_mode and not yes:
-                broker.add_error(
-                    "unknown_error",
-                    "--yes flag required in non-interactive mode",
-                    hint="Use: ctx reset . --yes --output json",
-                )
-                broker.set_data({"manifests_removed": 0, "paths": []})
-            else:
-                aborted = False
-                if not yes:
-                    confirmed = click.confirm(
-                        f"Found {len(manifests)} CONTEXT.md file(s). Delete all?", default=False
-                    )
-                    if not confirmed:
-                        click.echo("Aborted.")
-                        broker.set_data({"manifests_removed": 0, "paths": []})
-                        aborted = True
-                if not aborted:
-                    from ctx.lock import fenced_unlink
-
-                    with CtxLock(root, command="reset"):
-                        for manifest_path in manifests:
-                            fenced_unlink(manifest_path, missing_ok=True)
-                        api._sync_tier1_ctx_exports(root)
-                    click.echo(f"Removed {len(manifests)} CONTEXT.md file(s).")
-                    broker.set_data({"manifests_removed": len(manifests), "paths": rel_paths})
+        _execute_reset_command(
+            Path(path).resolve(),
+            yes=yes,
+            dry_run=dry_run,
+            json_mode=json_mode,
+            broker=broker,
+            confirm_error_code="unknown_error",
+        )
     _exit_for_broker(broker, json_mode=json_mode)
 
 
@@ -1828,4 +1841,291 @@ def serve(ctx: click.Context, path: str, host: str, port: int, mcp: bool) -> Non
     click.echo(f"Starting ctx HTTP server on http://{host}:{port}")
     click.echo(f"Serving manifests from: {root}")
     start_server(host=host, port=port, root=root)
+
+
+@cli.command("impact")
+@click.argument("target")
+@click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, resolve_path=True))
+@click.option("--depth", type=int, default=None, help="Maximum reverse-dependency BFS depth (>= 1).")
+@_subcommand_output_option
+@click.pass_context
+def impact(
+    ctx: click.Context,
+    target: str,
+    path: str,
+    depth: Optional[int],
+    sub_output_mode: Optional[str] = None,
+) -> None:
+    """Analyze reverse-dependency blast radius, coupled tests, and governing docs."""
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
+    with OutputBroker(command="impact", json_mode=json_mode) as broker:
+        try:
+            result = api.analyze_impact(Path(path), target, max_depth=depth)
+        except ValueError as exc:
+            if json_mode:
+                broker.add_error("invalid_target", str(exc))
+            else:
+                raise click.ClickException(str(exc)) from exc
+            result = None
+
+        if result is not None:
+            broker.set_data(asdict(result))
+            if not json_mode:
+                click.echo(f"Target: {result.target} ({result.target_kind})")
+                click.echo(f"Matched files ({len(result.matched_files)}): {', '.join(result.matched_files)}")
+                if result.matched_symbols:
+                    preview_syms = ", ".join(result.matched_symbols[:8])
+                    suffix = f" (+{len(result.matched_symbols) - 8} more)" if len(result.matched_symbols) > 8 else ""
+                    click.echo(f"Matched symbols ({len(result.matched_symbols)}): {preview_syms}{suffix}")
+                if result.layer_index is not None:
+                    click.echo(f"Topological layer: {result.layer_index + 1} / {result.total_layers}")
+                click.echo(
+                    f"Direct outbound deps ({len(result.direct_outbound_deps)}): "
+                    f"{', '.join(result.direct_outbound_deps) if result.direct_outbound_deps else 'none'}"
+                )
+                click.echo(
+                    f"Direct inbound dependents ({len(result.direct_inbound_dependents)}): "
+                    f"{', '.join(result.direct_inbound_dependents) if result.direct_inbound_dependents else 'none'}"
+                )
+                click.echo(f"Transitive inbound dependents: {len(result.transitive_inbound_dependents)}")
+                for rec in result.transitive_inbound_dependents[:15]:
+                    tag = " [test]" if rec.get("is_test") else ""
+                    click.echo(f"  - [d={rec['distance']}] {rec['path']}{tag}")
+                if len(result.transitive_inbound_dependents) > 15:
+                    click.echo(f"  ... (+{len(result.transitive_inbound_dependents) - 15} more)")
+                click.echo(f"Coupled tests ({len(result.coupled_tests)}):")
+                for test_rec in result.coupled_tests[:15]:
+                    dist_part = f", d={test_rec['distance']}" if test_rec.get("distance") is not None else ""
+                    click.echo(f"  - {test_rec['path']} ({test_rec['reason']}{dist_part})")
+                if len(result.coupled_tests) > 15:
+                    click.echo(f"  ... (+{len(result.coupled_tests) - 15} more)")
+                click.echo(
+                    f"Affected subsystems ({len(result.affected_subsystems)}): "
+                    f"{', '.join(result.affected_subsystems) if result.affected_subsystems else 'none'}"
+                )
+                if result.affected_entrypoints:
+                    click.echo(f"Affected entrypoints & surfaces ({len(result.affected_entrypoints)}):")
+                    for ep in result.affected_entrypoints[:15]:
+                        click.echo(f"  - {ep}")
+                    if len(result.affected_entrypoints) > 15:
+                        click.echo(f"  ... (+{len(result.affected_entrypoints) - 15} more)")
+                if result.governing_docs:
+                    click.echo(f"Governing docs: {', '.join(result.governing_docs)}")
+                if result.cycles_involving_target:
+                    click.echo(f"Cycles involving target ({len(result.cycles_involving_target)}):")
+                    for cyc in result.cycles_involving_target:
+                        click.echo(f"  - {' -> '.join(cyc)}")
+    _exit_for_broker(broker, json_mode=json_mode)
+
+
+def _parse_cli_state_json(raw_state: str) -> dict[str, object]:
+    """Load a state dictionary from inline JSON or `@path/to/file.json`."""
+    payload_str = raw_state
+    if raw_state.startswith("@"):
+        state_path = Path(raw_state[1:])
+        try:
+            payload_str = state_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ValueError(f"Unable to read state file {state_path}: {exc}") from exc
+    try:
+        parsed = json.loads(payload_str)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON state payload: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("State payload must be a JSON object.")
+    return parsed
+
+
+@cli.group("jev")
+def jev_group() -> None:
+    """Inspect, execute, and evaluate governed Type 1 Jev System-One heads."""
+
+
+@jev_group.command("heads")
+@click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, resolve_path=True))
+@_subcommand_output_option
+@click.pass_context
+def jev_heads_cmd(
+    ctx: click.Context,
+    path: str,
+    sub_output_mode: Optional[str] = None,
+) -> None:
+    """List governed Type 1 Jev decision heads."""
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
+    with OutputBroker(command="jev.heads", json_mode=json_mode) as broker:
+        heads = api.jev_list_heads(Path(path))
+        broker.set_data({"heads": heads, "count": len(heads)})
+        if not json_mode:
+            click.echo(f"Governed Type 1 Jev heads ({len(heads)}):")
+            for h in heads:
+                auth_flag = " [authority ceiling: ADVISORY]" if h.get("authority") else ""
+                prov = h.get("provider", {}) if isinstance(h.get("provider"), dict) else {}
+                click.echo(
+                    f"  - {h['id']} (v{h['version']}, type={h['type']}, "
+                    f"state={h['promotion_state']}, model={prov.get('model')}){auth_flag}"
+                )
+    _exit_for_broker(broker, json_mode=json_mode)
+
+
+@jev_group.command("decide")
+@click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, resolve_path=True))
+@click.option("--head", "head_ids", multiple=True, required=True, help="Head ID to execute (repeatable).")
+@click.option("--state", "raw_state", required=True, help="JSON state object or @path/to/state.json.")
+@click.option("--provider", type=click.Choice(["code", "jev"]), default=None, help="Override execution provider.")
+@click.option("--live", is_flag=True, help="Permit 1Password vault resolution when TYPESAFE_API_KEY is unset.")
+@click.option("--no-trace", is_flag=True, help="Do not append decision trace to .ctx-cache/jev_decisions.jsonl.")
+@_subcommand_output_option
+@click.pass_context
+def jev_decide_cmd(
+    ctx: click.Context,
+    path: str,
+    head_ids: tuple[str, ...],
+    raw_state: str,
+    provider: Optional[str],
+    live: bool,
+    no_trace: bool,
+    sub_output_mode: Optional[str] = None,
+) -> None:
+    """Run one or more governed Type 1 Jev heads on a structured JSON state."""
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
+    with OutputBroker(command="jev.decide", json_mode=json_mode) as broker:
+        try:
+            state_obj = _parse_cli_state_json(raw_state)
+            result = api.jev_decide(
+                list(head_ids),
+                state_obj,
+                root=Path(path),
+                provider=provider,
+                allow_vault=live,
+                record_trace=not no_trace,
+            )
+        except ValueError as exc:
+            if json_mode:
+                broker.add_error("invalid_input", str(exc))
+                result = None
+            else:
+                raise click.ClickException(str(exc)) from exc
+
+        if result is not None:
+            decisions = result.get("decisions", []) if isinstance(result, dict) else []
+            tok = sum(int(d.get("input_tokens") or 0) for d in decisions if isinstance(d, dict))
+            cost = sum(float(d.get("cost_usd") or 0.0) for d in decisions if isinstance(d, dict))
+            broker.set_data(result)
+            broker.set_tokens(tok, cost)
+            if not json_mode:
+                for d in decisions:
+                    conf = f"{d['confidence']:.3f}" if isinstance(d.get("confidence"), (int, float)) else "n/a"
+                    click.echo(
+                        f"[{d['head_id']}] effective={d['effective_output']!r} "
+                        f"(tier={d['tier']}, provider={d['provider']}, model={d['model']}, "
+                        f"route={d['route']}, confidence={conf})"
+                    )
+    _exit_for_broker(broker, json_mode=json_mode)
+
+
+@jev_group.command("eval")
+@click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, resolve_path=True))
+@click.option("--provider", type=click.Choice(["code", "jev"]), default="code", help="Provider to evaluate.")
+@click.option("--head", "head_ids", multiple=True, help="Restrict evaluation to specific head ID(s).")
+@click.option("--live", is_flag=True, help="Permit 1Password vault resolution when TYPESAFE_API_KEY is unset.")
+@click.option("--skip-pre-rule", is_flag=True, help="Force raw model inference even on pre_rule cases.")
+@_subcommand_output_option
+@click.pass_context
+def jev_eval_cmd(
+    ctx: click.Context,
+    path: str,
+    provider: str,
+    head_ids: tuple[str, ...],
+    live: bool,
+    skip_pre_rule: bool,
+    sub_output_mode: Optional[str] = None,
+) -> None:
+    """Evaluate governed Type 1 Jev heads against the gold evaluation corpus."""
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
+    with OutputBroker(command="jev.eval", json_mode=json_mode) as broker:
+        try:
+            report = api.evaluate_jev_heads(
+                Path(path),
+                provider=provider,
+                head_ids=list(head_ids) if head_ids else None,
+                allow_vault=live,
+                skip_pre_rule_for_jev=skip_pre_rule,
+            )
+        except ValueError as exc:
+            if json_mode:
+                broker.add_error("invalid_input", str(exc))
+                report = None
+            else:
+                raise click.ClickException(str(exc)) from exc
+
+        if report is not None:
+            broker.set_data(report)
+            broker.set_tokens(int(report.get("total_input_tokens") or 0), float(report.get("total_cost_usd") or 0.0))
+            if not json_mode:
+                acc = report.get("accuracy")
+                acc_str = f"{acc * 100:.1f}%" if isinstance(acc, (int, float)) else "n/a"
+                brier = report.get("brier_score")
+                brier_str = f"{brier:.6f}" if isinstance(brier, (int, float)) else "n/a"
+                click.echo(
+                    f"Jev Gold Evaluation (provider={report['provider']}): "
+                    f"evaluated={report['evaluated']}/{report['total']} "
+                    f"(coverage={report['coverage'] * 100:.1f}%), accuracy={acc_str}, brier={brier_str}"
+                )
+                for hid, summary in sorted((report.get("per_head") or {}).items()):
+                    h_acc = summary.get("accuracy")
+                    h_acc_s = f"{h_acc * 100:.1f}%" if isinstance(h_acc, (int, float)) else "n/a"
+                    click.echo(
+                        f"  - {hid}: {summary['evaluated']}/{summary['total']} evaluated, accuracy={h_acc_s}"
+                    )
+    _exit_for_broker(broker, json_mode=json_mode)
+
+
+@cli.command("benchmark")
+@click.argument(
+    "paths",
+    nargs=-1,
+    type=click.Path(exists=True, file_okay=False, resolve_path=True),
+)
+@click.option(
+    "--out-file",
+    "-o",
+    "output_file",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Write Markdown or .json benchmark report to file.",
+)
+@_subcommand_output_option
+@click.pass_context
+def benchmark_cmd(
+    ctx: click.Context,
+    paths: tuple[str, ...],
+    output_file: Optional[str],
+    sub_output_mode: Optional[str] = None,
+) -> None:
+    """Run the Phase 27.1 A/B/C agent navigation & blast-radius benchmark."""
+    json_mode = _resolve_json_mode(ctx, sub_output_mode)
+    target_paths = [Path(p) for p in paths] if paths else [Path(".").resolve()]
+    with OutputBroker(command="benchmark", json_mode=json_mode) as broker:
+        report = api.run_benchmark(target_paths, output_file=output_file)
+        broker.set_data(report)
+        if not json_mode:
+            summary = report["summary"]
+            aggs = summary["aggregates"]
+            click.echo(
+                f"Phase 27.1 Navigation Benchmark ({report['repos_evaluated']} repo(s)):\n"
+                f"  Token reduction vs raw_grep: {summary['token_reduction_vs_raw_grep_pct']:+.1f}%\n"
+                f"  Turn reduction vs raw_grep:  {summary['turn_reduction_vs_raw_grep_pct']:+.1f}%\n"
+                f"  Mean recall gain vs raw_grep: {summary['recall_gain_vs_raw_grep_pct']:+.1f} pp"
+            )
+            for cond in ("raw_grep", "tier1_manifests", "tier2_plus_impact"):
+                c = aggs[cond]
+                click.echo(
+                    f"  - {cond}: turns={c['mean_tool_turns']}, "
+                    f"tokens={c['mean_context_tokens_read']}, "
+                    f"mean_recall={c['mean_recall'] * 100:.1f}%, "
+                    f"blast_recall={c['mean_blast_radius_recall'] * 100:.1f}%"
+                )
+            if output_file:
+                click.echo(f"Wrote benchmark report to {output_file}")
+    _exit_for_broker(broker, json_mode=json_mode)
 

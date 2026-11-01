@@ -1170,6 +1170,7 @@ def test_uninit_coordinates_with_live_hook_and_preserves_persistent_hook_guard_i
     assert guard_path.stat().st_ino == guard_inode
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX frozen-owner guard-inode rotation")
 def test_frozen_live_lock_owner_is_reclaimed_exclusively_after_stale_timeout(tmp_path: Path) -> None:
     """A suspended/frozen live owner holding flock past STALE_TIMEOUT_SECONDS must be reclaimed safely by 1 winner."""
     src_dir = str(Path(__file__).resolve().parents[1] / "src")
@@ -1461,6 +1462,7 @@ def test_composite_action_checkout_detection_handles_git_dirs_worktrees_and_expl
     assert _eval_checkout(repo, "invalid-mode").returncode != 0
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX frozen-owner guard-inode rotation")
 def test_r1_superseded_frozen_writer_cannot_publish_or_rollback_manifests_or_exports(
     tmp_path: Path,
 ) -> None:
@@ -1883,6 +1885,7 @@ def test_r4_custom_hooks_path_inside_worktree_stays_fresh_and_rolls_back_on_fail
     assert proj_t1.is_stale() is False
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX frozen-owner guard-inode rotation")
 def test_r1_post_validation_pause_blocks_reclamation_and_fences_subsequent_writes(
     tmp_path: Path,
 ) -> None:

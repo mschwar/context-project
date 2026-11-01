@@ -159,6 +159,70 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
             "required": [],
         },
     },
+    {
+        "name": "ctx_impact",
+        "description": (
+            "Analyze directed dependency blast radius, reverse dependents, coupled test suites, "
+            "affected entrypoints/surfaces, and governing authority docs for a file, subsystem, or symbol."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "Repo-relative file path, subsystem/directory path, or symbol name.",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Repository root path relative to the server root.",
+                    "default": ".",
+                },
+                "depth": {
+                    "type": "integer",
+                    "description": "Optional maximum reverse-dependency hop distance (>= 1).",
+                },
+            },
+            "required": ["target"],
+        },
+    },
+    {
+        "name": "ctx_jev",
+        "description": (
+            "Inspect, evaluate, or invoke governed Type 1 Jev (System-One) bounded architectural "
+            "decision heads (`heads`, `decide`, or `eval`) with deterministic code fallback."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["heads", "decide", "eval"],
+                    "description": "Jev action to run.",
+                    "default": "heads",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Repository root path relative to the server root.",
+                    "default": ".",
+                },
+                "heads": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Head IDs to evaluate (required for `decide`, optional filter for `eval`).",
+                },
+                "state": {
+                    "type": "object",
+                    "description": "Structured JSON state payload for `decide`.",
+                },
+                "provider": {
+                    "type": "string",
+                    "enum": ["code", "jev"],
+                    "description": "Optional provider override (`code` deterministic rule or `jev` System-One).",
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 RESOURCE_DEFINITIONS: list[dict[str, str]] = [
@@ -425,6 +489,8 @@ class CtxMCPServer:
             "ctx_reset": self._call_reset,
             "ctx_board": self._call_board,
             "ctx_global_board": self._call_global_board,
+            "ctx_impact": self._call_impact,
+            "ctx_jev": self._call_jev,
         }
         handler = handlers.get(tool_name)
         if handler is None:
@@ -506,6 +572,72 @@ class CtxMCPServer:
     def _call_global_board(self, arguments: dict[str, object]) -> dict[str, object]:
         from ctx.stats_board import read_global_board
         return read_global_board()
+
+    def _call_impact(self, arguments: dict[str, object]) -> dict[str, object]:
+        path = self._resolve_path(arguments.get("path", "."))
+        target = arguments.get("target")
+        if not isinstance(target, str) or not target.strip():
+            raise InvalidToolArgumentsError("target must be a non-empty string", error_code="invalid_target")
+        depth = arguments.get("depth")
+        if depth is not None and (not isinstance(depth, int) or isinstance(depth, bool) or depth < 1):
+            raise InvalidToolArgumentsError("depth must be a positive integer", error_code="invalid_depth")
+        try:
+            result = api.analyze_impact(path, target.strip(), max_depth=depth)
+        except ValueError as exc:
+            raise InvalidToolArgumentsError(str(exc), error_code="target_not_found") from exc
+        return asdict(result)
+
+    def _call_jev(self, arguments: dict[str, object]) -> dict[str, object]:
+        path = self._resolve_path(arguments.get("path", "."))
+        action = str(arguments.get("action") or "heads").strip().lower()
+        provider = arguments.get("provider")
+        if provider is not None and (not isinstance(provider, str) or provider not in ("code", "jev")):
+            raise InvalidToolArgumentsError("provider must be 'code' or 'jev'", error_code="invalid_provider")
+        raw_heads = arguments.get("heads")
+        head_ids: list[str] | None = None
+        if raw_heads is not None:
+            if not isinstance(raw_heads, list) or not all(isinstance(h, str) and h.strip() for h in raw_heads):
+                raise InvalidToolArgumentsError("heads must be a list of non-empty strings", error_code="invalid_heads")
+            head_ids = [h.strip() for h in raw_heads]
+
+        try:
+            if action == "heads":
+                return {"heads": api.jev_list_heads(path)}
+            if action == "eval":
+                return api.evaluate_jev_heads(
+                    path,
+                    provider=provider or "code",
+                    head_ids=head_ids,
+                    allow_vault=False,
+                )
+            if action == "decide":
+                if not head_ids:
+                    raise InvalidToolArgumentsError(
+                        "heads is required when action is 'decide'",
+                        error_code="missing_heads",
+                    )
+                state = arguments.get("state")
+                if not isinstance(state, dict):
+                    raise InvalidToolArgumentsError(
+                        "state must be a JSON object when action is 'decide'",
+                        error_code="invalid_state",
+                    )
+                return api.jev_decide(
+                    head_ids,
+                    state,
+                    root=path,
+                    provider=provider,
+                    allow_vault=False,
+                )
+        except MCPToolError:
+            raise
+        except ValueError as exc:
+            raise InvalidToolArgumentsError(str(exc), error_code="invalid_jev_arguments") from exc
+
+        raise InvalidToolArgumentsError(
+            f"Unsupported action {action!r}; expected 'heads', 'decide', or 'eval'",
+            error_code="invalid_action",
+        )
 
     def _resolve_path(self, relative: object) -> Path:
         if not isinstance(relative, str):
