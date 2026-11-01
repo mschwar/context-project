@@ -1,46 +1,46 @@
 ---
-generated: '2026-10-30T14:57:38Z'
+generated: '2026-11-01T00:00:50Z'
 generator: ctx/1.1.0
-model: qwen2.5:7b-instruct
-content_hash: sha256:31e034ef49bee2527e883a1a1b793b8382f517efd27d6f1621c958a5b8ae51fb
+model: claude-haiku-4-5-20251001
+content_hash: sha256:8a466989de50a86b4066ab21d160a6c8df5c5941fa06867343d4c7faf81b042c
 files: 23
 dirs: 1
-tokens_total: 28571
+tokens_total: 81391
 ---
-# /central/repos/active/context-project/src/ctx
+# src/ctx
 
-Unified API and CLI entry points for managing and generating CONTEXT.md files, integrating various utilities and services.
+Core Python package implementing manifest generation, deterministic structural synthesis, CLI, MCP server, and consumer SDK.
 
 ## Files
 - **.ctxignore.default** — Default ignore patterns for ctx projects.
-- **__init__.py** — Version number for the ctx filesystem-native context layer library.
+- **__init__.py** — Version number for the ctx package.
 - **__main__.py** — Entry point for the CLI application.
-- **api.py** — Unified API layer for ctx canonical commands including refresh, check, and export operations.
-- **cli.py** — Click entry point for ctx CLI, handling various commands and operations.
-- **config.py** — Configuration handling and provider detection for the context project.
-- **generator.py** — Core generation engine for producing CONTEXT.md files by walking directory trees and generating summaries.
-- **git.py** — Retrieves changed files in a Git repository, handling unborn heads and staged/unstaged changes.
-- **hasher.py** — Computes SHA-256 hashes for files and directories, detecting staleness and handling symlinks.
-- **ignore.py** — Loads and merges ignore patterns from default and user-defined .ctxignore files for path matching.
-- **init.py** — Bootstrap .ctx/ infrastructure, install hooks, and manage git repo exports.
+- **api.py** — Unified API layer for canonical refresh, check, export, reset, Tier 2 synthesis, and fleet capsule generation.
+- **cli.py** — Click CLI entry point implementing refresh, check, export, reset, init, uninit, stats, setup, and serve commands.
+- **config.py** — Configuration loading and resolution with environment variable and .ctxconfig file support.
+- **generator.py** — Core generation engine walking a directory tree to produce CONTEXT.md files.
+- **git.py** — Retrieves changed files in a Git repository, handling unborn heads and untracked files.
+- **hasher.py** — Computes and compares SHA-256 hashes for files and directories to detect staleness.
+- **ignore.py** — Loads and merges .ctxignore.default, project-anchored .gitignore trees, and .ctxignore override rules via pathspec.
+- **init.py** — Bootstraps transactional .ctx/ exports, git worktree-aware hooks, kernel-locked PID debouncing, and hook telemetry.
 - **language_detector.py** — Detects the primary programming language of a file or directory based on extensions and configuration files.
-- **llm.py** — LLM client interface with Anthropic and OpenAI implementations, providing file and directory summarization.
-- **lock.py** — Cross-platform PID lock implementation for ctx write operations managing lock files and PID validation.
-- **manifest.py** — Reads and parses CONTEXT.md manifest files into structured data models.
-- **mcp_server.py** — Defines error classes and resource definitions for the MCP stdio server, including tool operations and protocol handling.
+- **llm.py** — Anthropic, OpenAI-compatible, and disk-cached LLM summarization clients with exact token accounting and lazy SDK loading.
+- **lock.py** — Cross-platform OS kernel-backed exclusive file lock with atomic metadata publication and active heartbeat.
+- **manifest.py** — Reads and parses CONTEXT.md manifest, extracting metadata and body content.
+- **mcp_server.py** — Defines protocol handlers, tool operations, and read-only .ctx/ resource definitions for the stdio MCP server.
 - **output.py** — Structured output broker for ctx CLI commands managing JSON envelope creation and error handling.
-- **preflight.py** — Preflight checks for LLM provider, model configuration, and connectivity.
-- **sdk.py** — Provides typed access to .ctx/ metadata and export tiers without importing LLM clients.
+- **preflight.py** — Validates explicit provider/base_url configuration precedence, endpoint connectivity, model summary quality, and target writability.
+- **sdk.py** — Provides typed access to .ctx/ metadata and pre-compiled exports without importing LLM clients.
 - **server.py** — Serves CONTEXT.md files from project directories via HTTP API.
-- **skeleton.py** — Determines structural and dependency signatures for source files and directories.
-- **stats_board.py** — Persistent run-stats ledger for ctx including per-repo and global stats management.
+- **skeleton.py** — Extracts deterministic multi-language symbol signatures, classified dependencies, operational entrypoints, and authority boundaries without LLM calls.
+- **stats_board.py** — Persistent per-repo and global refresh telemetry ledger with cost savings tracking and retention pruning.
 - **watcher.py** — Monitors directory changes and triggers manifest regeneration with debounced handling.
 
 ## Subdirectories
 - **lang_parsers/** — Language-specific parsers that extract public APIs and structural elements from source files across multiple programming languages.
 
 ## Notes
-- Cross-module relationships: `lang_parsers` subdirectory provides language-specific parsing capabilities used by `generator.py` and `skeleton.py`.
-- Architectural notes: `__main__.py` and `cli.py` handle CLI interactions, while `api.py` and `generator.py` manage API and file generation respectively.
+- `lang_parsers/` extracts language-specific public signatures consumed by both `generator.py` and `skeleton.py`.
+- `api.py` coordinates Tier 1 LLM manifest workflows and Tier 2 zero-LLM `.ctx/` architectural maps under `CtxLock`.
 
 <!-- Generated by ctx (https://pypi.org/project/ctx-tool/) -->

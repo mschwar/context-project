@@ -21,6 +21,8 @@ def test_help_shows_canonical_commands_only() -> None:
     assert "reset" in result.output
     assert "\n  init" in result.output  # init is now a visible command
     assert "\n  uninit" in result.output  # uninit is a new visible command
+    assert "\n  stats" in result.output
+    assert "\n  setup" in result.output
     assert "\n  update" not in result.output
     assert "\n  status" not in result.output
     assert "\n  clean" not in result.output

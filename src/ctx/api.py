@@ -17,6 +17,7 @@ from ctx.config import (
     MissingApiKeyError,
     PROVIDER_DETECTED_VIA,
     Config,
+    _iter_config_dirs,
     detect_provider,
     estimate_cost,
     load_config,
@@ -34,7 +35,13 @@ from ctx.generator import (
 from ctx.ignore import load_ignore_patterns
 from ctx.manifest import read_manifest
 from ctx.llm import create_client
-from ctx.lock import CtxLock
+from ctx.lock import (
+    CtxLock,
+    LockSupersededError,
+    assert_lock_ownership_for_path,
+    fenced_mkdir,
+    fenced_unlink,
+)
 
 
 ProgressCallback = Callable[[Path, int, int, int], None]
@@ -70,6 +77,12 @@ class RefreshResult:
     local_batch_fallbacks: int = 0
     cache_hits: int = 0
     cache_misses: int = 0
+    tokens_saved: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    input_tokens_saved: int = 0
+    output_tokens_saved: int = 0
+    tokens_saved_exact: bool = False
 
 
 @dataclass
@@ -154,7 +167,7 @@ def _find_config_path(target_path: Path) -> Path | None:
     """Return the nearest .ctxconfig for a path, if any."""
 
     start_dir = target_path if target_path.is_dir() else target_path.parent
-    for directory in (start_dir, *start_dir.parents):
+    for directory in _iter_config_dirs(start_dir):
         config_path = directory / ".ctxconfig"
         if config_path.exists():
             return config_path
@@ -175,15 +188,206 @@ def _has_manifests(root: Path) -> bool:
     return bool(_iter_tree_manifests(root))
 
 
-def _is_tier2_repo(root: Path) -> bool:
-    """Return True when root is initialized in Tier 2 (.ctx/ only, no root CONTEXT.md)."""
-    meta_path = root / ".ctx" / "metadata.json"
-    if not meta_path.is_file() or (root / "CONTEXT.md").is_file():
-        return False
+def _resolve_tier2_root(root: Path) -> Path | None:
+    """Return the enclosing Tier 2 project root if *root* (or its project anchor) is in Tier 2 mode."""
+    from ctx.config import resolve_project_anchor
     from ctx.stats_board import load_json_safe
 
-    data = load_json_safe(meta_path, {})
-    return isinstance(data, dict) and data.get("mode") == "tier2"
+    candidates = [root]
+    if root.exists():
+        anchor = resolve_project_anchor(root)
+        if anchor not in candidates:
+            candidates.append(anchor)
+
+    for candidate in candidates:
+        meta_path = candidate / ".ctx" / "metadata.json"
+        if not meta_path.is_file():
+            continue
+        data = load_json_safe(meta_path, {})
+        if isinstance(data, dict) and data.get("mode") == "tier2":
+            return candidate
+    return None
+
+
+def _is_tier2_repo(root: Path) -> bool:
+    """Return True when *root* (or its enclosing project anchor) is initialized in Tier 2 (.ctx/ mode: tier2)."""
+    return _resolve_tier2_root(root) is not None
+
+
+def _refresh_tier2_locked(
+    root: Path,
+    *,
+    force: bool = False,
+    max_depth: int | None = None,
+    touch_last_refresh: bool = False,
+) -> RefreshResult | None:
+    """Refresh Tier 2 (.ctx/) maps while the caller already holds CtxLock(root).
+
+    Returns None when .ctx/metadata.json no longer declares mode == 'tier2'.
+    """
+    from datetime import datetime, timezone
+
+    from ctx.init import _restore_dir_snapshot, _snapshot_dir
+    from ctx.skeleton import (
+        extract_skeleton,
+        render_context_0,
+        render_context_1,
+        render_context_full,
+        should_invoke_llm,
+    )
+    from ctx.stats_board import load_json_safe, save_json_atomic, write_text_atomic
+
+    ctx_dir = root / ".ctx"
+    meta_path = ctx_dir / "metadata.json"
+    expected_exports = ("CONTEXT.md", "CONTEXT-1.md", "CONTEXT-0.md")
+
+    meta_exists = meta_path.is_file()
+    meta = load_json_safe(meta_path, {}) if meta_exists else {}
+    if not (meta_exists and isinstance(meta, dict) and meta.get("mode") == "tier2"):
+        return None
+
+    skeleton = extract_skeleton(root, max_depth=max_depth)
+    exports_missing = any(
+        not (ctx_dir / name).is_file() or (ctx_dir / name).stat().st_size == 0
+        for name in expected_exports
+    )
+    needs_update = force or exports_missing or should_invoke_llm(meta, skeleton)
+    subsystem_count = max(1, len(skeleton.subsystems))
+
+    if not needs_update:
+        if touch_last_refresh and meta_path.is_file():
+            meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
+            save_json_atomic(meta_path, meta)
+        return RefreshResult(
+            dirs_processed=0,
+            dirs_skipped=subsystem_count,
+            files_processed=0,
+            tokens_used=0,
+            errors=[],
+            budget_exhausted=False,
+            strategy="tier2",
+            est_cost_usd=0.0,
+            stale_directories=[],
+        )
+
+    prior_snapshot = _snapshot_dir(ctx_dir)
+    try:
+        rendered_c0 = render_context_0(skeleton)
+        rendered_c1 = render_context_1(skeleton)
+        rendered_full = render_context_full(skeleton)
+        fenced_mkdir(ctx_dir, parents=True, exist_ok=True)
+        write_text_atomic(ctx_dir / "CONTEXT-0.md", rendered_c0)
+        write_text_atomic(ctx_dir / "CONTEXT-1.md", rendered_c1)
+        write_text_atomic(ctx_dir / "CONTEXT.md", rendered_full)
+        meta["mode"] = "tier2"
+        meta["structural_hash"] = skeleton.structural_hash
+        meta["boundary_doc_hash"] = skeleton.boundary_doc_hash
+        meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
+        save_json_atomic(meta_path, meta)
+    except LockSupersededError:
+        raise
+    except Exception:
+        _restore_dir_snapshot(ctx_dir, prior_snapshot)
+        raise
+
+    return RefreshResult(
+        dirs_processed=subsystem_count,
+        dirs_skipped=0,
+        files_processed=skeleton.total_files,
+        tokens_used=0,
+        errors=[],
+        budget_exhausted=False,
+        strategy="tier2",
+        est_cost_usd=0.0,
+        stale_directories=[],
+    )
+
+
+def _refresh_tier2(
+    root: Path,
+    *,
+    force: bool = False,
+    dry_run: bool = False,
+    max_depth: int | None = None,
+    touch_last_refresh: bool = False,
+    _allow_fallback: bool = True,
+    _from_hook: bool = False,
+    _mode_hops: int = 0,
+    _fallback_kwargs: dict[str, object] | None = None,
+) -> RefreshResult:
+    """Refresh deterministic Tier 2 (.ctx/) architectural maps without requiring LLM credentials."""
+    from ctx.skeleton import extract_skeleton, should_invoke_llm
+    from ctx.stats_board import load_json_safe
+
+    ctx_dir = root / ".ctx"
+    meta_path = ctx_dir / "metadata.json"
+    expected_exports = ("CONTEXT.md", "CONTEXT-1.md", "CONTEXT-0.md")
+
+    if dry_run:
+        meta = load_json_safe(meta_path, {})
+        if not isinstance(meta, dict):
+            meta = {}
+        skeleton = extract_skeleton(root, max_depth=max_depth)
+        exports_missing = any(
+            not (ctx_dir / name).is_file() or (ctx_dir / name).stat().st_size == 0
+            for name in expected_exports
+        )
+        needs_update = force or exports_missing or should_invoke_llm(meta, skeleton)
+        stale_dirs = ["."] if needs_update else []
+        return RefreshResult(
+            dirs_processed=0,
+            dirs_skipped=len(stale_dirs),
+            files_processed=0,
+            tokens_used=0,
+            errors=[],
+            budget_exhausted=False,
+            strategy="tier2",
+            est_cost_usd=0.0,
+            stale_directories=stale_dirs,
+        )
+
+    with CtxLock(root, command="refresh"):
+        locked_result = _refresh_tier2_locked(
+            root,
+            force=force,
+            max_depth=max_depth,
+            touch_last_refresh=touch_last_refresh,
+        )
+        if locked_result is not None:
+            return locked_result
+        if _from_hook and not meta_path.is_file():
+            return RefreshResult(
+                dirs_processed=0,
+                dirs_skipped=0,
+                files_processed=0,
+                tokens_used=0,
+                errors=[],
+                budget_exhausted=False,
+                strategy="tier2",
+                est_cost_usd=0.0,
+                stale_directories=[],
+            )
+
+    if _allow_fallback and _mode_hops < 4:
+        fb_kwargs = dict(_fallback_kwargs or {})
+        fb_kwargs.update(
+            force=force,
+            dry_run=dry_run,
+            max_depth=max_depth,
+            _mode_hops=_mode_hops + 1,
+        )
+        return refresh(root, **fb_kwargs)
+    return RefreshResult(
+        dirs_processed=0,
+        dirs_skipped=0,
+        files_processed=0,
+        tokens_used=0,
+        errors=[],
+        budget_exhausted=False,
+        strategy="tier2",
+        est_cost_usd=0.0,
+        stale_directories=[],
+    )
 
 
 def _directory_within_depth(path: Path, root: Path, depth: Optional[int]) -> bool:
@@ -203,6 +407,25 @@ def _apply_token_guardrail(config: Config) -> None:
         config.token_budget = config.max_tokens_per_run
 
 
+def _estimate_usage_cost(
+    tokens_used: int,
+    input_tokens: int,
+    output_tokens: int,
+    provider: str,
+    model: str,
+) -> float:
+    if input_tokens > 0 or output_tokens > 0:
+        remainder = max(0, tokens_used - (input_tokens + output_tokens))
+        return estimate_cost(
+            tokens_used,
+            provider,
+            model,
+            input_tokens=input_tokens + remainder,
+            output_tokens=output_tokens,
+        )
+    return estimate_cost(tokens_used, provider, model)
+
+
 def _budget_guardrail_message(config: Config, stats: GenerateStats) -> str | None:
     """Return a hard-budget error message when a Stage 3 guardrail is hit."""
 
@@ -212,13 +435,44 @@ def _budget_guardrail_message(config: Config, stats: GenerateStats) -> str | Non
             f"(limit {config.max_tokens_per_run:,})."
         )
     if config.max_usd_per_run is not None:
-        est_cost = estimate_cost(stats.tokens_used, config.provider, config.resolved_model())
+        est_cost = _estimate_usage_cost(
+            stats.tokens_used,
+            stats.input_tokens,
+            stats.output_tokens,
+            config.provider,
+            config.resolved_model(),
+        )
         if est_cost >= config.max_usd_per_run:
             return (
                 f"USD budget guardrail reached: ${est_cost:.4f} estimated spend "
                 f"(limit ${config.max_usd_per_run:.4f})."
             )
     return None
+
+
+def _sync_tier1_ctx_exports(root: Path) -> None:
+    """Atomically synchronize .ctx/ exports and metadata while holding CtxLock."""
+    from ctx.config import resolve_project_anchor
+
+    target_root = resolve_project_anchor(root) if root.exists() else root
+    meta_path = target_root / ".ctx" / "metadata.json"
+    if not meta_path.is_file() or _resolve_tier2_root(target_root) is not None:
+        return
+    try:
+        from datetime import datetime, timezone
+
+        from ctx.init import _populate_ctx_dir
+        from ctx.stats_board import load_json_safe, save_json_atomic
+
+        _populate_ctx_dir(target_root, target_root / ".ctx")
+        meta = load_json_safe(meta_path, {})
+        if isinstance(meta, dict):
+            meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
+            save_json_atomic(meta_path, meta)
+    except LockSupersededError:
+        raise
+    except Exception as exc:
+        logger.warning("Tier 1 .ctx/ export sync failed: %s", exc)
 
 
 def refresh(
@@ -236,8 +490,14 @@ def refresh(
     base_url: str | None = None,
     cache_path: str | None = None,
     progress: ProgressCallback | None = None,
+    _force_tier1: bool = False,
+    _on_locked_begin: Callable[[], None] | None = None,
+    _on_locked_success: Callable[[], None] | None = None,
+    _on_locked_rollback: Callable[[], None] | None = None,
+    _mode_hops: int = 0,
 ) -> RefreshResult:
     """Run canonical refresh behavior with strategy selection."""
+    from ctx.config import resolve_project_anchor
     from ctx.git import get_changed_files
     from ctx.watcher import run_watch
 
@@ -245,6 +505,34 @@ def refresh(
         raise ValueError("--setup and --watch cannot be used together.")
     if dry_run and watch:
         raise ValueError("--dry-run and --watch cannot be used together.")
+
+    fallback_kwargs: dict[str, object] = {
+        "until_complete": until_complete,
+        "provider": provider,
+        "model": model,
+        "token_budget": token_budget,
+        "base_url": base_url,
+        "cache_path": cache_path,
+        "progress": progress,
+    }
+
+    tier2_root = None if _force_tier1 else _resolve_tier2_root(root)
+    if tier2_root is not None:
+        if setup or watch:
+            unsupported = "--setup" if setup else "--watch"
+            raise ValueError(
+                f"{unsupported} is not supported in Tier 2 (.ctx/-only) repositories. "
+                "Run 'ctx init --force' to switch to Tier 1 per-directory manifests."
+            )
+        return _refresh_tier2(
+            tier2_root,
+            force=force,
+            dry_run=dry_run,
+            max_depth=max_depth,
+            _allow_fallback=_mode_hops < 4,
+            _mode_hops=_mode_hops,
+            _fallback_kwargs=fallback_kwargs,
+        )
 
     setup_provider: str | None = None
     setup_model: str | None = None
@@ -360,46 +648,136 @@ def refresh(
     _apply_token_guardrail(config)
 
     cumulative_stats = GenerateStats()
+    preexisting_manifests: dict[Path, bytes] = {}
+    tx_started = False
+    manifests_snapshotted = False
 
+    def _rollback_manifests() -> None:
+        from ctx.init import _write_bytes_atomic
+
+        assert_lock_ownership_for_path(root)
+        for manifest_path in _iter_tree_manifests(root):
+            if manifest_path not in preexisting_manifests:
+                fenced_unlink(manifest_path, missing_ok=True)
+        for manifest_path, prior_bytes in preexisting_manifests.items():
+            _write_bytes_atomic(manifest_path, prior_bytes)
+
+    switched_to_tier2_root: Path | None = None
     while True:
-        with CtxLock(root, command="refresh"):
-            stats: GenerateStats
-            if strategy == "full" and cumulative_stats.dirs_processed == 0:
-                stats = generate_tree(root, config, client, spec, progress=progress)
-            elif strategy == "smart":
-                stats = update_tree(root, config, client, spec, progress=progress, changed_files=changed_files)
-            else:
-                stats = update_tree(root, config, client, spec, progress=progress)
+        should_continue_cycles = False
+        lock_root = resolve_project_anchor(root) if root.exists() else root
+        with CtxLock(lock_root, command="refresh"):
+            if not _force_tier1:
+                locked_tier2_root = _resolve_tier2_root(root)
+                if locked_tier2_root is not None:
+                    if setup or watch:
+                        unsupported = "--setup" if setup else "--watch"
+                        raise ValueError(
+                            f"{unsupported} is not supported in Tier 2 (.ctx/-only) repositories. "
+                            "Run 'ctx init --force' to switch to Tier 1 per-directory manifests."
+                        )
+                    if locked_tier2_root.resolve() == lock_root.resolve():
+                        inline_tier2 = _refresh_tier2_locked(
+                            locked_tier2_root,
+                            force=force,
+                            max_depth=max_depth,
+                        )
+                        if inline_tier2 is not None:
+                            return inline_tier2
+                    else:
+                        switched_to_tier2_root = locked_tier2_root
+                        break
 
-        cumulative_stats.dirs_processed += stats.dirs_processed
-        cumulative_stats.dirs_skipped += stats.dirs_skipped
-        cumulative_stats.files_processed += stats.files_processed
-        cumulative_stats.files_binary += stats.files_binary
-        cumulative_stats.tokens_used += stats.tokens_used
-        # Replace (not extend) errors each pass so that directories which
-        # were retried and succeeded no longer appear as errors.
-        cumulative_stats.errors = list(stats.errors)
-        cumulative_stats.budget_exhausted = stats.budget_exhausted
-        cumulative_stats.local_batch_fallbacks = max(
-            cumulative_stats.local_batch_fallbacks,
-            stats.local_batch_fallbacks,
-        )
+            try:
+                if not tx_started:
+                    tx_started = True
+                    if _on_locked_begin is not None:
+                        _on_locked_begin()
+                        spec = load_ignore_patterns(root)
+                        if not force:
+                            strategy = "full" if not _has_manifests(root) else "incremental"
+                            changed_files = None
+                    elif not force and not _has_manifests(root):
+                        strategy = "full"
+                        changed_files = None
+                    if _on_locked_success is not None or _on_locked_rollback is not None:
+                        preexisting_manifests = {
+                            p: p.read_bytes() for p in _iter_tree_manifests(root)
+                        }
+                        manifests_snapshotted = True
 
-        if not until_complete:
+                stats: GenerateStats
+                if strategy == "full" and cumulative_stats.dirs_processed == 0:
+                    stats = generate_tree(root, config, client, spec, progress=progress)
+                elif strategy == "smart":
+                    stats = update_tree(root, config, client, spec, progress=progress, changed_files=changed_files)
+                else:
+                    stats = update_tree(root, config, client, spec, progress=progress)
+
+                cumulative_stats.dirs_processed += stats.dirs_processed
+                cumulative_stats.dirs_skipped += stats.dirs_skipped
+                cumulative_stats.files_processed += stats.files_processed
+                cumulative_stats.files_binary += stats.files_binary
+                cumulative_stats.tokens_used += stats.tokens_used
+                cumulative_stats.input_tokens += stats.input_tokens
+                cumulative_stats.output_tokens += stats.output_tokens
+                # Replace (not extend) errors each pass so that directories which
+                # were retried and succeeded no longer appear as errors.
+                cumulative_stats.errors = list(stats.errors)
+                cumulative_stats.budget_exhausted = stats.budget_exhausted
+                cumulative_stats.local_batch_fallbacks = max(
+                    cumulative_stats.local_batch_fallbacks,
+                    stats.local_batch_fallbacks,
+                )
+                cumulative_stats.cache_hits += stats.cache_hits
+                cumulative_stats.cache_misses += stats.cache_misses
+                cumulative_stats.tokens_saved += stats.tokens_saved
+                cumulative_stats.input_tokens_saved += stats.input_tokens_saved
+                cumulative_stats.output_tokens_saved += stats.output_tokens_saved
+                cumulative_stats.tokens_saved_exact = (
+                    cumulative_stats.tokens_saved_exact or stats.tokens_saved_exact
+                )
+
+                if (
+                    until_complete
+                    and stats.dirs_processed > 0
+                    and (stats.budget_exhausted or bool(stats.errors))
+                ):
+                    should_continue_cycles = True
+                    if config.max_usd_per_run is not None:
+                        est_cost = _estimate_usage_cost(
+                            cumulative_stats.tokens_used,
+                            cumulative_stats.input_tokens,
+                            cumulative_stats.output_tokens,
+                            config.provider,
+                            config.resolved_model(),
+                        )
+                        if est_cost >= config.max_usd_per_run:
+                            should_continue_cycles = False
+
+                if not should_continue_cycles and not dry_run:
+                    if _on_locked_success is not None:
+                        if cumulative_stats.errors or not (root / "CONTEXT.md").is_file():
+                            err_detail = (
+                                cumulative_stats.errors[0]
+                                if cumulative_stats.errors
+                                else f"Failed to generate root CONTEXT.md in {root}"
+                            )
+                            raise RuntimeError(err_detail)
+                        _on_locked_success()
+                    else:
+                        _sync_tier1_ctx_exports(root)
+            except LockSupersededError:
+                raise
+            except Exception:
+                if manifests_snapshotted:
+                    _rollback_manifests()
+                if _on_locked_rollback is not None:
+                    _on_locked_rollback()
+                raise
+
+        if not should_continue_cycles:
             break
-        # No forward progress this pass — stop to avoid infinite loops.
-        if stats.dirs_processed == 0:
-            break
-        # Clean completion: no budget limit hit and no errors.
-        if not stats.budget_exhausted and not stats.errors:
-            break
-        # Honor hard USD ceiling across cycles.  (The token budget is
-        # per-pass by design — _apply_token_guardrail folds it into the
-        # generator budget so each pass stops independently.)
-        if config.max_usd_per_run is not None:
-            est_cost = estimate_cost(cumulative_stats.tokens_used, config.provider, config.resolved_model())
-            if est_cost >= config.max_usd_per_run:
-                break
 
         reason = "budget" if stats.budget_exhausted else "errors"
         logger.info(
@@ -411,6 +789,17 @@ def refresh(
         _time.sleep(config.resume_cooldown_seconds)
         strategy = "incremental"
 
+    if switched_to_tier2_root is not None:
+        return _refresh_tier2(
+            switched_to_tier2_root,
+            force=force,
+            dry_run=dry_run,
+            max_depth=max_depth,
+            _allow_fallback=_mode_hops < 4,
+            _mode_hops=_mode_hops + 1,
+            _fallback_kwargs=fallback_kwargs,
+        )
+
     budget_guardrail = _budget_guardrail_message(config, cumulative_stats)
     errors = list(cumulative_stats.errors)
     if budget_guardrail is not None:
@@ -419,10 +808,18 @@ def refresh(
     if watch and not errors:
         run_watch(root, config, client, spec)
 
-    cache_hits, cache_misses = (
-        client.hit_miss_counts
-        if hasattr(client, "hit_miss_counts")
-        else (0, 0)
+    if cumulative_stats.cache_hits or cumulative_stats.cache_misses:
+        cache_hits, cache_misses = cumulative_stats.cache_hits, cumulative_stats.cache_misses
+    elif hasattr(client, "hit_miss_counts"):
+        cache_hits, cache_misses = client.hit_miss_counts
+    else:
+        cache_hits, cache_misses = 0, 0
+    tokens_saved = cumulative_stats.tokens_saved or int(getattr(client, "tokens_saved", 0) or 0)
+    input_tokens_saved = cumulative_stats.input_tokens_saved or int(
+        getattr(client, "input_tokens_saved", 0) or 0
+    )
+    output_tokens_saved = cumulative_stats.output_tokens_saved or int(
+        getattr(client, "output_tokens_saved", 0) or 0
     )
 
     result = RefreshResult(
@@ -433,16 +830,31 @@ def refresh(
         errors=errors,
         budget_exhausted=cumulative_stats.budget_exhausted or budget_guardrail is not None,
         strategy=strategy,
-        est_cost_usd=estimate_cost(cumulative_stats.tokens_used, config.provider, config.resolved_model()),
+        est_cost_usd=_estimate_usage_cost(
+            cumulative_stats.tokens_used,
+            cumulative_stats.input_tokens,
+            cumulative_stats.output_tokens,
+            config.provider,
+            config.resolved_model(),
+        ),
         stale_directories=[],
         budget_guardrail=budget_guardrail,
         config_written=config_written,
         setup_provider=setup_provider,
         setup_model=setup_model,
         setup_detected_via=setup_detected_via,
-        local_batch_fallbacks=int(getattr(client, "local_batch_fallbacks", 0) or 0),
+        local_batch_fallbacks=max(
+            cumulative_stats.local_batch_fallbacks,
+            int(getattr(client, "local_batch_fallbacks", 0) or 0),
+        ),
         cache_hits=cache_hits,
         cache_misses=cache_misses,
+        tokens_saved=tokens_saved,
+        input_tokens=cumulative_stats.input_tokens,
+        output_tokens=cumulative_stats.output_tokens,
+        input_tokens_saved=input_tokens_saved,
+        output_tokens_saved=output_tokens_saved,
+        tokens_saved_exact=cumulative_stats.tokens_saved_exact or hasattr(client, "tokens_saved"),
     )
 
     if not dry_run:
@@ -595,9 +1007,10 @@ def check(
     if sum(1 for enabled in modes if enabled) > 1:
         raise ValueError("Only one check mode may be selected.")
 
-    if _is_tier2_repo(root):
+    tier2_root = _resolve_tier2_root(root)
+    if tier2_root is not None:
         return _check_tier2(
-            root,
+            tier2_root,
             verify=verify,
             stats=stats,
             diff=diff,
@@ -773,9 +1186,11 @@ def export_context(
     output_file: str | None = None,
     filter_mode: str = "all",
     depth: int | None = None,
+    _force_tier1: bool = False,
 ) -> ExportResult:
     """Export manifests with filter/depth controls."""
-    if _is_tier2_repo(root):
+    tier2_root = None if _force_tier1 else _resolve_tier2_root(root)
+    if tier2_root is not None:
         from ctx.sdk import CtxProject
 
         if depth == 0:
@@ -784,9 +1199,9 @@ def export_context(
             target_name = "CONTEXT-1.md"
         else:
             target_name = "CONTEXT.md"
-        target_file = root / ".ctx" / target_name
+        target_file = tier2_root / ".ctx" / target_name
         label = f".ctx/{target_name}"
-        proj = CtxProject.load(root, walk_parents=False)
+        proj = CtxProject.load(tier2_root, walk_parents=False)
         is_stale_flag = proj.is_stale() if proj is not None else True
 
         if filter_mode == "missing":
@@ -872,20 +1287,64 @@ def reset(
     yes: bool = False,
 ) -> ResetResult:
     """Remove CONTEXT.md files from a tree."""
-    manifests = _iter_tree_manifests(root)
-    paths = [_path_relative(manifest, root) for manifest in manifests]
+    from ctx.config import resolve_project_anchor
 
     if dry_run:
+        manifests = _iter_tree_manifests(root)
+        paths = [_path_relative(manifest, root) for manifest in manifests]
         return ResetResult(manifests_removed=0, paths=paths)
 
     if not yes:
         raise ConfirmationRequiredError("--yes flag required in non-interactive mode")
 
-    with CtxLock(root, command="reset"):
+    lock_root = resolve_project_anchor(root) if root.exists() else root
+    with CtxLock(lock_root, command="reset"):
+        manifests = _iter_tree_manifests(root)
+        paths = [_path_relative(manifest, root) for manifest in manifests]
         for manifest in manifests:
-            manifest.unlink()
+            fenced_unlink(manifest, missing_ok=True)
+        _sync_tier1_ctx_exports(root)
 
     return ResetResult(manifests_removed=len(manifests), paths=paths)
+
+
+def _file_within_capsule_depth(rel_path: str, depth: int | None) -> bool:
+    if depth is None:
+        return True
+    dir_parts = Path(rel_path).parts[:-1]
+    if not dir_parts:
+        return True
+    if depth == 0:
+        return False
+    effective_depth = 1 if (dir_parts[0] == "src" and len(dir_parts) == 2) else len(dir_parts)
+    return effective_depth <= depth
+
+
+def _entrypoint_within_capsule_depth(ep: str, depth: int | None, root: Path) -> bool:
+    if depth is None:
+        return True
+    if ep.startswith("file:"):
+        return _file_within_capsule_depth(ep[len("file:") :], depth)
+    if ep.startswith("npm:") and " -> " in ep:
+        from ctx.skeleton import resolve_config_target_path
+
+        _, raw_target = ep.split(" -> ", 1)
+        resolved_target = resolve_config_target_path(root, raw_target)
+        if resolved_target is None:
+            return False
+        clean_rel = resolved_target.relative_to(root.resolve()).as_posix()
+        return _file_within_capsule_depth(clean_rel, depth)
+    if ep.startswith("cli:") and " -> " in ep:
+        from ctx.skeleton import resolve_cli_entrypoint_target
+
+        _, raw_target = ep.split(" -> ", 1)
+        resolved_rel = resolve_cli_entrypoint_target(root, raw_target.strip())
+        if resolved_rel is not None:
+            return _file_within_capsule_depth(resolved_rel, depth)
+        module_name = raw_target.strip().split(":", 1)[0].strip()
+        mod_depth = max(0, len([seg for seg in module_name.split(".") if seg]) - 1)
+        return mod_depth <= depth
+    return True
 
 
 def build_fleet_capsule(
@@ -897,12 +1356,26 @@ def build_fleet_capsule(
     """Generate a compact deterministic capsule for project-ledger and gbrain ingestion."""
     import hashlib
     import json
-    from dataclasses import asdict
-    from ctx.skeleton import extract_skeleton, render_context_0, render_context_1
+    from dataclasses import asdict, replace
+    from ctx.skeleton import (
+        extract_skeleton,
+        render_context_0,
+        render_context_1,
+        strip_tier2_chrome,
+    )
 
     resolved_root = root.resolve()
     skeleton = extract_skeleton(resolved_root)
     repo_id = f"sha256:{hashlib.sha256(str(resolved_root).encode('utf-8')).hexdigest()}"
+
+    kept_boundary_docs = [
+        doc for doc in skeleton.boundary_docs if _file_within_capsule_depth(doc.relative_path, depth)
+    ]
+    kept_entrypoints = [
+        ep
+        for ep in skeleton.entrypoints
+        if _entrypoint_within_capsule_depth(ep, depth, resolved_root)
+    ]
 
     authority_boundaries = [
         {
@@ -912,9 +1385,10 @@ def build_fleet_capsule(
             "summary": doc.summary_line,
             "content_hash": doc.content_hash,
         }
-        for doc in skeleton.boundary_docs
+        for doc in kept_boundary_docs
     ]
 
+    kept_subsystem_objs = []
     filtered_subsystems = []
     for sub in skeleton.subsystems:
         if depth is not None and sub.path != ".":
@@ -923,6 +1397,7 @@ def build_fleet_capsule(
             effective_depth = 1 if (Path(sub.path).parts[0] == "src" and sub_depth == 2) else sub_depth
             if effective_depth > depth:
                 continue
+        kept_subsystem_objs.append(sub)
         filtered_subsystems.append(
             {
                 "path": sub.path,
@@ -934,13 +1409,19 @@ def build_fleet_capsule(
             }
         )
 
-    capsule_md = render_context_0(skeleton)
+    render_skeleton = replace(
+        skeleton,
+        subsystems=kept_subsystem_objs,
+        boundary_docs=kept_boundary_docs,
+        entrypoints=kept_entrypoints,
+    )
+    capsule_md = render_context_0(render_skeleton)
     if depth is None or depth >= 1:
-        c1_lines = render_context_1(skeleton).splitlines()[12:]
+        c1_body = strip_tier2_chrome(render_context_1(render_skeleton), strip_footer=False)
         capsule_md = (
             capsule_md.removesuffix("<!-- Generated by ctx (https://pypi.org/project/ctx-tool/) -->\n")
             + "\n"
-            + "\n".join(c1_lines)
+            + c1_body.rstrip()
             + "\n"
         )
 
@@ -952,7 +1433,7 @@ def build_fleet_capsule(
         boundary_doc_hash=skeleton.boundary_doc_hash,
         total_files=skeleton.total_files,
         languages=dict(skeleton.languages),
-        entrypoints=list(skeleton.entrypoints),
+        entrypoints=kept_entrypoints,
         authority_boundaries=authority_boundaries,
         subsystems=filtered_subsystems,
         capsule_markdown=capsule_md,

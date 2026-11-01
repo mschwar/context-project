@@ -3,9 +3,9 @@
 Current development status and upcoming milestones.
 
 ## Current Health (October 2026)
-- **Status:** Stable. Phases 1–21, Phase 24, Phase 25, Phase 28, Phase 29, Phase 30, and Phase 30.8 (AI-Server Live Dogfood Hardening, Issue #73) are complete and closeout is documented.
-- **Core Engine:** Bottom-up traversal, incremental hashing, parallel depth-level processing, persistent model-aware LLM cache. Rate limit handling uses Retry-After headers with 60s backoff ceiling and 5 retry attempts (local timeouts capped at 2 attempts). Mid-level budget enforcement via `threading.Event`. Configurable concurrency defaults to 1 worker for cloud and local single-GPU providers (overridable via `max_concurrent_dirs` / `CTX_MAX_CONCURRENT_DIRS`).
-- **Test Coverage:** 566 tests passing across all modules.
+- **Status:** Stable. Phases 1–21, Phase 24, Phase 25, Phase 28, Phase 29, Phase 30, Phase 30.8 (AI-Server Live Dogfood Hardening, Issue #73), and Phase 30.9 (Full Repository Audit Remediation Gate, Issue #76) are complete and closeout is documented.
+- **Core Engine:** Bottom-up traversal, portable repo-relative `# <rel_path>` headings, incremental SHA-256 hashing with enforced `extensions` allowlist and `.gitignore` merging, heartbeat-backed atomic `CtxLock`, real `tiktoken` `max_file_tokens` slicing, deterministic `[empty file]` handling, parallel depth-level processing, and persistent model-aware LLM file + directory cache with exact `tokens_saved` propagation.
+- **Test Coverage:** 619+ tests passing across all modules; `ctx check . --verify --check-exit` passes with `0` stale, `0` missing, and `0` invalid manifests.
 - **LLM Support:** Anthropic (Claude), OpenAI, Ollama, LM Studio. BitNet removed.
 - **Agent Surface:** canonical `ctx init`, `ctx uninit`, `ctx refresh`, `ctx check`, `ctx export`, and `ctx reset` commands backed by `src/ctx/api.py` and `src/ctx/init.py`, with hidden legacy aliases preserved for compatibility. `--until-complete` flag enables resilient auto-resume for large trees. `ctx setup --check` provides a 7-check preflight onboarding gate (`src/ctx/preflight.py`).
 - **Configuration:** full `CTX_*` env-var parity for scalar config fields, shared cost estimation, zero-config refresh bootstrap for env/local providers, and hard `max_tokens_per_run` / `max_usd_per_run` guardrails. `files_per_call` (formerly `batch_size`) and `max_concurrent_dirs` are configurable.
@@ -478,7 +478,36 @@ Claimed job ([#73](https://github.com/mschwar/context-project/issues/73)) resolv
 - [x] **30.8.10 `pytest` global stats isolation (`CTX_GLOBAL_STATS_PATH`)** — supported `CTX_GLOBAL_STATS_PATH` in `stats_board._global_stats_path()` and isolated pytest runs in `tests/conftest.py`.
 - [x] **30.8.Z Gate closeout** — reflection filed at `archive/reflections/2026-10-30-phase30-8-dogfood-hardening-reflection.md`; 566 tests passing.
 
-### Phase 31 — Hybrid Semantic Synthesis on Structural Change (Backlog)
+### Phase 30.9 — Full Repository Audit Remediation Gate ✓
+
+Claimed job ([#76](https://github.com/mschwar/context-project/issues/76)) resolving all P0, P1, P2, and P3 repository audit findings plus emergent cache-telemetry propagation issues:
+
+- [x] **30.9.1 Portable repo-relative manifest headings (`D1`)** — replaced machine-specific `# /abs/path` headings with portable repo-relative `# <rel_path>` (`# .` at root) in `_render_manifest_body()` and `validate_manifest_body()`.
+- [x] **30.9.2 Unified Tier 2 `ctx refresh` & Tier 1 `CtxProject.is_stale()` (`D2`)** — wired deterministic zero-LLM `_refresh_tier2()` into `api.refresh()`, auto-synced `.ctx/CONTEXT*.md` after Tier 1 `refresh()`, and fixed `CtxProject.is_stale()` for missing Tier 2 hashes and Tier 1 drift.
+- [x] **30.9.3 Sound `smart` refresh (`D3`)** — included untracked files (`git ls-files --others --exclude-standard`) in `get_changed_files()` and unioned changed-file directories with any pre-existing missing or hash-stale directories in `_expand_smart_target_directories()`.
+- [x] **30.9.4 Heartbeat-backed atomic `CtxLock` (`D4`)** — raised `STALE_TIMEOUT_SECONDS = 900`, added background daemon lock heartbeat renewal, atomic temp-file lock writes, PID-liveness-first staleness checks, and PID-ownership verification on release.
+- [x] **30.9.5 Token-accurate `max_file_tokens` slicing & 0-byte `[empty file]` handling (`D5`)** — replaced character slicing with `_truncate_to_tokens()` (`tiktoken`) and labeled 0-byte files `[empty file]` without incrementing `files_binary` or failing `--verify`.
+- [x] **30.9.6 `.gitignore` privacy & noise boundary (`D6`)** — merged `.gitignore` between `.ctxignore.default` and `.ctxignore` so gitignored secrets/artifacts are excluded while preserving `.ctxignore` `!negation` overrides.
+- [x] **30.9.7 Multi-language `skeleton.py` & `build_fleet_capsule` accuracy (`D7`)** — filtered stdlib modules from `external_deps`, added import extraction across all 11 supported languages + `go.mod`/`Cargo.toml` module prefixes, diversified `key_symbols`, excluded tests/missing `package.json` `main` from entrypoints, honored `depth` in `capsule_markdown`, and replaced fragile line slicing with `strip_tier2_chrome()`.
+- [x] **30.9.8 Git worktree, `core.hooksPath`, atomic `.ctx/hook.pid`, & `hook_log.json` pruning (`D8`)** — supported `.git` worktree pointer files and `git rev-parse --git-path hooks`, moved hook PID metadata to `.ctx/hook.pid` backed by a persistent OS kernel guard lock (`.ctx-cache/.hook.guard`) coordinated with `uninit`, and capped `hook_log.json` at 200 entries.
+- [x] **30.9.9 Enforced `Config.extensions` / `CTX_EXTENSIONS` allowlist (`D9`)** — enforced extension allowlists consistently across generation, hashing, health inspection, verification, and skeleton extraction.
+- [x] **30.9.10 Accurate model pricing, directory summary disk caching, & `tokens_saved` telemetry (`D10`)** — ordered specific `mini`/`nano` models ahead of prefix substrings + added `OUTPUT_PRICING_DATA`, cached `summarize_directory` and token metadata in `CachingLLMClient`, propagated `cache_hits`/`cache_misses`/`tokens_saved` through `GenerateStats` -> `RefreshResult`, and fixed `stats_board._build_run_record`.
+- [x] **30.9.11 Config-first `ctx setup --check` preflight & wording accuracy (`D11`)** — resolved explicit `CTX_PROVIDER` / `.ctxconfig` / `CTX_BASE_URL` before `detect_provider()` and updated `"mtime-based"` wording to `"content-hash-based"`.
+- [x] **30.9.12 Lazy cloud SDK imports, visible `stats`/`setup`, DRY `cli.export`, & composite action fix (`D12`)** — lazy-loaded `anthropic`/`openai` in `src/ctx/llm.py`, unhid `ctx stats` and `ctx setup`, delegated `cli.export` to `api.export_context()`, and updated `.github/actions/ctx-check/action.yml` + `.github/workflows/tests.yml`.
+- [x] **30.9.13 Repo hygiene, documentation alignment, work-queue filing, & full manifest refresh (`D13`)** — removed `'=4.0'`, cleaned `package.json`, aligned docs, queued Wave 2/3 feature unlocks ([#77](https://github.com/mschwar/context-project/issues/77), [#78](https://github.com/mschwar/context-project/issues/78), [#79](https://github.com/mschwar/context-project/issues/79)), and refreshed every repository `CONTEXT.md` manifest (`0` stale, `0` missing, `0` invalid).
+- [x] **30.9.Z Gate closeout** — reflection filed at `archive/reflections/2026-10-31-phase30-9-audit-remediation-reflection.md`.
+
+### Phase 31 — Hybrid Semantic Synthesis on Structural Change (Backlog — [#77](https://github.com/mschwar/context-project/issues/77))
 
 - [ ] **31.1 Optional LLM invariant synthesis on `should_invoke_llm()` trigger** — when `ctx init --tier2` or `run_hook` detects a `structural_hash` or `boundary_doc_hash` change and an LLM provider is configured, optionally enrich the deterministic Tier 2 `CONTEXT-0.md`/`CONTEXT-1.md` maps with concise LLM-synthesized cross-module invariant notes.
 - [ ] **31.2 Optional OpenAI structured-output / constrained JSON-schema capability probe for local providers** — probe whether a local OpenAI-compatible server supports constrained JSON-array `response_format` during preflight/client init so batch file summarization avoids malformed-JSON fallback even on smaller 7B models.
+
+### Phase 32 — Directed Blast-Radius Graph & Operational Surface Extraction (Backlog — [#78](https://github.com/mschwar/context-project/issues/78))
+
+- [ ] **32.1 `ctx impact <path_or_symbol>` CLI & `ctx_impact` MCP tool** — extend `src/ctx/skeleton.py` into a file-level directed dependency graph reporting inbound callers, outbound dependencies, coupled test files, and governing boundary docs.
+- [ ] **32.2 Deterministic operational surface extraction** — extract CLI commands/flags, HTTP routes, MCP tools/resources, and `os.getenv` config keys into Tier 2 maps and `ctx export --capsule` payloads.
+
+### Phase 33 — Optional Cloud LLM SDK Extras & A/B Navigation Benchmark (Backlog — [#79](https://github.com/mschwar/context-project/issues/79))
+
+- [ ] **33.1 Packaging footprint split** — evaluate moving heavy cloud SDKs (`anthropic`, `openai`) into optional extras or publishing a zero-dep `ctx-sdk` wheel building on lazy SDK loading in `src/ctx/llm.py`.
+- [ ] **33.2 Phase 27.1 A/B agent navigation benchmark** — benchmark raw glob/grep vs Tier 1 `ctx export --depth 1` vs Tier 2 `.ctx/CONTEXT-0.md` + `CONTEXT-1.md` across orientation latency, token cost, and task accuracy.

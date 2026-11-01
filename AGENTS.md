@@ -268,6 +268,14 @@ Common flags:
 - `--format text|json|csv` — output format (`csv` available with `--board`)
 - `--verbose` — per-directory breakdown (coverage mode)
 
+### `ctx setup [path]`
+
+Auto-detect an available LLM provider and write `.ctxconfig`, or run the 7-check preflight readiness gate.
+
+Common flags:
+- `--check` — run preflight checks (configured/detected provider, `.ctxconfig` syntax, live endpoint connectivity, sample model summary quality, target directory write permissions, git detection, ignore rules) without writing `.ctxconfig`
+- `--output json` — emit the JSON envelope only
+
 ## Exit Codes
 | Code | Meaning |
 |------|---------|
@@ -441,7 +449,7 @@ Each generated `CONTEXT.md` contains YAML frontmatter followed by a Markdown bod
 ```yaml
 ---
 generated: "2026-03-18T19:00:00Z"
-generator: ctx/1.0.0
+generator: ctx/1.1.0
 model: claude-haiku-4-5-20251001
 content_hash: "sha256:abc123..."
 files: 12
@@ -451,7 +459,7 @@ tokens_total: 48000
 ```
 
 ```markdown
-# /path/to/directory
+# path/to/directory
 
 One-sentence purpose summary.
 

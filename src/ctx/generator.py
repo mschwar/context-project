@@ -24,8 +24,8 @@ from typing import Callable, Literal, Optional
 
 import pathspec
 
-from ctx.config import LOCAL_PROVIDERS, Config
-from ctx.hasher import hash_directory, is_stale
+from ctx.config import LOCAL_PROVIDERS, Config, resolve_configured_extensions, resolve_project_anchor
+from ctx.hasher import file_matches_extensions, hash_directory, is_stale, normalize_extensions
 from ctx.ignore import should_ignore
 from ctx.llm import CachingLLMClient, LLMClient, FileSummary, SubdirSummary
 from ctx.manifest import Manifest, ManifestFrontmatter, read_manifest, write_manifest
@@ -56,8 +56,16 @@ class GenerateStats:
     files_processed: int = 0
     files_binary: int = 0
     tokens_used: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
     budget_exhausted: bool = False
     local_batch_fallbacks: int = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
+    tokens_saved: int = 0
+    input_tokens_saved: int = 0
+    output_tokens_saved: int = 0
+    tokens_saved_exact: bool = False
     errors: list[str] = field(default_factory=list)
 
 
@@ -90,19 +98,47 @@ def _relative_path_str(path: Path, root: Path) -> str:
 _TIKTOKEN_ENCODER: object = None  # lazy-loaded; None = not yet attempted, False = unavailable
 
 
-def _estimate_tokens(text: str) -> int:
+def _get_tiktoken_encoder() -> object:
     global _TIKTOKEN_ENCODER
-    if not text:
-        return 0
     if _TIKTOKEN_ENCODER is None:
         try:
             import tiktoken
             _TIKTOKEN_ENCODER = tiktoken.get_encoding("cl100k_base")
         except (ImportError, ValueError):
             _TIKTOKEN_ENCODER = False  # mark unavailable so we don't retry
-    if _TIKTOKEN_ENCODER is False:
+    return _TIKTOKEN_ENCODER
+
+
+def _encode_ordinary_tokens(encoder: object, text: str) -> list[int]:
+    encode_ordinary = getattr(encoder, "encode_ordinary", None)
+    if callable(encode_ordinary):
+        return encode_ordinary(text)  # type: ignore[return-value]
+    return encoder.encode(text, disallowed_special=())  # type: ignore[union-attr]
+
+
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    encoder = _get_tiktoken_encoder()
+    if encoder is False:
         return max(1, math.ceil(len(text) / 4))
-    return len(_TIKTOKEN_ENCODER.encode(text))  # type: ignore[union-attr]
+    return len(_encode_ordinary_tokens(encoder, text))
+
+
+def _truncate_to_tokens(text: str, max_tokens: int) -> tuple[str, int]:
+    """Truncate *text* to at most *max_tokens* tokens and return (truncated_text, token_count)."""
+    if not text or max_tokens <= 0:
+        return "", 0
+    encoder = _get_tiktoken_encoder()
+    if encoder is False:
+        char_cap = max_tokens * 4
+        truncated = text[:char_cap]
+        return truncated, max(1, math.ceil(len(truncated) / 4)) if truncated else 0
+    tokens = _encode_ordinary_tokens(encoder, text)
+    if len(tokens) <= max_tokens:
+        return text, len(tokens)
+    truncated_tokens = tokens[:max_tokens]
+    return encoder.decode(truncated_tokens), len(truncated_tokens)  # type: ignore[union-attr]
 
 
 def _extract_manifest_summary(manifest: Manifest, directory_name: str) -> str:
@@ -156,9 +192,12 @@ def _render_manifest_body(
     subdir_summaries: list[SubdirSummary],
     purpose: str,
     notes: list[str],
+    *,
+    root: Optional[Path] = None,
 ) -> str:
+    heading = _relative_path_str(path, root) if root is not None else path.as_posix()
     lines = [
-        f"# {path.as_posix()}",
+        f"# {heading}",
         "",
         purpose.strip(),
         "",
@@ -274,9 +313,12 @@ def validate_manifest_body(
     root: Path,
     spec: pathspec.PathSpec,
     manifest: Manifest,
+    *,
+    extensions: Optional[list[str]] = None,
 ) -> list[str]:
     """Validate that a manifest body structurally matches the real directory."""
-    files, directories = _list_directory_entries(path, spec, root)
+    effective_exts = extensions if extensions is not None else resolve_configured_extensions(root)
+    files, directories = _list_directory_entries(path, spec, root, extensions=effective_exts)
     expected_files = [file_path.name for file_path in files]
     expected_directories = [directory.name for directory in directories]
 
@@ -291,7 +333,8 @@ def validate_manifest_body(
         )
 
     heading, purpose, sections = _parse_manifest_sections(manifest.body)
-    expected_heading = path.as_posix()
+    anchor_root = resolve_project_anchor(root)
+    expected_heading = _relative_path_str(path.resolve(), anchor_root.resolve())
     if heading != expected_heading:
         issues.append(f"Manifest heading should be '# {expected_heading}'.")
     if purpose is None:
@@ -375,9 +418,12 @@ def _list_directory_entries(
     path: Path,
     spec: pathspec.PathSpec,
     target_root: Path,
+    *,
+    extensions: Optional[list[str]] = None,
 ) -> tuple[list[Path], list[Path]]:
     files: list[Path] = []
     directories: list[Path] = []
+    normalized_exts = normalize_extensions(extensions)
 
     for child in sorted(path.iterdir(), key=lambda item: item.name):
         if should_ignore(child, spec, target_root):
@@ -385,6 +431,8 @@ def _list_directory_entries(
         if child.is_dir():
             directories.append(child)
         elif child.is_file():
+            if not file_matches_extensions(child, normalized_exts):
+                continue
             files.append(child)
 
     return files, directories
@@ -398,10 +446,24 @@ def _binary_file_summary(path: Path) -> FileSummary:
     )
 
 
+def _empty_file_summary(path: Path) -> FileSummary:
+    return FileSummary(
+        name=path.name,
+        summary="[empty file]",
+        is_binary=False,
+    )
+
+
 def _prepare_file_entry(
     path: Path,
     config: Config,
 ) -> tuple[FileSummary | dict, int]:
+    try:
+        if path.stat().st_size == 0:
+            return _empty_file_summary(path), 0
+    except OSError:
+        pass
+
     content: Optional[str] = None
     if not is_binary_file(path):
         try:
@@ -411,6 +473,8 @@ def _prepare_file_entry(
 
     if content is None:
         return _binary_file_summary(path), 0
+    if content == "":
+        return _empty_file_summary(path), 0
 
     language = detect_language(path)
     metadata: dict = {}
@@ -437,14 +501,14 @@ def _prepare_file_entry(
     elif language == "Elixir":
         metadata = parse_elixir_file(path)
 
-    truncated = content[: config.max_file_tokens]
+    truncated, token_count = _truncate_to_tokens(content, config.max_file_tokens)
     entry = {
         "name": path.name,
         "content": truncated,
         "language": language,
         "metadata": metadata,
     }
-    return entry, _estimate_tokens(truncated)
+    return entry, token_count
 
 
 def _should_regenerate_directory(
@@ -453,11 +517,12 @@ def _should_regenerate_directory(
     spec: pathspec.PathSpec,
     *,
     incremental: bool,
+    extensions: Optional[list[str]] = None,
 ) -> bool:
     if not incremental:
         return True
 
-    current_hash = hash_directory(path, spec, root)
+    current_hash = hash_directory(path, spec, root, extensions=extensions)
     manifest = read_manifest(path)
     return manifest is None or is_stale(manifest.frontmatter.content_hash, current_hash)
 
@@ -487,8 +552,8 @@ def _generate_directory_manifest(
     config: Config,
     client: LLMClient,
     spec: pathspec.PathSpec,
-) -> tuple[int, int, int]:
-    files, directories = _list_directory_entries(path, spec, root)
+) -> tuple[int, int, int, int, int]:
+    files, directories = _list_directory_entries(path, spec, root, extensions=config.extensions)
 
     ordered_entries: list[FileSummary | dict] = []
     text_inputs: list[dict] = []
@@ -498,7 +563,8 @@ def _generate_directory_manifest(
     for file_path in files:
         entry, estimated_tokens = _prepare_file_entry(file_path, config)
         if isinstance(entry, FileSummary):
-            binary_count += 1
+            if entry.is_binary:
+                binary_count += 1
             ordered_entries.append(entry)
             continue
 
@@ -506,7 +572,7 @@ def _generate_directory_manifest(
         tokens_total += estimated_tokens
         ordered_entries.append(entry)
 
-    text_results = client.summarize_files(path, text_inputs)
+    text_results = client.summarize_files(path, text_inputs) if text_inputs else []
     if len(text_results) != len(text_inputs):
         raise ValueError(f"Expected {len(text_inputs)} file summaries for {path}, got {len(text_results)}.")
 
@@ -538,9 +604,15 @@ def _generate_directory_manifest(
             )
         )
 
-    directory_result = client.summarize_directory(path, file_summaries, subdir_summaries)
+    content_hash = hash_directory(path, spec, root, extensions=config.extensions)
+    if isinstance(client, CachingLLMClient):
+        directory_result = client.summarize_directory(
+            path, file_summaries, subdir_summaries, content_hash=content_hash
+        )
+    else:
+        directory_result = client.summarize_directory(path, file_summaries, subdir_summaries)
     purpose, notes = _extract_directory_purpose_and_notes(directory_result.text, path)
-    content_hash = hash_directory(path, spec, root)
+    anchor_root = resolve_project_anchor(root)
     write_manifest(
         path,
         model=_manifest_model(config, client),
@@ -548,12 +620,15 @@ def _generate_directory_manifest(
         files=len(files),
         dirs=len(directories),
         tokens_total=tokens_total,
-        body=_render_manifest_body(path, file_summaries, subdir_summaries, purpose, notes),
+        body=_render_manifest_body(
+            path.resolve(), file_summaries, subdir_summaries, purpose, notes, root=anchor_root.resolve()
+        ),
     )
 
-    total_tokens_used = sum(result.input_tokens + result.output_tokens for result in text_results)
-    total_tokens_used += directory_result.input_tokens + directory_result.output_tokens
-    return len(files), binary_count, total_tokens_used
+    dir_input_tokens = sum(result.input_tokens for result in text_results) + directory_result.input_tokens
+    dir_output_tokens = sum(result.output_tokens for result in text_results) + directory_result.output_tokens
+    total_tokens_used = dir_input_tokens + dir_output_tokens
+    return len(files), binary_count, total_tokens_used, dir_input_tokens, dir_output_tokens
 
 
 def _process_one_directory(
@@ -564,25 +639,67 @@ def _process_one_directory(
     spec: pathspec.PathSpec,
     incremental: bool,
     budget_stop: threading.Event | None = None,
-) -> tuple[int, int, int, str | None]:
+) -> tuple[int, int, int, int, int, str | None]:
     """Worker function for parallel execution within a depth level.
 
-    Returns (file_count, binary_count, tokens_used, error):
+    Returns (file_count, binary_count, tokens_used, input_tokens, output_tokens, error):
       - error is None on success
       - error is "skip" when the directory is fresh, was skipped, or budget stopped
       - error is an error string when an exception occurred
     """
+    from ctx.lock import LockSupersededError
+
     try:
         if budget_stop is not None and budget_stop.is_set():
-            return 0, 0, 0, "skip"
-        if not _should_regenerate_directory(directory, root, spec, incremental=incremental):
-            return 0, 0, 0, "skip"
-        file_count, binary_count, tokens_used = _generate_directory_manifest(
+            return 0, 0, 0, 0, 0, "skip"
+        if not _should_regenerate_directory(
+            directory, root, spec, incremental=incremental, extensions=config.extensions
+        ):
+            return 0, 0, 0, 0, 0, "skip"
+        file_count, binary_count, tokens_used, input_tokens, output_tokens = _generate_directory_manifest(
             directory, root, config, client, spec
         )
-        return file_count, binary_count, tokens_used, None
+        return file_count, binary_count, tokens_used, input_tokens, output_tokens, None
+    except LockSupersededError:
+        raise
     except Exception as exc:
-        return 0, 0, 0, str(exc)
+        return 0, 0, 0, 0, 0, str(exc)
+
+
+def _expand_smart_target_directories(
+    ordered_directories: list[Path],
+    root: Path,
+    spec: pathspec.PathSpec,
+    changed_files: list[Path],
+    *,
+    incremental: bool,
+    extensions: Optional[list[str]] = None,
+) -> list[Path]:
+    """Select directories touched by *changed_files* unioned with any missing/hash-stale directories."""
+    target_directories: set[Path] = set()
+
+    def _add_with_ancestors(dir_path: Path) -> None:
+        if dir_path == root or dir_path.is_relative_to(root):
+            target_directories.add(dir_path)
+            for ancestor in dir_path.parents:
+                if ancestor == root or ancestor.is_relative_to(root):
+                    target_directories.add(ancestor)
+                if ancestor == root:
+                    break
+
+    for changed_file in changed_files:
+        _add_with_ancestors(changed_file.parent)
+
+    if incremental:
+        for directory in ordered_directories:
+            if directory in target_directories:
+                continue
+            if _should_regenerate_directory(
+                directory, root, spec, incremental=True, extensions=extensions
+            ):
+                _add_with_ancestors(directory)
+
+    return [d for d in ordered_directories if d in target_directories]
 
 
 def _run_generation(
@@ -599,29 +716,14 @@ def _run_generation(
     ordered_directories = _ordered_directories(root, spec, max_depth=config.max_depth)
 
     if changed_files is not None:
-        target_directories: set[Path] = set()
-        for changed_file in changed_files:
-            # Add the directory containing the changed file
-            dir_to_check = changed_file.parent
-            if dir_to_check.is_relative_to(root):
-                target_directories.add(dir_to_check)
-                # Add all ancestors up to the root
-                for ancestor in dir_to_check.parents:
-                    if ancestor == root or ancestor.is_relative_to(root):
-                        target_directories.add(ancestor)
-                    if ancestor == root: # Stop at the root
-                        break
-        
-        # Filter ordered_directories to only include those in target_directories
-        # Or, more precisely, those that are affected by the change (contain a changed file or are ancestors of one)
-        # Given bottom-up processing, if a directory is in target_directories,
-        # it means it either contains a changed file, or an ancestor of one.
-        # This implies its children would have been processed already if they contained changed files.
-        filtered_ordered_directories = []
-        for d in ordered_directories:
-            if d in target_directories:
-                filtered_ordered_directories.append(d)
-        ordered_directories = filtered_ordered_directories
+        ordered_directories = _expand_smart_target_directories(
+            ordered_directories,
+            root,
+            spec,
+            changed_files,
+            incremental=incremental,
+            extensions=config.extensions,
+        )
 
     total_dirs = len(ordered_directories)
 
@@ -665,7 +767,12 @@ def _run_generation(
             }
             for future in as_completed(futures):
                 directory = futures[future]
-                file_count, binary_count, tokens_used, error = future.result()
+                try:
+                    file_count, binary_count, tokens_used, dir_in_tokens, dir_out_tokens, error = future.result()
+                except Exception:
+                    budget_stop.set()
+                    executor.shutdown(wait=True, cancel_futures=True)
+                    raise
                 with stats_lock:
                     dirs_done += 1
                     local_done = dirs_done
@@ -678,6 +785,8 @@ def _run_generation(
                         stats.files_processed += file_count
                         stats.files_binary += binary_count
                         stats.tokens_used += tokens_used
+                        stats.input_tokens += dir_in_tokens
+                        stats.output_tokens += dir_out_tokens
                     if progress is not None:
                         progress(directory, local_done, total_dirs, stats.tokens_used)
                     # Mid-level budget check — signal remaining workers to skip.
@@ -690,6 +799,12 @@ def _run_generation(
                         stats.budget_exhausted = True
 
     stats.local_batch_fallbacks = int(getattr(client, "local_batch_fallbacks", 0) or 0)
+    if hasattr(client, "hit_miss_counts"):
+        stats.cache_hits, stats.cache_misses = client.hit_miss_counts
+    stats.tokens_saved = int(getattr(client, "tokens_saved", 0) or 0)
+    stats.input_tokens_saved = int(getattr(client, "input_tokens_saved", 0) or 0)
+    stats.output_tokens_saved = int(getattr(client, "output_tokens_saved", 0) or 0)
+    stats.tokens_saved_exact = isinstance(client, CachingLLMClient)
     return stats
 
 
@@ -745,10 +860,19 @@ def generate_tree(
            i. Update stats, call progress callback.
         5. Return stats.
     """
+    caching_client = (
+        client
+        if isinstance(client, CachingLLMClient)
+        else CachingLLMClient(
+            client,
+            cache_path=_resolve_cache_path(config, root),
+            max_cache_entries=config.max_cache_entries,
+        )
+    )
     return _run_generation(
         root,
         config,
-        CachingLLMClient(client, cache_path=_resolve_cache_path(config, root), max_cache_entries=config.max_cache_entries),
+        caching_client,
         spec,
         incremental=False,
         progress=progress,
@@ -789,10 +913,19 @@ def update_tree(
               bottom-up and the parent's hash_directory() will compute a new hash.
         4. Return stats.
     """
+    caching_client = (
+        client
+        if isinstance(client, CachingLLMClient)
+        else CachingLLMClient(
+            client,
+            cache_path=_resolve_cache_path(config, root),
+            max_cache_entries=config.max_cache_entries,
+        )
+    )
     return _run_generation(
         root,
         config,
-        CachingLLMClient(client, cache_path=_resolve_cache_path(config, root), max_cache_entries=config.max_cache_entries),
+        caching_client,
         spec,
         incremental=True,
         progress=progress,
@@ -806,6 +939,7 @@ def inspect_directory_health(
     target_root: Path,
     *,
     max_depth: Optional[int] = None,
+    extensions: Optional[list[str]] = None,
 ) -> list[DirectoryHealth]:
     """Inspect manifest health for all directories in a tree.
 
@@ -814,10 +948,12 @@ def inspect_directory_health(
         spec: Ignore spec.
         target_root: Root for relative path computation.
         max_depth: Optional maximum depth relative to *root*.
+        extensions: Optional file-extension allowlist.
 
     Returns:
         List of DirectoryHealth rows sorted by relative path.
     """
+    effective_exts = extensions if extensions is not None else resolve_configured_extensions(target_root)
     directories = _collect_directories(root, spec, target_root, max_depth=max_depth)
     results: list[DirectoryHealth] = []
 
@@ -845,7 +981,7 @@ def inspect_directory_health(
             )
             continue
 
-        current_hash = hash_directory(directory, spec, target_root)
+        current_hash = hash_directory(directory, spec, target_root, extensions=effective_exts)
         status = "stale" if is_stale(manifest.frontmatter.content_hash, current_hash) else "fresh"
         results.append(
             DirectoryHealth(
@@ -886,21 +1022,20 @@ def check_stale_dirs(
     ordered_directories = _ordered_directories(root, spec, max_depth=config.max_depth)
 
     if changed_files is not None:
-        target_directories: set[Path] = set()
-        for changed_file in changed_files:
-            dir_to_check = changed_file.parent
-            if dir_to_check.is_relative_to(root):
-                target_directories.add(dir_to_check)
-                for ancestor in dir_to_check.parents:
-                    if ancestor == root or ancestor.is_relative_to(root):
-                        target_directories.add(ancestor)
-                    if ancestor == root:
-                        break
-        ordered_directories = [d for d in ordered_directories if d in target_directories]
+        ordered_directories = _expand_smart_target_directories(
+            ordered_directories,
+            root,
+            spec,
+            changed_files,
+            incremental=True,
+            extensions=config.extensions,
+        )
 
     return [
         directory for directory in ordered_directories
-        if _should_regenerate_directory(directory, root, spec, incremental=True)
+        if _should_regenerate_directory(
+            directory, root, spec, incremental=True, extensions=config.extensions
+        )
     ]
 
 

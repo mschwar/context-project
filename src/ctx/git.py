@@ -51,7 +51,7 @@ def get_changed_files(repo_path: Path) -> List[Path]:
         return [repo_path / f for f in sorted(changed_files_str)]
 
     try:
-        return _collect([UNSTAGED_CMD, STAGED_CMD])
+        return _collect([UNSTAGED_CMD, STAGED_CMD, UNTRACKED_CMD])
     except subprocess.CalledProcessError as e:
         if list(e.cmd) == UNSTAGED_CMD and is_unborn_head_error(e.stderr):
             return _collect([UNBORN_UNSTAGED_CMD, STAGED_CMD, UNTRACKED_CMD])

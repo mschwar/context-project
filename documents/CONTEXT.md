@@ -7,7 +7,7 @@ files: 2
 dirs: 0
 tokens_total: 1384
 ---
-# C:/Users/Matty/Documents/context-project/documents
+# documents
 
 This directory contains strategic planning and architectural thesis documents for the context-project, focusing on agent-first design principles and system overhaul strategies.
 

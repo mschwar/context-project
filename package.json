@@ -1,11 +1,8 @@
 {
-  "name": "ctx-tool",
-  "version": "1.0.0",
-  "description": "Filesystem-native context layer for AI agents — generates CONTEXT.md manifests",
-  "main": "index.js",
-  "directories": {
-    "test": "tests"
-  },
+  "name": "ctx-tool-dev",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Development tooling (Husky + Commitlint) for ctx-tool",
   "scripts": {
     "test": "pytest",
     "prepare": "husky"
@@ -14,16 +11,6 @@
     "type": "git",
     "url": "git+https://github.com/mschwar/context-project.git"
   },
-  "keywords": [
-    "ai",
-    "llm",
-    "agents",
-    "context",
-    "manifest",
-    "rag",
-    "claude",
-    "openai"
-  ],
   "author": "mschwar",
   "license": "MIT",
   "type": "commonjs",
@@ -34,9 +21,7 @@
   "devDependencies": {
     "@commitlint/cli": "^20.4.4",
     "@commitlint/config-conventional": "^20.4.4",
+    "commitlint": "^20.5.0",
     "husky": "^9.1.7"
-  },
-  "dependencies": {
-    "commitlint": "^20.5.0"
   }
 }

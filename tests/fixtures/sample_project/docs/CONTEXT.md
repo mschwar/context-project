@@ -7,7 +7,7 @@ files: 1
 dirs: 0
 tokens_total: 55
 ---
-# C:/Users/Matty/Documents/context-project/tests/fixtures/sample_project/docs
+# tests/fixtures/sample_project/docs
 
 Documentation files for the sample project.
 

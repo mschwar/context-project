@@ -1,44 +1,44 @@
 ---
-generated: '2026-10-30T14:54:37Z'
+generated: '2026-10-31T23:04:21Z'
 generator: ctx/1.1.0
-model: qwen2.5:7b-instruct
-content_hash: sha256:cb2cfc4f2f1fa64aa9de3cd682e5a59b87862f4b5033ffc7ae0a4545b5843306
-files: 21
+model: qwen2.5-coder-7b-instruct
+content_hash: sha256:9cbce9227bdd1dffd29c26fc65af98ca793ea33ae47db7b878671e5a3e314866
+files: 22
 dirs: 0
-tokens_total: 20277
+tokens_total: 22293
 ---
-# /central/repos/active/context-project/archive/reflections
+# archive/reflections
 
-Repository of phase-specific reflections detailing project progress, challenges, and future directions.
+Repository of phase-specific closeout reflections detailing engineering progress, challenges, and follow-up actions.
 
 ## Files
 - **2026-03-14-phase10-reflection.md** — Summarizes Phase 10 successes, friction, observations, and suggestions for the project.
 - **2026-03-14-phase11-reflection.md** — Phase 11 reflection document details successes, friction points, observations, and suggestions for future phases.
-- **2026-03-14-phase12-reflection.md** — Phase 12 reflection on language parser advancements and CLI command improvements.
+- **2026-03-14-phase12-reflection.md** — Phase 12 reflection on language parser successes, friction points, and suggestions for Phase 13.
 - **2026-03-14-phase13-reflection.md** — Phase 13 reflection on extended language support and CLI improvements.
-- **2026-03-14-phase14-reflection.md** — Phase 14 reflection on CLI completeness with updates and observations on context tool features.
-- **2026-03-14-phase15-reflection.md** — Summary of CLI power-user features and reflections from Phase 15 development.
-- **2026-03-14-phase4-reflection.md** — Phase 4 reflection on prompt quality, batch control improvements, and SDLC enhancements.
-- **2026-03-14-phase5-reflection.md** — Phase 5 reflection on cost control and observability features, including successes, friction, observations, and suggestions.
-- **2026-03-14-phase6-reflection.md** — Phase 6 reflection on language expansion and CI improvements documenting successes, friction, observations, and suggestions.
+- **2026-03-14-phase14-reflection.md** — Summary of Phase 14 CLI completeness, detailing successes, friction points, observations, and suggestions for improvements.
+- **2026-03-14-phase15-reflection.md** — Summary of CLI power-user features and lessons learned from Phase 15 development.
+- **2026-03-14-phase4-reflection.md** — Phase 4 reflection document detailing successes, friction, observations, suggestions, and implications for upcoming phases.
+- **2026-03-14-phase5-reflection.md** — Summary of Phase 5 implementation, focusing on cost control, observability, and lessons learned for future phases.
+- **2026-03-14-phase6-reflection.md** — Summary of Phase 6 reflections on language expansion and CI improvements in the project.
 - **2026-03-14-phase7-reflection.md** — Phase 7 reflection on Go parser, ctx watch implementation, and cache model-awareness.
 - **2026-03-14-phase8-reflection.md** — Phase 8 reflection document covering successes, friction, observations, suggestions, and implications for the next phase.
-- **2026-03-14-phase9-reflection.md** — Phase 9 reflection on automation setup, including ctx commands, pre-commit hooks, and error handling.
-- **2026-03-15-phase16-reflection.md** — Phase 16 reflection on observability, consistency, successes, friction, observations, suggestions, and implications for future phases.
+- **2026-03-14-phase9-reflection.md** — Phase 9 reflection document detailing successes, friction, observations, suggestions, and implications for automation.
+- **2026-03-15-phase16-reflection.md** — Phase 16 reflection on observability improvements, consistency checks, and lessons learned for future phases.
 - **2026-03-16-phase17-reflection.md** — Closeout reflection document for Phase 17 detailing successes, friction, observations, and suggestions for future phases.
-- **2026-03-16-phase18-reflection.md** — Phase 18 reflection document detailing implementation successes, friction points, and future suggestions for the context-project.
-- **2026-03-17-phase21-reflection.md** — Phase 21 reflection document detailing code changes, successes, friction, observations, and disposition of suggestions for the context project.
+- **2026-03-16-phase18-reflection.md** — Summary of Phase 18 implementation successes, friction, observations, and suggestions including timeout control and caching.
+- **2026-03-17-phase21-reflection.md** — Summary of Phase 21 changes focusing on health truth and diagnostics improvements.
 - **2026-03-18-afo-stage1-6-reflection.md** — Summary of AFO Stage 1-6 closeout, including successes, friction, observations, and suggestions.
-- **2026-03-19-phase25-reflection.md** — Production hardening reflections and pre-1.0.0 assessment including infrastructure and model quality observations.
-- **2026-10-29-phase29-reflection.md** — Comprehensive preflight gate and MCP resource exposure for context project validation and testing.
-- **2026-10-29-phase30-reflection.md** — Summarizes Phase 30 of the project, detailing completed tasks and their implementation.
-- **2026-10-30-phase30-8-dogfood-hardening-reflection.md** — Phase 30.8 reflection document detailing the completion of various CLI enhancements and bug fixes.
+- **2026-03-19-phase25-reflection.md** — Summarizes Phase 25 of the project, detailing successes, friction points, observations, and suggestions for improvement.
+- **2026-10-29-phase29-reflection.md** — Comprehensive preflight gate and MCP resource reflection with success, friction, and suggestions documented.
+- **2026-10-29-phase30-reflection.md** — Summarizes Phase 30 of the project, detailing completed tasks and their implementations.
+- **2026-10-30-phase30-8-dogfood-hardening-reflection.md** — Phase 30.8 reflection document detailing the completion of various context-project audit and remediation tasks.
+- **2026-10-31-phase30-9-audit-remediation-reflection.md** — Summary of Phase 30.9 repository audit remediation, detailing completed tasks and their implementations.
 
 ## Subdirectories
 - None
 
 ## Notes
-- Cross-phase documentation provides a comprehensive view of the project's evolution.
-- Highlights successes, friction points, and suggestions for continuous improvement.
+- Chronicles iterative hardening from initial CLI prototypes through v1.1.0 agent-first architecture.
 
 <!-- Generated by ctx (https://pypi.org/project/ctx-tool/) -->

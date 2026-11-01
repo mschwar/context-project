@@ -15,8 +15,14 @@ venv/
 *.pyc.*
 node_modules/
 
-# Test artifacts
+# Test / lint / coverage artifacts
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+.coverage
+htmlcov/
 .tmp/
 pytest-cache-files-*/
 

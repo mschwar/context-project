@@ -7,7 +7,7 @@ files: 3
 dirs: 0
 tokens_total: 200
 ---
-# C:/Users/Matty/Documents/context-project/.husky
+# .husky
 
 This directory contains Git hooks that enforce code quality standards and branching workflows through automated validation at commit and push stages.
 

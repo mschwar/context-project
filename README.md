@@ -2,7 +2,7 @@
 
 Filesystem-native context layer for AI agents.
 
-`ctx` generates `CONTEXT.md` manifests for every directory in a project so AI agents can navigate with structured summaries instead of reading every file. One command refreshes the entire tree. Manifests are deterministic, verifiable, and cheap to maintain.
+`ctx` generates `CONTEXT.md` manifests (or zero-LLM `.ctx/` Tier 2 architectural & invariant maps) so AI agents can orient and navigate codebases without reading every file. Manifests use portable repo-relative headings, deterministic filesystem listings, and SHA-256 staleness verification.
 
 ## Quick Start
 
@@ -12,36 +12,45 @@ export ANTHROPIC_API_KEY="sk-..."
 ctx refresh .
 ```
 
-That's it. Every directory now has a `CONTEXT.md` with a purpose summary, file descriptions, and subdirectory overviews.
+Or bootstrap self-maintaining `.ctx/` exports and background git hooks (with optional zero-LLM `--tier2` architectural synthesis):
+
+```bash
+ctx init . --tier2   # zero-LLM structural & boundary-doc map in .ctx/
+ctx init .           # full per-directory CONTEXT.md tree + .ctx/ + git hooks
+```
 
 ## What It Costs
 
-ctx uses lightweight LLM calls (Haiku-class models by default). Real-world benchmarks on personal document trees:
+ctx uses lightweight LLM calls (Haiku-class models by default, or zero-cost local Ollama / `--tier2`). Real-world benchmarks:
 
 | Tree | Dirs | Files | Cost | Time |
 |------|------|-------|------|------|
 | 31 dirs | 31 | 566 | $0.11 | 7 min |
 | 171 dirs | 171 | ~1,200 | ~$1.26 | ~15 min |
 
-Runs are incremental — unchanged directories are skipped, so subsequent refreshes cost near zero.
+Runs are incremental and disk-cached — unchanged directories and files cost zero tokens.
 
 ## For Agents
 
 Tell your agent: install `ctx-tool`, run `ctx refresh .`, then read [AGENTS.md](./AGENTS.md) for the full command contract, JSON output schemas, error codes, and integration patterns.
 
-For MCP clients, copy the config from [`mcp.json`](./mcp.json) into your client's MCP config (`.mcp.json` for Claude Code, `.cursor/mcp.json` for Cursor) or run `ctx serve --mcp`.
+For MCP clients, copy [`mcp.json`](./mcp.json) into `.mcp.json` / `.cursor/mcp.json` or run `ctx serve --mcp` (exposes tools + read-only `ctx://.ctx/*` resources).
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
-| `ctx refresh <path>` | Generate or update manifests |
-| `ctx check <path>` | Validate manifest health, coverage, freshness |
-| `ctx export <path>` | Concatenate manifests for agent ingestion |
-| `ctx reset <path>` | Remove all generated manifests |
-| `ctx serve --mcp` | Expose manifests via MCP (stdio JSON-RPC) |
+| `ctx init [path]` | Bootstrap `.ctx/` tiered exports + git hooks (`--tier2` for zero-LLM map) |
+| `ctx uninit [path]` | Remove `.ctx/` exports and ctx git hook blocks |
+| `ctx refresh <path>` | Generate or update manifests (Tier 1 or Tier 2) |
+| `ctx check <path>` | Validate manifest health, `--verify` bodies, `--stats`, or `--diff` |
+| `ctx export <path>` | Concatenate manifests or emit `--capsule` structural payload |
+| `ctx stats [path]` | Show coverage or `--board` refresh/cost telemetry (`--global`, `--trend`) |
+| `ctx setup [path]` | Detect provider, write `.ctxconfig`, or run `--check` preflight gate |
+| `ctx reset <path>` | Remove generated `CONTEXT.md` manifests |
+| `ctx serve --mcp` | Expose tools and `.ctx/` resources via MCP (stdio JSON-RPC) |
 
-Key flags: `--until-complete` (auto-retry large trees), `--output json` (machine-readable), `--force` (regenerate all), `--watch` (live refresh).
+Key flags: `--until-complete` (auto-retry large trees), `--output json` (machine-readable), `--force` (regenerate all), `--watch` (live refresh), `--verify --check-exit` (strict verification gate).
 
 ## Configuration
 
@@ -49,6 +58,7 @@ Works out of the box with `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. For local mod
 
 ```bash
 ctx refresh . --setup   # auto-detects Ollama or LM Studio
+ctx setup --check .     # 7-check preflight readiness gate
 ```
 
 Fine-tune with `.ctxconfig`:

@@ -125,11 +125,9 @@ git push --tags
 Every roadmap phase (gate) requires a formal closeout pass.
 Follow the steps in [GATE_CLOSEOUT.md](./GATE_CLOSEOUT.md) before marking a phase as complete.
 
-## Phase 16 Handoff
+## Historical Handoffs
 
-Phase 16 work is intentionally split into small gates for narrower models.
-
-- Read [PHASE16_HANDOFF.md](./PHASE16_HANDOFF.md) before picking up any Phase 16 task.
+Earlier narrow-model phase handoffs and phase reflections are archived under [`archive/`](./archive/) (including [`archive/reflections/`](./archive/reflections/)).
 - Use one gate per branch and one gate per PR.
 - Keep the gate's file list, validation commands, and acceptance criteria in the working prompt.
 

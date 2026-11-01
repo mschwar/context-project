@@ -933,11 +933,20 @@ def test_caching_client_saves_summaries_to_disk(tmp_path) -> None:
 
 def test_caching_client_loads_summaries_from_disk(tmp_path) -> None:
     import json, hashlib
+    from ctx.llm import DEFAULT_PROMPT_TEMPLATES
     cache_file = tmp_path / "cache.json"
     file_dict = {"name": "a.py", "content": "hello"}
-    # Key format: sha256(model_bytes + b":" + file_json). _CountingClient has no
-    # model attribute so CachingLLMClient.model returns "" → prefix is b":".
-    key = hashlib.sha256(b":" + json.dumps(file_dict, sort_keys=True).encode()).hexdigest()
+    # Key format: sha256(model_bytes + b":" + file_json + b":prompts:" + effective_prompts_json).
+    effective_prompts = {
+        k: DEFAULT_PROMPT_TEMPLATES[k]
+        for k in ("file_summary", "file_summary_system", "single_file_summary", "single_file_system")
+    }
+    key = hashlib.sha256(
+        b":"
+        + json.dumps(file_dict, sort_keys=True).encode()
+        + b":prompts:"
+        + json.dumps(effective_prompts, sort_keys=True).encode()
+    ).hexdigest()
     cache_file.write_text(json.dumps({key: "preloaded summary"}), encoding="utf-8")
 
     inner = _CountingClient()
@@ -1134,3 +1143,69 @@ def test_hit_miss_counts_property() -> None:
     hits, misses = cache.hit_miss_counts
     assert hits == 1
     assert misses == 1
+
+
+def test_caching_client_caches_summarize_directory_and_tracks_tokens_saved(tmp_path) -> None:
+    class _TokenCountingClient:
+        model = "test-model"
+
+        def __init__(self) -> None:
+            self.file_calls = 0
+            self.dir_calls = 0
+
+        def summarize_files(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
+            self.file_calls += 1
+            return [LLMResult(text=f"summary:{f['name']}", input_tokens=100, output_tokens=20) for f in files]
+
+        def summarize_directory(self, dir_path: Path, file_summaries, subdir_summaries) -> LLMResult:
+            self.dir_calls += 1
+            return LLMResult(text="# src\n\nDirectory purpose.\n", input_tokens=200, output_tokens=50)
+
+    cache_file = tmp_path / "llm_cache.json"
+    inner1 = _TokenCountingClient()
+    cache1 = CachingLLMClient(inner1, cache_path=cache_file)
+    f_res1 = cache1.summarize_files(Path("src"), [{"name": "a.py", "content": "x = 1"}])
+    d_res1 = cache1.summarize_directory(
+        Path("src"),
+        [FileSummary(name="a.py", summary=f_res1[0].text)],
+        [],
+        content_hash="sha256:abc",
+    )
+    assert d_res1.input_tokens == 200
+    assert inner1.file_calls == 1
+    assert inner1.dir_calls == 1
+
+    # Fresh process/instance reload with 100% cache hits (0 misses, 0 new tokens used)
+    inner2 = _TokenCountingClient()
+    cache2 = CachingLLMClient(inner2, cache_path=cache_file)
+    f_res2 = cache2.summarize_files(Path("src"), [{"name": "a.py", "content": "x = 1"}])
+    d_res2 = cache2.summarize_directory(
+        Path("src"),
+        [FileSummary(name="a.py", summary=f_res2[0].text)],
+        [],
+        content_hash="sha256:abc",
+    )
+    assert inner2.file_calls == 0
+    assert inner2.dir_calls == 0
+    assert "Directory purpose." in d_res2.text
+    assert cache2.hit_miss_counts == (2, 0)
+    assert cache2.tokens_saved == 120 + 250
+
+
+def test_llm_module_imports_provider_sdks_lazily() -> None:
+    import subprocess
+    import sys
+
+    src_dir = str(Path(__file__).resolve().parents[1] / "src")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, ctx.llm; assert 'anthropic' not in sys.modules and 'openai' not in sys.modules",
+        ],
+        env={**__import__("os").environ, "PYTHONPATH": src_dir},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr

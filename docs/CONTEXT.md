@@ -7,7 +7,7 @@ files: 2
 dirs: 2
 tokens_total: 4223
 ---
-# /central/repos/active/context-project/docs
+# docs
 
 Tracks and aggregates context refresh run statistics for analytics and public leaderboard, alongside design documents for the `ctx` tool's architecture and new feature implementations.
 

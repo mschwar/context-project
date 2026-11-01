@@ -86,3 +86,18 @@
 ### 3. Fleet Ingestion Pre-Processor Capsule (`ctx export --depth 1 --capsule`) ✓
 - **What:** Have `ctx export --depth 1 --capsule` (`api.build_fleet_capsule`) generate a compact capsule summary feeding `state/projects/<id>.json` for `project-ledger` and `gbrain` code checkout ingestion.
 
+## Queued Strategic Feature Unlocks (Post-Audit Work Queue)
+
+### Phase 31 — Hybrid Semantic Invariant Synthesis & Constrained JSON-Schema Probing ([#77](https://github.com/mschwar/context-project/issues/77))
+- **Status:** Queued (Wave 2)
+- **What:** Combine zero-cost deterministic structural extraction (`should_invoke_llm()`) with optional LLM-synthesized cross-module invariants/footguns only when `structural_hash` or `boundary_doc_hash` drifts, plus probe local OpenAI-compatible `response_format` JSON-schema support to eliminate batch fallbacks on 7B models.
+
+### Phase 32 — Directed Blast-Radius Graph (`ctx impact` / `ctx_impact`) & Operational Surface Extraction ([#78](https://github.com/mschwar/context-project/issues/78))
+- **Status:** Queued (Wave 2)
+- **What:** Expose a file- and symbol-level blast-radius query (`ctx impact <target>` and MCP `ctx_impact`) returning inbound dependents, outbound dependencies, coupled tests, and governing boundary docs, alongside deterministic extraction of CLI commands, HTTP routes, MCP tools/resources, and `os.getenv` config surfaces.
+
+### Phase 33 — Optional Cloud LLM SDK Extras & Phase 27.1 A/B Agent Navigation Benchmark ([#79](https://github.com/mschwar/context-project/issues/79))
+- **Status:** Queued (Wave 3)
+- **What:** Evaluate splitting `anthropic` and `openai` SDK dependencies into optional extras (building on lazy loading in `src/ctx/llm.py`) for ultra-lightweight CI / Tier 2 / `ctx.sdk` installs, and run the controlled Phase 27.1 A/B agent orientation benchmark.
+
+

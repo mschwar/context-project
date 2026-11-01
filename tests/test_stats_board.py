@@ -240,8 +240,18 @@ def test_tokens_saved_estimation() -> None:
 
     record = _build_run_record(result, config)
 
-    # hits / (hits + misses) * tokens_used = 20/30 * 3000 = 2000
-    assert record["tokens_saved"] == round((20 / 30) * 3000)
+    assert record["tokens_saved"] == 6000
+
+
+def test_tokens_saved_uses_explicit_cached_tokens_on_full_cache_hit_run() -> None:
+    config = _make_config()
+    result = _make_result(cache_hits=15, cache_misses=0, tokens_used=0)
+    result.tokens_saved = 4500
+
+    record = _build_run_record(result, config)
+
+    assert record["tokens_saved"] == 4500
+    assert record["cost_saved_usd"] > 0.0
 
 
 def test_run_record_fields(tmp_path) -> None:

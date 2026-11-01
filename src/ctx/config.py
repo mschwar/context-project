@@ -69,34 +69,79 @@ PROVIDER_DETECTED_VIA: dict[str, str] = {
     "lmstudio": "LM Studio running on localhost:1234",
 }
 
-# Pricing per 1M input tokens in USD.
+# Pricing per 1M input tokens in USD (ordered most-specific substring first).
 PRICING_DATA: dict[str, dict] = {
     "anthropic": {
         "models": [
             ("claude-opus-4", 15.0),
             ("claude-sonnet-4", 3.0),
-            ("claude-haiku-4-5", 0.80),
+            ("claude-haiku-4-5", 1.00),
+            ("claude-3-5-sonnet", 3.0),
+            ("claude-3-5-haiku", 0.80),
             ("claude-3-opus", 15.0),
             ("claude-3-sonnet", 3.0),
             ("claude-3-haiku", 0.25),
         ],
-        "default": 0.80,
+        "default": 1.00,
     },
     "openai": {
         "models": [
+            ("gpt-4.1-nano", 0.10),
+            ("gpt-4.1-mini", 0.40),
             ("gpt-4.1", 2.0),
+            ("gpt-4o-mini", 0.15),
             ("gpt-4o", 2.50),
             ("gpt-4-o", 2.50),
+            ("o4-mini", 1.10),
+            ("o3-mini", 1.10),
+            ("gpt-4-turbo", 10.0),
             ("gpt-4", 30.0),
             ("gpt-3.5-turbo", 0.5),
             ("gpt-3.5", 0.5),
         ],
-        "default": 2.50,
+        "default": 0.15,
+    },
+    "ollama": {"default": 0.0},
+    "lmstudio": {"default": 0.0},
+}
+
+# Pricing per 1M output tokens in USD (ordered most-specific substring first).
+OUTPUT_PRICING_DATA: dict[str, dict] = {
+    "anthropic": {
+        "models": [
+            ("claude-opus-4", 75.0),
+            ("claude-sonnet-4", 15.0),
+            ("claude-haiku-4-5", 5.0),
+            ("claude-3-5-sonnet", 15.0),
+            ("claude-3-5-haiku", 4.0),
+            ("claude-3-opus", 75.0),
+            ("claude-3-sonnet", 15.0),
+            ("claude-3-haiku", 1.25),
+        ],
+        "default": 5.0,
+    },
+    "openai": {
+        "models": [
+            ("gpt-4.1-nano", 0.40),
+            ("gpt-4.1-mini", 1.60),
+            ("gpt-4.1", 8.0),
+            ("gpt-4o-mini", 0.60),
+            ("gpt-4o", 10.0),
+            ("gpt-4-o", 10.0),
+            ("o4-mini", 4.40),
+            ("o3-mini", 4.40),
+            ("gpt-4-turbo", 30.0),
+            ("gpt-4", 60.0),
+            ("gpt-3.5-turbo", 1.5),
+            ("gpt-3.5", 1.5),
+        ],
+        "default": 0.60,
     },
     "ollama": {"default": 0.0},
     "lmstudio": {"default": 0.0},
 }
 DEFAULT_UNKNOWN_PROVIDER_PRICE = 3.0
+DEFAULT_UNKNOWN_PROVIDER_OUTPUT_PRICE = 12.0
 
 
 @dataclass
@@ -246,17 +291,89 @@ def probe_provider_connectivity(
 
 def write_default_config(path: Path, provider: str, model: str | None = None, base_url: str | None = None) -> None:
     """Write a minimal .ctxconfig into *path* directory."""
+    from ctx.stats_board import write_text_atomic
+
     lines = [f"provider: {provider}"]
     if model:
         lines.append(f"model: {model}")
     if base_url:
         lines.append(f"base_url: {base_url}")
-    (path / ".ctxconfig").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(path / ".ctxconfig", "\n".join(lines) + "\n")
+
+
+def infer_provider_from_base_url(base_url: str) -> str:
+    """Infer an OpenAI-compatible or local provider name from an endpoint URL."""
+    lowered = base_url.lower()
+    if ":11434" in lowered or "ollama" in lowered:
+        return "ollama"
+    if ":1234" in lowered or "lmstudio" in lowered:
+        return "lmstudio"
+    return "openai"
 
 
 def _iter_config_dirs(start_dir: Path) -> list[Path]:
     """Return directories from *start_dir* upward for .ctxconfig lookup."""
     return [start_dir, *start_dir.parents]
+
+
+def resolve_project_anchor(target_path: Path) -> Path:
+    """Resolve the canonical project root anchor for *target_path*.
+
+    Ensures subtree invocations (e.g. `ctx refresh src` or `ctx check src --verify`)
+    produce and verify the same repo-relative manifest headings as root invocations.
+    """
+    resolved = target_path.resolve()
+    start_dir = resolved if resolved.is_dir() else resolved.parent
+    candidates = _iter_config_dirs(start_dir)
+    try:
+        home_dir = Path.home().resolve()
+    except OSError:
+        home_dir = None
+
+    for directory in candidates:
+        if (directory / ".git").exists() or (directory / ".ctx" / "metadata.json").is_file():
+            return directory
+
+    for directory in candidates:
+        if directory != home_dir and (directory / ".ctxconfig").is_file():
+            return directory
+
+    anchor = start_dir
+    for directory in candidates[1:]:
+        if (directory / "CONTEXT.md").is_file():
+            anchor = directory
+        else:
+            break
+    return anchor
+
+
+def resolve_configured_extensions(target_path: Path) -> Optional[list[str]]:
+    """Resolve file-extension allowlist from CTX_EXTENSIONS or .ctxconfig without requiring API keys."""
+    env_extensions = os.getenv("CTX_EXTENSIONS")
+    if env_extensions is not None:
+        parsed = [item.strip() for item in env_extensions.split(",") if item.strip()]
+        return parsed or None
+
+    start_dir = target_path if target_path.is_dir() else target_path.parent
+    for directory in _iter_config_dirs(start_dir):
+        config_path = directory / ".ctxconfig"
+        if not config_path.exists():
+            continue
+        try:
+            data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            return None
+        if isinstance(data, dict) and "extensions" in data:
+            raw = data["extensions"]
+            if raw is None:
+                return None
+            if isinstance(raw, str):
+                return [raw.strip()] if raw.strip() else None
+            if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
+                cleaned = [item.strip() for item in raw if item.strip()]
+                return cleaned or None
+        break
+    return None
 
 
 def load_config(
@@ -417,9 +534,10 @@ def load_config(
         config.cache_path = cache_path
 
     if not provider_explicit:
-        # Support env-only setups where the operator exported an API key but
-        # did not also set CTX_PROVIDER or write a .ctxconfig file yet.
-        if os.getenv("ANTHROPIC_API_KEY", "").strip():
+        # Infer provider from configured base_url before falling back to ambient API keys.
+        if config.base_url:
+            config.provider = infer_provider_from_base_url(config.base_url)
+        elif os.getenv("ANTHROPIC_API_KEY", "").strip():
             config.provider = "anthropic"
         elif os.getenv("OPENAI_API_KEY", "").strip():
             config.provider = "openai"
@@ -448,20 +566,37 @@ def load_config(
     return config
 
 
-def estimate_cost(tokens: int, provider: str, model: str) -> float:
+def _lookup_rate(table: dict[str, dict], provider_lower: str, model_lower: str, unknown_default: float) -> float:
+    provider_pricing = table.get(provider_lower)
+    if not provider_pricing:
+        return unknown_default
+    if "models" not in provider_pricing:
+        return float(provider_pricing["default"])
+    for model_key, price_per_million in provider_pricing["models"]:
+        if model_key in model_lower:
+            return float(price_per_million)
+    return float(provider_pricing["default"])
+
+
+def estimate_cost(
+    tokens: int,
+    provider: str,
+    model: str,
+    *,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+) -> float:
     """Estimate cost in USD based on tokens used and provider pricing."""
     provider_lower = provider.lower()
     model_lower = model.lower()
 
-    provider_pricing = PRICING_DATA.get(provider_lower)
-    if not provider_pricing:
-        return tokens * DEFAULT_UNKNOWN_PROVIDER_PRICE / 1_000_000
+    input_rate = _lookup_rate(PRICING_DATA, provider_lower, model_lower, DEFAULT_UNKNOWN_PROVIDER_PRICE)
+    if input_tokens is not None or output_tokens is not None:
+        in_tok = max(0, input_tokens or 0)
+        out_tok = max(0, output_tokens or 0)
+        output_rate = _lookup_rate(
+            OUTPUT_PRICING_DATA, provider_lower, model_lower, DEFAULT_UNKNOWN_PROVIDER_OUTPUT_PRICE
+        )
+        return ((in_tok * input_rate) + (out_tok * output_rate)) / 1_000_000
 
-    if "models" not in provider_pricing:
-        return tokens * provider_pricing["default"] / 1_000_000
-
-    for model_key, price_per_million in provider_pricing["models"]:
-        if model_key in model_lower:
-            return tokens * price_per_million / 1_000_000
-
-    return tokens * provider_pricing["default"] / 1_000_000
+    return tokens * input_rate / 1_000_000

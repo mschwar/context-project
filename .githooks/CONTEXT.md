@@ -7,7 +7,7 @@ files: 1
 dirs: 0
 tokens_total: 40
 ---
-# C:/Users/Matty/Documents/context-project/.githooks
+# .githooks
 
 This directory contains Git hooks that enforce automated testing and code quality checks before commits are made to the repository.
 

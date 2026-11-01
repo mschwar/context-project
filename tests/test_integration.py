@@ -88,4 +88,5 @@ def test_ctx_refresh_end_to_end_creates_manifests(monkeypatch, tmp_path) -> None
         manifest = read_manifest(directory)
         assert manifest is not None
         assert manifest.frontmatter.model == "e2e-llm-model"
-        assert manifest.body.startswith(f"# {directory.as_posix()}")
+        rel = directory.relative_to(root).as_posix() if directory != root else "."
+        assert manifest.body.startswith(f"# {rel}\n")

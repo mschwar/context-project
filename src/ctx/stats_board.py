@@ -82,13 +82,37 @@ def load_json_safe(path: Path, default: dict) -> dict:
 
 
 def save_json_atomic(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    from ctx.lock import assert_lock_ownership_for_path, fenced_mkdir, fenced_replace
+
+    assert_lock_ownership_for_path(path)
+    fenced_mkdir(path.parent, parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        os.replace(tmp, path)
-    except Exception:
+        fenced_replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def write_text_atomic(path: Path, content: str, *, mode: int | None = None) -> None:
+    """Write UTF-8 text atomically via a same-directory temp file and kernel-fenced os.replace."""
+    from ctx.lock import assert_lock_ownership_for_path, fenced_mkdir, fenced_replace
+
+    assert_lock_ownership_for_path(path)
+    fenced_mkdir(path.parent, parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.tmp-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        if mode is not None and os.name != "nt":
+            os.chmod(tmp, mode)
+        fenced_replace(tmp, path)
+    except BaseException:
         try:
             os.unlink(tmp)
         except OSError:
@@ -123,13 +147,30 @@ def _classify_errors(errors: list[str]) -> dict:
 def _build_run_record(result, config) -> dict:
     hits = result.cache_hits
     misses = result.cache_misses
-    total = hits + misses
-    if total > 0:
-        tokens_saved = round((hits / total) * result.tokens_used)
+    explicit_saved = int(getattr(result, "tokens_saved", 0) or 0)
+    in_saved = int(getattr(result, "input_tokens_saved", 0) or 0)
+    out_saved = int(getattr(result, "output_tokens_saved", 0) or 0)
+    exact_saved = bool(getattr(result, "tokens_saved_exact", False))
+    if explicit_saved > 0:
+        tokens_saved = explicit_saved
+    elif (in_saved + out_saved) > 0:
+        tokens_saved = in_saved + out_saved
+    elif not exact_saved and hits > 0 and misses > 0:
+        tokens_saved = round((result.tokens_used / misses) * hits)
     else:
         tokens_saved = 0
     from ctx.config import estimate_cost
-    cost_saved_usd = estimate_cost(tokens_saved, config.provider, config.resolved_model())
+    if in_saved > 0 or out_saved > 0:
+        remainder = max(0, tokens_saved - (in_saved + out_saved))
+        cost_saved_usd = estimate_cost(
+            tokens_saved,
+            config.provider,
+            config.resolved_model(),
+            input_tokens=in_saved + remainder,
+            output_tokens=out_saved,
+        )
+    else:
+        cost_saved_usd = estimate_cost(tokens_saved, config.provider, config.resolved_model())
     return {
         "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
         "dirs_processed": result.dirs_processed,

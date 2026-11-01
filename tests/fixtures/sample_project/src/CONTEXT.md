@@ -7,7 +7,7 @@ files: 2
 dirs: 0
 tokens_total: 142
 ---
-# C:/Users/Matty/Documents/context-project/tests/fixtures/sample_project/src
+# tests/fixtures/sample_project/src
 
 Python source code directory containing entry point and utility modules.
 

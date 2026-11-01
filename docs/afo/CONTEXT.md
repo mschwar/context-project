@@ -7,7 +7,7 @@ files: 8
 dirs: 0
 tokens_total: 16226
 ---
-# C:/Users/Matty/Documents/context-project/docs/afo
+# docs/afo
 
 Architecture and design specifications for the ctx command-line tool, covering JSON output conventions, API unification, concurrency safety, MCP server integration, and agent workflows.
 

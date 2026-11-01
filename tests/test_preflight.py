@@ -201,6 +201,7 @@ def test_preflight_no_git_repo(monkeypatch, tmp_path):
         result = run_preflight(str(tmp_path))
     git_check = next(c for c in result.checks if c.name == "git")
     assert git_check.status == "info"
+    assert "content-hash-based" in git_check.detail
     assert result.ready is True
 
 
@@ -512,4 +513,22 @@ def test_preflight_cloud_connectivity_fail_with_proxy_hint(monkeypatch, tmp_path
     assert conn.status == "fail"
     assert conn.fix is not None
     assert "HTTPS_PROXY" in conn.fix
+
+
+def test_preflight_respects_ctxconfig_provider_over_env_api_key(monkeypatch, tmp_path):
+    """Explicit .ctxconfig provider/base_url must not be overridden by ambient cloud API keys."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ambient-cloud-key")
+    (tmp_path / ".ctxconfig").write_text(
+        "provider: ollama\nmodel: qwen2.5:7b-instruct\nbase_url: http://10.0.0.5:11434/v1\n",
+        encoding="utf-8",
+    )
+
+    with patch("ctx.preflight._probe_local_models", return_value=(True, None)) as mock_probe, \
+         patch("ctx.preflight.probe_model_quality", return_value=(True, None)):
+        result = run_preflight(str(tmp_path))
+
+    assert result.ready is True
+    assert result.provider == "ollama"
+    assert result.model == "qwen2.5:7b-instruct"
+    mock_probe.assert_called_once_with("http://10.0.0.5:11434")
 

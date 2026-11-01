@@ -19,6 +19,7 @@ from ctx.config import (
     MissingApiKeyError,
     _iter_config_dirs,
     detect_provider,
+    infer_provider_from_base_url,
     load_config,
     normalize_models_probe_url,
     probe_provider_connectivity,
@@ -105,36 +106,83 @@ def probe_model_quality(config) -> tuple[bool, str | None]:
         return False, str(exc)
 
 
+def _infer_provider_from_base_url(base_url: str) -> str:
+    return infer_provider_from_base_url(base_url)
+
+
+def _resolve_explicit_provider(target: Path) -> tuple[str | None, str | None]:
+    """Check explicit provider first (CTX_PROVIDER > .ctxconfig), then effective base_url (CTX_BASE_URL > .ctxconfig)."""
+    env_provider = os.getenv("CTX_PROVIDER", "").strip()
+    if env_provider:
+        return env_provider.lower(), "via CTX_PROVIDER"
+
+    cfg_base_url = ""
+    cfg_base_source: Path | None = None
+    start = target.resolve() if target.exists() else target
+    if not start.is_dir():
+        start = start.parent
+    for d in _iter_config_dirs(start):
+        cfg_path = d / ".ctxconfig"
+        if not cfg_path.exists():
+            continue
+        try:
+            data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            # Invalid YAML is handled and reported by load_config in step 3.2.
+            return None, None
+        if isinstance(data, dict):
+            raw_provider = str(data.get("provider") or "").strip()
+            if raw_provider:
+                return raw_provider.lower(), f"via {cfg_path}"
+            cfg_base_url = str(data.get("base_url") or "").strip()
+            cfg_base_source = cfg_path
+        break
+
+    env_base_url = os.getenv("CTX_BASE_URL", "").strip()
+    if env_base_url:
+        return _infer_provider_from_base_url(env_base_url), "via CTX_BASE_URL"
+    if cfg_base_url:
+        return _infer_provider_from_base_url(cfg_base_url), f"via base_url in {cfg_base_source}"
+
+    return None, None
+
+
 def run_preflight(path: str = ".") -> PreflightResult:
     checks: list[PreflightCheck] = []
     target = Path(path)
 
-    # 3.1 Provider detection
-    detected = detect_provider()
-    if detected is None:
-        checks.append(PreflightCheck(
-            name="provider",
-            status="fail",
-            detail="no LLM provider detected.",
-            fix=(
-                "set ANTHROPIC_API_KEY or OPENAI_API_KEY in your environment,\n"
-                "       or start Ollama / LM Studio before running ctx."
-            ),
-        ))
-        return PreflightResult(checks=checks, ready=False)
-
-    provider_name, detected_model = detected
-
-    if os.getenv("ANTHROPIC_API_KEY", "").strip():
-        detected_via = "via ANTHROPIC_API_KEY"
-    elif os.getenv("OPENAI_API_KEY", "").strip():
-        detected_via = "via OPENAI_API_KEY"
-    elif provider_name == "ollama":
-        detected_via = "Ollama running on localhost:11434"
-    elif provider_name == "lmstudio":
-        detected_via = "LM Studio running on localhost:1234"
+    # 3.1 Provider resolution (explicit config first, then auto-detection)
+    explicit_provider, explicit_via = _resolve_explicit_provider(target)
+    detected_model: str | None = None
+    if explicit_provider is not None:
+        provider_name = explicit_provider
+        detected_via = explicit_via or provider_name
     else:
-        detected_via = provider_name
+        detected = detect_provider()
+        if detected is None:
+            checks.append(PreflightCheck(
+                name="provider",
+                status="fail",
+                detail="no LLM provider detected.",
+                fix=(
+                    "set ANTHROPIC_API_KEY or OPENAI_API_KEY in your environment,\n"
+                    "       configure .ctxconfig, or start Ollama / LM Studio before running ctx."
+                ),
+            ))
+            return PreflightResult(checks=checks, ready=False)
+
+        provider_name, detected_model = detected
+
+        if os.getenv("ANTHROPIC_API_KEY", "").strip() and provider_name == "anthropic":
+            detected_via = "via ANTHROPIC_API_KEY"
+        elif os.getenv("OPENAI_API_KEY", "").strip() and provider_name == "openai":
+            detected_via = "via OPENAI_API_KEY"
+        elif provider_name == "ollama":
+            detected_via = "Ollama running on localhost:11434"
+        elif provider_name == "lmstudio":
+            detected_via = "LM Studio running on localhost:1234"
+        else:
+            detected_via = provider_name
 
     checks.append(PreflightCheck(
         name="provider",
@@ -146,7 +194,16 @@ def run_preflight(path: str = ".") -> PreflightResult:
     config = None
     config_failed_fatal = False
     try:
-        config = load_config(target, provider=provider_name, require_api_key=True)
+        provider_override = (
+            provider_name
+            if (explicit_provider is None or (explicit_via and "base_url" in explicit_via.lower()))
+            else None
+        )
+        config = load_config(
+            target,
+            provider=provider_override,
+            require_api_key=True,
+        )
         if detected_model and config.provider == provider_name and not _has_explicit_model_config(target):
             config.model = detected_model
         config_detail = f"loaded from {target.resolve()}"
@@ -208,7 +265,7 @@ def run_preflight(path: str = ".") -> PreflightResult:
                     name="connectivity",
                     status="fail",
                     detail=f"{resolved_provider} is running but has no models loaded.",
-                    fix=f"pull a model first — e.g., `ollama pull llama3.2`",
+                    fix="pull a model first — e.g., `ollama pull llama3.2`",
                 ))
             else:
                 checks.append(PreflightCheck(
@@ -378,7 +435,7 @@ def _add_target_checks(checks: list[PreflightCheck], target: Path) -> None:
         checks.append(PreflightCheck(
             name="git",
             status="info",
-            detail="not a git repository. ctx will use incremental refresh (mtime-based).",
+            detail="not a git repository. ctx will use incremental refresh (content-hash-based).",
         ))
 
     # 3.5d .ctxignore status
