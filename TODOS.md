@@ -86,18 +86,18 @@
 ### 3. Fleet Ingestion Pre-Processor Capsule (`ctx export --depth 1 --capsule`) ✓
 - **What:** Have `ctx export --depth 1 --capsule` (`api.build_fleet_capsule`) generate a compact capsule summary feeding `state/projects/<id>.json` for `project-ledger` and `gbrain` code checkout ingestion.
 
-## Queued Strategic Feature Unlocks (Post-Audit Work Queue)
+## Queued Strategic Feature Unlocks (Post-Audit Work Queue) ✓
 
-### Phase 31 — Hybrid Semantic Invariant Synthesis & Constrained JSON-Schema Probing ([#77](https://github.com/mschwar/context-project/issues/77))
-- **Status:** Queued (Wave 2)
-- **What:** Combine zero-cost deterministic structural extraction (`should_invoke_llm()`) with optional LLM-synthesized cross-module invariants/footguns only when `structural_hash` or `boundary_doc_hash` drifts, plus probe local OpenAI-compatible `response_format` JSON-schema support to eliminate batch fallbacks on 7B models.
+### Phase 31 — Hybrid Semantic Invariant Synthesis & Constrained JSON-Schema Probing ✓ ([#77](https://github.com/mschwar/context-project/issues/77))
+- **Status:** Complete — implemented 3-stage gated invariant synthesis (`src/ctx/invariants.py`, `--synthesize`) and OpenAI-compatible `json_schema` structured-output capability probing + fallback (`src/ctx/llm.py`, `src/ctx/preflight.py`).
 
-### Phase 32 — Directed Blast-Radius Graph (`ctx impact` / `ctx_impact`) & Operational Surface Extraction ([#78](https://github.com/mschwar/context-project/issues/78))
-- **Status:** Queued (Wave 2)
-- **What:** Expose a file- and symbol-level blast-radius query (`ctx impact <target>` and MCP `ctx_impact`) returning inbound dependents, outbound dependencies, coupled tests, and governing boundary docs, alongside deterministic extraction of CLI commands, HTTP routes, MCP tools/resources, and `os.getenv` config surfaces.
+### Phase 32 — Directed Blast-Radius Graph (`ctx impact` / `ctx_impact`) & Operational Surface Extraction ✓ ([#78](https://github.com/mschwar/context-project/issues/78))
+- **Status:** Complete — implemented `src/ctx/impact.py`, `ctx impact`, MCP `ctx_impact`, cross-file reference-ranked `key_symbols`, and polyglot CLI/HTTP/MCP/env operational surface extraction in `src/ctx/skeleton.py` and `api.build_fleet_capsule`.
 
-### Phase 33 — Optional Cloud LLM SDK Extras & Phase 27.1 A/B Agent Navigation Benchmark ([#79](https://github.com/mschwar/context-project/issues/79))
-- **Status:** Queued (Wave 3)
-- **What:** Evaluate splitting `anthropic` and `openai` SDK dependencies into optional extras (building on lazy loading in `src/ctx/llm.py`) for ultra-lightweight CI / Tier 2 / `ctx.sdk` installs, and run the controlled Phase 27.1 A/B agent orientation benchmark.
+### Phase 33 — Granular Extras, Lazy Heavy-SDK Isolation & Phase 27.1 Static-Oracle Benchmark ✓ ([#79](https://github.com/mschwar/context-project/issues/79))
+- **Status:** Complete — shipped `[anthropic]`, `[openai]`, `[cloud]`, `[watch]`, `[all]` extras (retaining 1.1.x core `dependencies` for backward compatibility), lazy `watchdog`/cloud-SDK runtime imports, `src/ctx/benchmark.py` (`ctx benchmark`), and reproducible static-oracle benchmark report `docs/benchmarks/phase27-1-navigation-benchmark.md` (**88.2% context-token reduction**, **82.9% retrieval-step reduction**, **+12.4 pp mean recall delta**, **+16.6 pp blast-radius F1 delta [`1.000` vs `0.834`]**).
+
+### Phase 34 — Type 1 Jev (`jev-1.13.0`) System-One Decision Layer ✓ ([#81](https://github.com/mschwar/context-project/issues/81))
+- **Status:** Complete — shipped pure-stdlib `src/ctx/jev.py` (`invariant_drift_material`, `subsystem_arch_role`, `operational_surface_exposure`), `ctx jev heads|decide|eval`, and MCP `ctx_jev` (verified against the 18-case calibration/gold suite across deterministic `code` rules, full governed pipeline, and `--skip-pre-rule` pure live `jev-1.13.0` inference).
 
 

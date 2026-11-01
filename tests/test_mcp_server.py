@@ -48,7 +48,16 @@ def test_tools_list_exposes_all_tools(monkeypatch: pytest.MonkeyPatch, tmp_path:
     )
 
     tool_names = [tool["name"] for tool in responses[0]["result"]["tools"]]
-    assert tool_names == ["ctx_refresh", "ctx_check", "ctx_export", "ctx_reset", "ctx_board", "ctx_global_board"]
+    assert tool_names == [
+        "ctx_refresh",
+        "ctx_check",
+        "ctx_export",
+        "ctx_reset",
+        "ctx_board",
+        "ctx_global_board",
+        "ctx_impact",
+        "ctx_jev",
+    ]
 
 
 def test_unknown_method_returns_jsonrpc_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -99,6 +99,14 @@ def probe_model_quality(config) -> tuple[bool, str | None]:
         summary = results[0].text if results else ""
         if not summary or not summary.strip() or len(summary.strip()) < 5:
             return False, None
+        if getattr(config, "provider", "") in (*LOCAL_PROVIDERS, "openai"):
+            from ctx.llm import get_structured_output_capability, probe_structured_output_support
+
+            if (
+                get_structured_output_capability(config) is None
+                and str(getattr(config, "structured_outputs", "auto")).lower() != "off"
+            ):
+                probe_structured_output_support(config)
         return True, None
     except TimeoutError:
         return False, "timeout"
@@ -349,6 +357,28 @@ def run_preflight(path: str = ".") -> PreflightResult:
                 status="ok",
                 detail=f"{model_name} returned valid summary",
             ))
+            if resolved_provider in LOCAL_PROVIDERS or resolved_provider == "openai":
+                from ctx.llm import get_structured_output_capability
+
+                cap = get_structured_output_capability(config)
+                if cap is True:
+                    checks.append(PreflightCheck(
+                        name="structured_outputs",
+                        status="ok",
+                        detail=f"{model_name} supports json_schema structured outputs",
+                    ))
+                elif cap is False:
+                    checks.append(PreflightCheck(
+                        name="structured_outputs",
+                        status="info",
+                        detail=f"{model_name} uses plain-JSON prompt fallback (json_schema unsupported by server)",
+                    ))
+                else:
+                    checks.append(PreflightCheck(
+                        name="structured_outputs",
+                        status="info",
+                        detail="auto-probe enabled (json_schema with automatic plain-JSON fallback)",
+                    ))
         elif err_q == "timeout":
             checks.append(PreflightCheck(
                 name="model_quality",

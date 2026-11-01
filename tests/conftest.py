@@ -39,6 +39,11 @@ def _isolate_process_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[No
         "CTX_EXTENSIONS",
         "CTX_OUTPUT",
         "CTX_GLOBAL_STATS_PATH",
+        "CTX_TIER2_SYNTHESIZE",
+        "CTX_STRUCTURED_OUTPUTS",
+        "CTX_JEV",
+        "CTX_JEV_USE_OP",
+        "TYPESAFE_API_KEY",
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
     ):

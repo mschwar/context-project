@@ -356,8 +356,10 @@ class CtxLock:
                 try:
                     with self.publication_fence():
                         self._refresh_owned_lock()
-                except (LockSupersededError, OSError):
+                except LockSupersededError:
                     return
+                except OSError:
+                    continue
 
         thread = threading.Thread(target=_beat, name="ctx-lock-heartbeat", daemon=True)
         self._heartbeat_thread = thread

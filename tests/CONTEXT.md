@@ -1,11 +1,11 @@
 ---
-generated: '2026-11-01T00:00:50Z'
+generated: '2026-11-01T05:32:47Z'
 generator: ctx/1.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:4d7a9381665e781e277a51eb255e90ab6bd527db191d698242cc736f6c84ffde
-files: 43
+content_hash: sha256:49e640836aff44c42ba94f73dd0c7a5a82d3cb933ffce17498e467a98e54226b
+files: 46
 dirs: 1
-tokens_total: 96535
+tokens_total: 142333
 ---
 # tests
 
@@ -16,6 +16,7 @@ Tests for various components of the project, including CLI, API, language parser
 - **conftest.py** — Isolates process environment for tests, managing temporary directories and proxy settings.
 - **test_agent_handoff.py** — Tests for agent context export and serve functionalities including depth, structure, and staleness filtering.
 - **test_api.py** — Tests for unified API module covering various refresh strategies and behaviors.
+- **test_benchmark_and_lazy_imports.py** — Tests for Phase 27.1 A/B/C navigation benchmarking, optional extras, and subprocess lazy-import isolation of heavy SDKs.
 - **test_cli.py** — Unit tests for ctx.cli module covering various command behaviors and output scenarios.
 - **test_cli_compat.py** — Compatibility tests for legacy CLI command surfaces ensuring correct behavior.
 - **test_config.py** — Tests configuration loading and resolution across environment variables, CLI, and ctxconfig files.
@@ -28,9 +29,11 @@ Tests for various components of the project, including CLI, API, language parser
 - **test_go_parser.py** — Tests for exporting functions, types, constants, and variables from Go files.
 - **test_hasher.py** — Tests for ctx.hasher – file and directory content hashing.
 - **test_ignore.py** — Tests for ctx.ignore – merged ignore patterns and path matching.
+- **test_impact_and_surfaces.py** — Tests for polyglot operational surface extraction, structural hash sensitivity, directed dependency graphs, and blast-radius impact queries.
 - **test_init.py** — Tests for ctx.init covering project initialization, uninitialization, and hook runtime.
 - **test_integration.py** — End-to-end integration tests for the CLI using a fake client and sample project.
 - **test_java_parser.py** — Tests for parsing Java files including classes, interfaces, enums, records, methods, and annotations.
+- **test_jev_and_invariants.py** — Tests for Type 1 Jev System-One heads, wire batching, authority ceilings, 3-stage Tier 2 invariant synthesis, and json_schema fallback.
 - **test_js_ts_parser.py** — Tests for parsing JavaScript and TypeScript files, including exported functions, classes, interfaces, types, and default exports.
 - **test_kotlin_parser.py** — Tests for Kotlin parser covering functions, classes, interfaces, objects, and enums.
 - **test_language_detector.py** — Tests for language detection based on file extensions and project files.

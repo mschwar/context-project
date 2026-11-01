@@ -164,6 +164,9 @@ class Config:
     max_cache_entries: int = 10_000  # trim disk cache when it exceeds this many entries
     watch_debounce_seconds: float = 0.5  # per-file debounce window for ctx watch
     resume_cooldown_seconds: float = 60.0  # delay between auto-resume cycles
+    tier2_synthesize: bool = False  # synthesize cross-module invariants when should_invoke_llm() triggers
+    structured_outputs: str = "auto"  # "auto" | "on" | "off" for OpenAI-compatible json_schema
+    jev_mode: str = "auto"  # "auto" | "off" | "shadow" | "advisory" | "routing" | "actuating"
     prompts: dict[str, str] = field(default_factory=dict)
 
 
@@ -314,6 +317,45 @@ def infer_provider_from_base_url(base_url: str) -> str:
 def _iter_config_dirs(start_dir: Path) -> list[Path]:
     """Return directories from *start_dir* upward for .ctxconfig lookup."""
     return [start_dir, *start_dir.parents]
+
+
+def resolve_tier2_synthesize_preference(
+    start_dir: Path,
+    *,
+    explicit_flag: bool = False,
+    persisted_meta: dict[str, object] | None = None,
+) -> bool:
+    """Resolve Tier 2 invariant synthesis setting with explicit disable support.
+
+    Precedence:
+    1. Explicit CLI/API `synthesize=True` flag (`explicit_flag`)
+    2. Explicit `CTX_TIER2_SYNTHESIZE` environment variable (`0`/`false` disables!)
+    3. Explicit `tier2_synthesize` key in `.ctxconfig` (`false` disables!)
+    4. Persisted `.ctx/metadata.json` `synthesize_invariants` boolean
+    """
+    if explicit_flag:
+        return True
+    env_val = _env_text("CTX_TIER2_SYNTHESIZE")
+    if env_val is not None:
+        return env_val.lower() in {"1", "true", "yes", "on"}
+    resolved_start = start_dir.resolve() if start_dir.exists() else start_dir
+    if resolved_start.is_file():
+        resolved_start = resolved_start.parent
+    for directory in _iter_config_dirs(resolved_start):
+        config_path = directory / ".ctxconfig"
+        if not config_path.is_file():
+            continue
+        try:
+            data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            break
+        if isinstance(data, dict) and "tier2_synthesize" in data and data["tier2_synthesize"] is not None:
+            raw = data["tier2_synthesize"]
+            if isinstance(raw, bool):
+                return raw
+            return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+        break
+    return bool((persisted_meta or {}).get("synthesize_invariants", False))
 
 
 def resolve_project_anchor(target_path: Path) -> Path:
@@ -471,8 +513,32 @@ def load_config(
         
         if "prompts" in data and isinstance(data["prompts"], dict):
             config.prompts.update(data["prompts"])
+        if "tier2_synthesize" in data and data["tier2_synthesize"] is not None:
+            config.tier2_synthesize = bool(data["tier2_synthesize"])
+        if "structured_outputs" in data and data["structured_outputs"] is not None:
+            raw_so = data["structured_outputs"]
+            if isinstance(raw_so, bool):
+                config.structured_outputs = "on" if raw_so else "off"
+            else:
+                config.structured_outputs = str(raw_so).strip().lower() or "auto"
+        if "jev_mode" in data and data["jev_mode"] is not None:
+            raw_jm = data["jev_mode"]
+            if isinstance(raw_jm, bool):
+                config.jev_mode = "auto" if raw_jm else "off"
+            else:
+                config.jev_mode = str(raw_jm).strip().lower() or "auto"
 
         break
+
+    env_tier2_synth = _env_text("CTX_TIER2_SYNTHESIZE")
+    if env_tier2_synth is not None:
+        config.tier2_synthesize = env_tier2_synth.lower() in {"1", "true", "yes", "on"}
+    env_structured = _env_text("CTX_STRUCTURED_OUTPUTS")
+    if env_structured is not None:
+        config.structured_outputs = env_structured.lower()
+    env_jev = _env_text("CTX_JEV")
+    if env_jev is not None:
+        config.jev_mode = env_jev.lower()
 
     env_provider = _env_text("CTX_PROVIDER")
     env_model = _env_text("CTX_MODEL")

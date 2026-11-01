@@ -86,6 +86,7 @@ def init_project(
     *,
     force: bool = False,
     tier2: bool = False,
+    synthesize: bool = False,
 ) -> dict:
     """Bootstrap .ctx/ infrastructure in a git repo.
 
@@ -108,14 +109,20 @@ def init_project(
     metadata = _build_metadata(root)
     gitignore_path = root / ".gitignore"
     hooks_installed: list[str] = []
+    invariants_synthesized = 0
+    init_warnings: list[str] = []
 
     if tier2:
+        from ctx.config import resolve_tier2_synthesize_preference
+        from ctx.invariants import synthesize_tier2_invariants
         from ctx.skeleton import (
             extract_skeleton,
             render_context_0,
             render_context_1,
             render_context_full,
         )
+
+        should_synth = resolve_tier2_synthesize_preference(root, explicit_flag=synthesize)
 
         with CtxLock(root, command="init"):
             if ctx_dir.is_dir() and not force:
@@ -130,11 +137,25 @@ def init_project(
                     _add_to_gitignore(root, CTX_DIR + "/")
                     hooks_installed = _install_hooks(root)
                     skeleton = extract_skeleton(root)
-                    rendered_c0 = render_context_0(skeleton)
-                    rendered_c1 = render_context_1(skeleton)
-                    rendered_full = render_context_full(skeleton)
                     fenced_mkdir(ctx_dir, parents=True, exist_ok=True)
                     write_text_atomic(ctx_dir / ".gitignore", "*\n")
+                    synthesized_invs: list[dict[str, str]] | None = None
+                    if should_synth:
+                        inv_res = synthesize_tier2_invariants(
+                            root,
+                            skeleton,
+                            force=force,
+                        )
+                        synthesized_invs = inv_res.invariants or None
+                        invariants_synthesized = len(inv_res.invariants)
+                        metadata["synthesize_invariants"] = True
+                        metadata["invariants_gate_action"] = inv_res.gate_action
+                        if inv_res.warning:
+                            metadata["invariants_warning"] = inv_res.warning
+                            init_warnings.append(inv_res.warning)
+                    rendered_c0 = render_context_0(skeleton, synthesized_invariants=synthesized_invs)
+                    rendered_c1 = render_context_1(skeleton, synthesized_invariants=synthesized_invs)
+                    rendered_full = render_context_full(skeleton, synthesized_invariants=synthesized_invs)
                     write_text_atomic(ctx_dir / "CONTEXT-0.md", rendered_c0)
                     write_text_atomic(ctx_dir / "CONTEXT-1.md", rendered_c1)
                     write_text_atomic(ctx_dir / "CONTEXT.md", rendered_full)
@@ -242,6 +263,9 @@ def init_project(
     }
     if tier2:
         result["mode"] = "tier2"
+        result["invariants_synthesized"] = invariants_synthesized
+    if init_warnings:
+        result["warnings"] = init_warnings
     return result
 
 
