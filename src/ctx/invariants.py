@@ -497,7 +497,7 @@ def synthesize_tier2_invariants(
                 return InvariantSynthesisResult(
                     invariants=cached_invs,
                     gate_action="jev_skipped_non_material",
-                    tokens_used=0,
+                    tokens_used=jev_tokens,
                     jev_input_tokens=jev_tokens,
                     est_cost_usd=round(jev_cost, 9),
                     model=cached_model,
@@ -542,7 +542,7 @@ def synthesize_tier2_invariants(
             return InvariantSynthesisResult(
                 invariants=cached_invs,
                 gate_action="no_provider_configured",
-                tokens_used=0,
+                tokens_used=jev_tokens,
                 jev_input_tokens=jev_tokens,
                 est_cost_usd=round(jev_cost, 9),
                 model=cached_model,
@@ -555,7 +555,7 @@ def synthesize_tier2_invariants(
             return InvariantSynthesisResult(
                 invariants=cached_invs,
                 gate_action="llm_call_failed_fallback",
-                tokens_used=0,
+                tokens_used=jev_tokens,
                 jev_input_tokens=jev_tokens,
                 est_cost_usd=round(jev_cost, 9),
                 model=cached_model,
@@ -564,20 +564,21 @@ def synthesize_tier2_invariants(
     else:
         resolved_model_name = resolved_model_name or getattr(client, "model", "custom-llm")
 
+    min_output_headroom = 256
     user_prompt = _build_invariant_synthesis_prompt(resolved_root, skeleton)
     est_prompt_tokens = max(
         1,
         (len(INVARIANT_SYNTHESIS_SYSTEM_PROMPT.encode("utf-8")) + len(user_prompt.encode("utf-8"))) // 4,
     )
-    projected_min_tokens = jev_tokens + est_prompt_tokens
+    projected_min_tokens = jev_tokens + est_prompt_tokens + min_output_headroom
     est_min_cost = round(
         jev_cost
         + estimate_cost(
-            est_prompt_tokens,
+            est_prompt_tokens + min_output_headroom,
             resolved_provider,
             resolved_model_name,
             input_tokens=est_prompt_tokens,
-            output_tokens=0,
+            output_tokens=min_output_headroom,
         ),
         9,
     )
@@ -597,8 +598,8 @@ def synthesize_tier2_invariants(
             est_cost_usd=round(jev_cost, 9),
             model=cached_model,
             warning=(
-                f"Semantic invariant synthesis skipped: {projected_min_tokens:,} estimated prompt tokens "
-                f"exceed token budget ({effective_token_cap:,})."
+                f"Semantic invariant synthesis skipped: {projected_min_tokens:,} estimated tokens "
+                f"(including {min_output_headroom}-token output floor) exceed token budget ({effective_token_cap:,})."
             ),
             budget_exhausted=True,
             budget_guardrail=guard_msg,
@@ -623,7 +624,7 @@ def synthesize_tier2_invariants(
     max_out_tokens = (
         2048
         if effective_token_cap is None
-        else max(1, min(2048, effective_token_cap - projected_min_tokens))
+        else max(min_output_headroom, min(2048, effective_token_cap - (jev_tokens + est_prompt_tokens)))
     )
     try:
         llm_res = client.complete_json(
@@ -632,16 +633,15 @@ def synthesize_tier2_invariants(
             json_schema=build_invariants_json_schema(),
             max_tokens=max_out_tokens,
         )
-        invariants = parse_invariants_response(llm_res.text)
     except LockSupersededError:
         raise
     except Exception as exc:
-        # Transient runtime/API/parse failure: do NOT advance checked hashes in `.ctx/invariants.json`
-        # so the very next `ctx refresh` retries synthesis against the true baseline.
+        # Transient runtime/API failure before response completion: do NOT advance checked hashes
+        # in `.ctx/invariants.json` so the very next `ctx refresh` retries synthesis.
         return InvariantSynthesisResult(
             invariants=cached_invs,
             gate_action="llm_call_failed_fallback",
-            tokens_used=0,
+            tokens_used=jev_tokens,
             jev_input_tokens=jev_tokens,
             est_cost_usd=round(jev_cost, 9),
             model=cached_model,
@@ -678,18 +678,55 @@ def synthesize_tier2_invariants(
             f"(limit ${effective_usd_cap:.6f})."
         )
 
+    try:
+        invariants = parse_invariants_response(llm_res.text)
+    except Exception as exc:
+        # Paid LLM call completed, so tokens/cost MUST be accounted for and post-call guardrails
+        # enforced. Advance `checked_*_hash` (while preserving `baseline_snapshot`) so unchanged
+        # refreshes and background git hooks do not re-bill endlessly on the exact same snapshot.
+        try:
+            _persist_invariants_cache(
+                resolved_root,
+                skeleton,
+                cached_invs,
+                model=cached_model or resolved_model_name,
+                tokens_used=combined_tok,
+                gate_action="llm_parse_failed_fallback",
+                synthesized_snapshot=baseline_snapshot,
+                synthesized_structural_hash=synth_struct_hash,
+                synthesized_boundary_doc_hash=synth_bdoc_hash,
+            )
+        except (OSError, ValueError):
+            pass
+        return InvariantSynthesisResult(
+            invariants=cached_invs,
+            gate_action="llm_parse_failed_fallback",
+            tokens_used=combined_tok,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            jev_input_tokens=jev_tokens,
+            est_cost_usd=total_cost,
+            model=resolved_model_name,
+            warning=(
+                f"Semantic invariant synthesis output could not be parsed ({exc}); "
+                "using deterministic Tier 2 map until structure or boundary docs change."
+            ),
+            budget_exhausted=post_exhausted,
+            budget_guardrail=post_guardrail,
+        )
+
     _persist_invariants_cache(
         resolved_root,
         skeleton,
         invariants,
         model=resolved_model_name,
-        tokens_used=total_tok,
+        tokens_used=combined_tok,
         gate_action="synthesized",
     )
     return InvariantSynthesisResult(
         invariants=invariants,
         gate_action="synthesized",
-        tokens_used=total_tok,
+        tokens_used=combined_tok,
         input_tokens=in_tok,
         output_tokens=out_tok,
         jev_input_tokens=jev_tokens,

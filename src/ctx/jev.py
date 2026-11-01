@@ -1098,7 +1098,7 @@ def decide(
     if record_trace and root is not None:
         try:
             decisions = append_decision_traces(root, decisions)
-        except OSError:
+        except (OSError, ValueError):
             pass
     return {"result": "DECIDED", "decisions": decisions}
 

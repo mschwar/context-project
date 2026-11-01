@@ -791,3 +791,106 @@ def test_round3_qa_symlink_confinement_nan_confidence_budget_guardrails_and_surf
     assert bud_ref.tokens_used == 0
     assert bud_ref.budget_exhausted is True
     assert bud_ref.budget_guardrail is not None
+
+
+def test_round4_qa_parse_failure_billing_symlink_trace_graceful_and_tier2_dry_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression coverage for Round-4 Claude QA findings 1, 2, 3, and 4."""
+    import os
+    import types
+    from ctx.api import refresh as api_refresh
+    from ctx.init import init_project
+    from ctx.jev import decide
+
+    monkeypatch.setenv("CTX_GLOBAL_STATS_PATH", str(tmp_path / "global_run_stats.json"))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-round4")
+    monkeypatch.setenv("CTX_JEV", "off")
+
+    repo = tmp_path / "t2_round4"
+    (repo / ".git" / "hooks").mkdir(parents=True)
+    (repo / "src" / "pkg").mkdir(parents=True)
+    (repo / "AGENTS.md").write_text("# AGENTS\n\nRule: Track every paid token.\n", encoding="utf-8")
+    (repo / "src" / "pkg" / "core.py").write_text(
+        "class CoreEngine:\n    def execute(self) -> int:\n        return 42\n",
+        encoding="utf-8",
+    )
+    init_project(repo, tier2=True)
+
+    # Finding 4: Tier 2 `--dry-run --synthesize` MUST report "." stale when synthesis is toggled on or uncached
+    dry_plain = api_refresh(repo, dry_run=True)
+    assert dry_plain.stale_directories == []
+    dry_synth = api_refresh(repo, dry_run=True, synthesize=True)
+    assert dry_synth.stale_directories == ["."]
+
+    # Finding 1: Paid synthesis returning unparseable JSON MUST report actual tokens/cost,
+    # enforce post-call guardrails, record run_stats.json, AND NOT re-bill on unchanged refresh!
+    (repo / ".ctxconfig").write_text(
+        "provider: openai\nmodel: gpt-4.1-mini\nmax_tokens_per_run: 3000\n",
+        encoding="utf-8",
+    )
+    bad_calls = {"n": 0}
+
+    class _UnparseablePaidClient:
+        provider = "openai"
+        model = "gpt-4.1-mini"
+
+        def complete_json(self, *args, **kwargs):
+            bad_calls["n"] += 1
+            # Verify 256-token minimum output floor (never truncated to 1 token)
+            assert kwargs.get("max_tokens", 0) >= 256
+            return types.SimpleNamespace(
+                text='{"invariants": [TRUNCATED_JSON',
+                input_tokens=1500,
+                output_tokens=2000,
+            )
+
+    with patch("ctx.llm.create_client", return_value=_UnparseablePaidClient()):
+        first_fail = api_refresh(repo, synthesize=True)
+        second_noop = api_refresh(repo, synthesize=True)
+
+    assert bad_calls["n"] == 1
+    assert first_fail.tokens_used == 3500
+    assert first_fail.input_tokens == 1500
+    assert first_fail.output_tokens == 2000
+    assert first_fail.est_cost_usd > 0.0
+    assert first_fail.budget_exhausted is True
+    assert first_fail.budget_guardrail is not None
+    assert "3,500 tokens used" in first_fail.budget_guardrail
+    assert second_noop.tokens_used == 0
+
+    run_stats_path = repo / ".ctx-cache" / "run_stats.json"
+    assert run_stats_path.is_file()
+    runs_data = json.loads(run_stats_path.read_text(encoding="utf-8"))
+    assert runs_data["runs"][-1]["tokens_used"] == 3500
+    assert runs_data["runs"][-1]["strategy"] == "tier2"
+
+    # Finding 2: Symlinked `.ctx-cache` refuses trace writes outside `root` WITHOUT cancelling `decide()`
+    sym_repo = tmp_path / "sym_trace_repo"
+    outside_cache = tmp_path / "outside_trace_dir"
+    sym_repo.mkdir()
+    outside_cache.mkdir()
+    (sym_repo / ".ctx-cache").symlink_to(outside_cache, target_is_directory=True)
+    dec_env = decide(
+        ["invariant_drift_material"],
+        {
+            "repo_name": "demo",
+            "boundary_docs_changed": [],
+            "entrypoints_changed": [],
+            "operational_surfaces_changed": [],
+            "added_symbols": ["_helper"],
+            "removed_symbols": [],
+            "added_subsystems": [],
+            "removed_subsystems": [],
+            "changed_imports": [],
+            "touched_subsystems": ["src/pkg"],
+            "cycle_count_delta": 0,
+            "files_changed_count": 1,
+        },
+        root=sym_repo,
+        record_trace=True,
+    )
+    assert dec_env["result"] == "DECIDED"
+    assert dec_env["decisions"][0]["effective_output"] is False
+    assert not (outside_cache / "jev_decisions.jsonl").exists()

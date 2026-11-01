@@ -54,6 +54,8 @@ def _run_stats_path(root: Path, config) -> Path | None:
         cache_dir = Path(cache_path).parent
     else:
         cache_dir = root / ".ctx-cache"
+    if cache_dir.is_symlink():
+        return None
     return cache_dir / "run_stats.json"
 
 

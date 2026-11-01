@@ -1,6 +1,6 @@
 # Phase 27.1 — Deterministic Static-Oracle Navigation & Blast-Radius Benchmark
 
-- **Generated:** `2026-11-01T05:04:06Z`
+- **Generated:** `2026-11-01T05:22:57Z`
 - **Generator:** `ctx/1.1.0` (`phase-27.1-v3-static-oracle-f1`)
 - **Methodology:** `deterministic_static_oracle_retrieval`
 - **Maintenance Cost Basis:** `modeled_analytical_estimate`
@@ -21,7 +21,7 @@ This benchmark deterministically evaluates retrieval context-token efficiency, r
 
 Across **3** repositories and **4** static-oracle retrieval dimensions (Authority & Architecture Orientation, Public Operational Surface Discovery, Multi-Hop Blast-Radius Tracing, and Coupled Test Selection), **Condition C (`tier2_plus_impact`: `.ctx/CONTEXT-0.md` + `ctx impact`)** achieves:
 
-- **88.2% context-token reduction** vs `raw_grep` (`3517.7` vs `29809.7` mean tokens)
+- **88.2% context-token reduction** vs `raw_grep` (`3517.7` vs `29824.3` mean tokens)
 - **82.9% retrieval-step reduction** vs `raw_grep` (`2.0` vs `11.67` mean steps)
 - **+12.4 percentage points static-oracle mean recall delta** (`0.8735` vs `0.7498`) and **+16.6 percentage points blast-radius F1 delta** (`1.0000` vs `0.8341`)
 - **0 modeled Type-II LLM maintenance tokens** on implementation-only commits (`should_invoke_llm() == False`) and non-material structural tweaks gated by Type 1 Jev (`invariant_drift_material`, ~215 modeled System-One input tokens @ `$0.042/1M`)
@@ -30,8 +30,8 @@ Across **3** repositories and **4** static-oracle retrieval dimensions (Authorit
 
 | Condition | Mean Steps | Mean Context Tokens | Mean Recall | Blast Recall / Prec / F1 | Surface Recall | Modeled Maint. Tokens (Impl / Minor Struct) |
 |-----------|-----------:|--------------------:|------------:|-------------------------:|---------------:|--------------------------------------------:|
-| A. `raw_grep` (No `ctx`) | 11.67 | 29809.7 | 0.7498 | 0.857 / 0.826 / 0.834 | 0.9279 | 0 / 0 |
-| B. `tier1_manifests` (Per-dir `CONTEXT.md`) | 4.00 | 4369.0 | 0.6344 | 0.857 / 0.826 / 0.834 | 0.2268 | 8596 / 8596 |
+| A. `raw_grep` (No `ctx`) | 11.67 | 29824.3 | 0.7498 | 0.857 / 0.826 / 0.834 | 0.9279 | 0 / 0 |
+| B. `tier1_manifests` (Per-dir `CONTEXT.md`) | 4.00 | 4368.7 | 0.6344 | 0.857 / 0.826 / 0.834 | 0.2268 | 8596 / 8596 |
 | C. `tier2_plus_impact` (`CONTEXT-0.md` + `ctx impact`) | 2.00 | 3517.7 | 0.8735 | 1.000 / 1.000 / 1.000 | 1.0000 | 0 / 0 (+215 Jev T1) |
 
 ## Per-Repository Results
@@ -56,13 +56,13 @@ Across **3** repositories and **4** static-oracle retrieval dimensions (Authorit
 | `tier1_manifests` | 4 | 3934 | 0.8000 | 0.2500 | 0.917 / 0.688 / 0.786 | 0.840 / 0.955 / 0.894 | **0.7017** |
 | `tier2_plus_impact` | 2 | 3471 | 0.5000 | 1.0000 | 1.000 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 | **0.8750** |
 
-### `machina` (604 files, 13 subsystems, 138 internal edges, 45 public surfaces)
+### `machina` (606 files, 13 subsystems, 138 internal edges, 45 public surfaces)
 
 - **Focal High-Fan-In Target:** `src/machina/runtime.py` (22 direct prod dependents, 24 transitive prod dependents, 9 coupled test suites)
 
 | Condition | Steps | Context Tokens | Arch Recall | Surface Recall | Blast R / P / F1 | Test R / P / F1 | Mean Recall |
 |-----------|------:|---------------:|------------:|---------------:|-----------------:|----------------:|------------:|
-| `raw_grep` | 11 | 25380 | 0.3636 | 0.8444 | 0.917 / 0.917 / 0.917 | 1.000 / 1.000 / 1.000 | **0.7812** |
-| `tier1_manifests` | 4 | 2548 | 0.1818 | 0.0667 | 0.917 / 0.917 / 0.917 | 1.000 / 1.000 / 1.000 | **0.5413** |
+| `raw_grep` | 11 | 25424 | 0.3636 | 0.8444 | 0.917 / 0.917 / 0.917 | 1.000 / 1.000 / 1.000 | **0.7812** |
+| `tier1_manifests` | 4 | 2547 | 0.1818 | 0.0667 | 0.917 / 0.917 / 0.917 | 1.000 / 1.000 / 1.000 | **0.5413** |
 | `tier2_plus_impact` | 2 | 3108 | 0.1818 | 1.0000 | 1.000 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 | **0.7955** |
 

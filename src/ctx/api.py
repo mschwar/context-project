@@ -310,6 +310,7 @@ def _refresh_tier2_locked(
     budget_exhausted = False
     budget_guardrail: str | None = None
     refresh_warnings: list[str] = []
+    synth_model: str | None = model
     try:
         fenced_mkdir(ctx_dir, parents=True, exist_ok=True)
         synthesized_invs: list[dict[str, str]] | None = None
@@ -331,6 +332,7 @@ def _refresh_tier2_locked(
             est_cost = inv_res.est_cost_usd
             budget_exhausted = inv_res.budget_exhausted
             budget_guardrail = inv_res.budget_guardrail
+            synth_model = inv_res.model or model
             meta["synthesize_invariants"] = True
             meta["invariants_gate_action"] = inv_res.gate_action
             if inv_res.warning:
@@ -359,12 +361,13 @@ def _refresh_tier2_locked(
         _restore_dir_snapshot(ctx_dir, prior_snapshot)
         raise
 
-    return RefreshResult(
+    tier2_errors: list[str] = [budget_guardrail] if budget_guardrail is not None else []
+    tier2_result = RefreshResult(
         dirs_processed=subsystem_count,
         dirs_skipped=0,
         files_processed=skeleton.total_files,
         tokens_used=tokens_used,
-        errors=[],
+        errors=tier2_errors,
         budget_exhausted=budget_exhausted,
         strategy="tier2",
         est_cost_usd=est_cost,
@@ -374,6 +377,22 @@ def _refresh_tier2_locked(
         output_tokens=out_tok,
         warnings=refresh_warnings,
     )
+    if tokens_used > 0 or est_cost > 0.0:
+        try:
+            from ctx.stats_board import record_run
+
+            tier2_cfg = load_config(
+                root,
+                provider=provider,
+                model=synth_model,
+                token_budget=token_budget,
+                base_url=base_url,
+                require_api_key=False,
+            )
+            record_run(root, tier2_result, tier2_cfg)
+        except Exception as exc:
+            logger.warning("Tier 2 stats recording failed: %s", exc)
+    return tier2_result
 
 
 def _refresh_tier2(
@@ -402,15 +421,36 @@ def _refresh_tier2(
     expected_exports = ("CONTEXT.md", "CONTEXT-1.md", "CONTEXT-0.md")
 
     if dry_run:
+        from ctx.config import resolve_tier2_synthesize_preference
+        from ctx.invariants import has_cached_synthesis_for_hashes
+
         meta = load_json_safe(meta_path, {})
         if not isinstance(meta, dict):
             meta = {}
+        prev_synth_flag = bool(meta.get("synthesize_invariants", False))
+        should_synth = resolve_tier2_synthesize_preference(
+            root,
+            explicit_flag=synthesize,
+            persisted_meta=meta,
+        )
+        synth_toggled = should_synth != prev_synth_flag
         skeleton = extract_skeleton(root, max_depth=max_depth)
         exports_missing = any(
             not (ctx_dir / name).is_file() or (ctx_dir / name).stat().st_size == 0
             for name in expected_exports
         )
-        needs_update = force or exports_missing or should_invoke_llm(meta, skeleton)
+        missing_synth_cache = should_synth and not has_cached_synthesis_for_hashes(
+            root,
+            skeleton.structural_hash,
+            skeleton.boundary_doc_hash,
+        )
+        needs_update = (
+            force
+            or exports_missing
+            or synth_toggled
+            or missing_synth_cache
+            or should_invoke_llm(meta, skeleton)
+        )
         stale_dirs = ["."] if needs_update else []
         return RefreshResult(
             dirs_processed=0,
@@ -773,6 +813,7 @@ def refresh(
                             synthesize=synthesize,
                             provider=provider,
                             model=model,
+                            token_budget=token_budget,
                             base_url=base_url,
                         )
                         if inline_tier2 is not None:
@@ -891,6 +932,7 @@ def refresh(
             synthesize=synthesize,
             provider=provider,
             model=model,
+            token_budget=token_budget,
             base_url=base_url,
             _allow_fallback=_mode_hops < 4,
             _mode_hops=_mode_hops + 1,
