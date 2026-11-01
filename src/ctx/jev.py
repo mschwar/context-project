@@ -22,6 +22,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 import time
 import urllib.error
@@ -32,16 +33,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-import yaml
-
-from ctx.config import _iter_config_dirs
+from ctx.config import load_config
 from ctx.lock import release_os_lock, try_acquire_os_lock
 
 DEFAULT_JEV_BASE_URL = "https://api.typesafe.ai"
 DEFAULT_JEV_MODEL = "jev-1.13.0"
-DEFAULT_JEV_VAULT_REF = "op://Homelab-Agents/vu7obpt7x2uzfzhknkkqx7iexa/credential"
-DEFAULT_KEYCHAIN_SERVICE = "typesafe-api"
-DEFAULT_KEYCHAIN_ACCOUNT = "machina"
 JEV_TIMEOUT_SECONDS = 10.0
 JEV_USD_PER_INPUT_TOKEN = 0.042 / 1_000_000
 
@@ -218,10 +214,10 @@ def _rule_invariant_drift_material(state: dict[str, Any]) -> bool:
 
 def _pre_subsystem_arch_role(state: dict[str, Any]) -> str | None:
     raw_path = str(state.get("path") or "").strip().lower().strip("/")
-    parts = [p for p in raw_path.split("/") if p and p != "."]
-    if any(p in {"tests", "test", "benchmarks", "benchmark", "qa", "e2e"} for p in parts):
+    tokens = {tok for tok in re.split(r"[/_\-.]+", raw_path) if tok}
+    if tokens & {"tests", "test", "benchmarks", "benchmark", "qa", "e2e", "specs", "fixtures"}:
         return "verification_tooling"
-    if any(p in {"docs", "doc", "adr", "adrs", "documents", "archive", "designs"} for p in parts):
+    if tokens & {"docs", "doc", "adr", "adrs", "documents", "archive", "designs", "rfcs"}:
         return "docs_governance"
     return None
 
@@ -230,7 +226,8 @@ def _rule_subsystem_arch_role(state: dict[str, Any]) -> str:
     pre = _pre_subsystem_arch_role(state)
     if pre is not None:
         return pre
-    raw_path = str(state.get("path") or "").strip().lower()
+    raw_path = str(state.get("path") or "").strip().lower().strip("/")
+    path_tokens = {tok for tok in re.split(r"[/_\-.]+", raw_path) if tok}
     symbols = " ".join(str(s).lower() for s in (state.get("key_symbols") or []))
     ext_deps = {str(d).lower() for d in (state.get("external_deps") or [])}
     surfaces = {str(k).lower() for k in (state.get("operational_surface_kinds") or [])}
@@ -239,17 +236,17 @@ def _rule_subsystem_arch_role(state: dict[str, Any]) -> str:
     if not langs or langs <= {"markdown"}:
         if raw_path in {".", ""} and not symbols:
             return "docs_governance"
-    if surfaces & {"cli_command", "http_route", "mcp_tool", "mcp_resource"} or any(
-        tok in raw_path for tok in ("cli", "cmd", "server", "routes", "web", "ui", "mcp")
+    if ext_deps & {"anthropic", "openai", "httpx", "requests", "boto3", "psycopg", "redis", "sqlalchemy"} or (
+        path_tokens & {"adapter", "adapters", "provider", "providers", "client", "clients", "git", "hook", "hooks", "storage", "db", "connector", "connectors"}
     ):
-        if "core" not in raw_path and "engine" not in raw_path:
-            return "entrypoint_interface"
-    if ext_deps & {"anthropic", "openai", "httpx", "requests", "boto3", "psycopg", "redis", "sqlalchemy"} or any(
-        tok in raw_path for tok in ("adapter", "provider", "client", "git", "hook", "storage", "db")
-    ):
-        if "core" not in raw_path and "domain" not in raw_path:
+        if not (path_tokens & {"core", "domain"}):
             return "adapter_integration"
-    if any(tok in raw_path for tok in ("util", "utils", "common", "shared", "helper", "config", "types")):
+    if surfaces & {"cli_command", "http_route", "mcp_tool", "mcp_resource"} or (
+        path_tokens & {"cli", "cmd", "server", "routes", "web", "ui", "mcp", "frontend"}
+    ):
+        if not (path_tokens & {"core", "engine"}):
+            return "entrypoint_interface"
+    if path_tokens & {"util", "utils", "common", "shared", "helper", "helpers", "config", "types"}:
         return "shared_utility"
     if symbols or langs:
         return "core_domain"
@@ -526,25 +523,16 @@ def effective_jev_mode(root: Path | None = None) -> str:
             return cleaned
     if root is not None and root.exists():
         start_dir = root.resolve() if root.is_dir() else root.resolve().parent
-        for directory in _iter_config_dirs(start_dir):
-            cfg_path = directory / ".ctxconfig"
-            if not cfg_path.is_file():
-                continue
-            try:
-                data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-            except Exception:
-                break
-            if isinstance(data, dict) and "jev_mode" in data and data["jev_mode"] is not None:
-                raw = data["jev_mode"]
-                if isinstance(raw, bool):
-                    return "auto" if raw else "off"
-                cleaned = str(raw).strip().lower()
-                if cleaned in _DISABLED_TOKENS:
-                    return "off"
-                if cleaned in _MODE_TO_LADDER:
-                    return cleaned
-                return "auto"
-            break
+        try:
+            cfg = load_config(start_dir, require_api_key=False)
+            cleaned = str(cfg.jev_mode or "auto").strip().lower()
+            if cleaned in _DISABLED_TOKENS:
+                return "off"
+            if cleaned in _MODE_TO_LADDER:
+                return cleaned
+            return "auto"
+        except Exception:
+            return "auto"
     return "auto"
 
 
@@ -568,28 +556,24 @@ def _resolve_api_key(*, allow_vault: bool = False) -> str | None:
     }
     if not use_vault:
         return None
-    vault_ref = os.environ.get("CTX_JEV_OP_REF", DEFAULT_JEV_VAULT_REF).strip()
-    commands: list[list[str]] = []
-    if vault_ref and vault_ref.lower() not in _DISABLED_TOKENS:
-        commands.append(["op", "read", vault_ref])
-    commands.append(
-        [
-            "security",
-            "find-generic-password",
-            "-s",
-            DEFAULT_KEYCHAIN_SERVICE,
-            "-a",
-            DEFAULT_KEYCHAIN_ACCOUNT,
-            "-w",
-        ]
+    vault_ref = (
+        os.environ.get("CTX_JEV_OP_REF", "").strip()
+        or os.environ.get("TYPESAFE_OP_REF", "").strip()
     )
-    for cmd in commands:
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=False)
-        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired, OSError):
-            continue
-        if proc.returncode == 0 and proc.stdout.strip():
-            return proc.stdout.strip()
+    if not vault_ref or vault_ref.lower() in _DISABLED_TOKENS:
+        return None
+    try:
+        proc = subprocess.run(
+            ["op", "read", vault_ref],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip()
     return None
 
 
@@ -926,23 +910,30 @@ def append_decision_traces(root: Path, records: list[dict[str, Any]]) -> list[di
         if fd is not None:
             break
         time.sleep(0.01)
+    if fd is None:
+        raise OSError("Timed out acquiring Jev trace guard lock")
 
     try:
-        existing_count = 0
+        existing_count: int | None = 0
         if trace_file.is_file():
-            with trace_file.open("r", encoding="utf-8") as fh:
-                existing_count = sum(1 for line in fh if line.strip())
+            st_size = trace_file.stat().st_size
+            if st_size <= 262_144:
+                with trace_file.open("r", encoding="utf-8") as fh:
+                    existing_count = sum(1 for line in fh if line.strip())
+            else:
+                existing_count = None
         written: list[dict[str, Any]] = []
         with trace_file.open("a", encoding="utf-8") as fh:
             for offset, rec in enumerate(records, start=1):
-                entry = {"ts": _utc_now(), **rec, "sequence": existing_count + offset}
+                entry: dict[str, Any] = {"ts": _utc_now(), **rec}
+                if existing_count is not None:
+                    entry["sequence"] = existing_count + offset
                 fh.write(_canonical_json(entry) + "\n")
                 written.append(entry)
             fh.flush()
         return written
     finally:
-        if fd is not None:
-            release_os_lock(fd)
+        release_os_lock(fd)
 
 
 def read_decision_traces(root: Path) -> list[dict[str, Any]]:
@@ -1236,6 +1227,61 @@ GOLD_EVAL_CASES: list[dict[str, Any]] = [
             "detail": "Analyze directed dependency blast radius and coupled tests",
         },
     },
+    # 4. Held-out segment-disambiguation & non-pre-rule cases
+    {
+        "case_id": "role_06_api_client_segment_disambiguation",
+        "head_id": "subsystem_arch_role",
+        "expected": "adapter_integration",
+        "state": {
+            "path": "src/api_client",
+            "file_count": 3,
+            "languages": ["Python"],
+            "key_symbols": ["http_transport.py:class RemoteApiClient"],
+            "internal_deps": ["app.models"],
+            "external_deps": ["httpx"],
+            "operational_surface_kinds": [],
+        },
+    },
+    {
+        "case_id": "role_07_build_guide_core_disambiguation",
+        "head_id": "subsystem_arch_role",
+        "expected": "core_domain",
+        "state": {
+            "path": "src/query_builder",
+            "file_count": 5,
+            "languages": ["Python"],
+            "key_symbols": ["planner.py:class QueryPlanCompiler", "feedback_loop.py:fn rank_results"],
+            "internal_deps": ["app.ast_nodes"],
+            "external_deps": [],
+            "operational_surface_kinds": [],
+        },
+    },
+    {
+        "case_id": "drift_06_localized_color_formatter",
+        "head_id": "invariant_drift_material",
+        "expected": False,
+        "state": {
+            "repo_name": "ctx-tool",
+            "boundary_docs_changed": [],
+            "entrypoints_changed": [],
+            "operational_surfaces_changed": [],
+            "added_symbols": ["table_printer.py:fn pad_cell_width"],
+            "removed_symbols": [],
+            "changed_imports": [],
+            "touched_subsystems": ["src/ctx"],
+        },
+    },
+    {
+        "case_id": "surface_05_public_http_route",
+        "head_id": "operational_surface_exposure",
+        "expected": "public_contract",
+        "state": {
+            "kind": "http_route",
+            "name": "GET /mcp/context/{directory}",
+            "file": "src/ctx/server.py",
+            "detail": "FastAPI GET route returning directory CONTEXT.md",
+        },
+    },
 ]
 
 
@@ -1276,6 +1322,8 @@ def evaluate_heads(
     total_tokens = 0
     total_cost = 0.0
     latencies: list[float] = []
+    pre_rule_hits = 0
+    live_model_calls = 0
 
     for case in selected_cases:
         hid = case["head_id"]
@@ -1293,6 +1341,11 @@ def evaluate_heads(
             )[hid]
 
         abstained = bool(res["abstained"])
+        conf_src = str(res.get("confidence_source") or "")
+        if conf_src.startswith("pre_rule:"):
+            pre_rule_hits += 1
+        elif provider == "jev" and not abstained:
+            live_model_calls += 1
         correct = (not abstained) and (res["output"] == case["expected"])
         brier = None if abstained else _brier_contribution(head, res["distribution"], case["expected"])
         if brier is not None:
@@ -1354,9 +1407,12 @@ def evaluate_heads(
 
     return {
         "provider": provider,
+        "skip_pre_rule": skip_pre_rule_for_jev,
         "total": total,
         "evaluated": evaluated,
         "abstained": abstained_total,
+        "pre_rule_hits": pre_rule_hits,
+        "live_model_calls": live_model_calls,
         "coverage": round(evaluated / total, 4) if total else 0.0,
         "accuracy": round(correct_total / evaluated, 4) if evaluated else None,
         "brier_score": round(sum(brier_scores) / len(brier_scores), 6) if brier_scores else None,

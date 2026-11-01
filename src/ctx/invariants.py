@@ -195,6 +195,22 @@ def load_cached_invariants(root: Path) -> dict[str, Any] | None:
         return None
 
 
+def has_cached_synthesis_for_hashes(
+    root: Path,
+    structural_hash: str,
+    boundary_doc_hash: str,
+) -> bool:
+    """Return True if `.ctx/invariants.json` already recorded a synthesis attempt for these hashes."""
+    cached = load_cached_invariants(root)
+    if not isinstance(cached, dict):
+        return False
+    return (
+        cached.get("structural_hash") == structural_hash
+        and cached.get("boundary_doc_hash") == boundary_doc_hash
+        and bool(cached.get("attempted", bool(cached.get("invariants"))))
+    )
+
+
 def _normalize_invariants_list(raw_items: Any) -> list[dict[str, str]]:
     if not isinstance(raw_items, list):
         return []
@@ -310,6 +326,7 @@ def _persist_invariants_cache(
     cache_file = invariants_cache_path(root)
     record = {
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "attempted": True,
         "structural_hash": skeleton.structural_hash,
         "boundary_doc_hash": skeleton.boundary_doc_hash,
         "model": model,
@@ -337,10 +354,11 @@ def synthesize_tier2_invariants(
     cached = load_cached_invariants(resolved_root)
     cached_invs = _normalize_invariants_list(cached.get("invariants")) if cached else []
     cached_model = str(cached.get("model") or "") if cached else ""
+    already_attempted = bool(cached.get("attempted", bool(cached_invs))) if cached else False
 
     # Stage 1 (`code`): exact structural_hash + boundary_doc_hash match -> 0 tokens
     hash_source = cached if (cached and cached.get("structural_hash")) else prev_metadata
-    if not force and cached_invs and not should_invoke_llm(hash_source, skeleton):
+    if not force and already_attempted and not should_invoke_llm(hash_source, skeleton):
         return InvariantSynthesisResult(
             invariants=cached_invs,
             gate_action="cached_structural_match",
@@ -400,6 +418,17 @@ def synthesize_tier2_invariants(
         except (MissingApiKeyError, ModuleNotFoundError, ImportError, Exception) as exc:
             if isinstance(exc, LockSupersededError):
                 raise
+            try:
+                _persist_invariants_cache(
+                    resolved_root,
+                    skeleton,
+                    cached_invs,
+                    model=cached_model,
+                    tokens_used=0,
+                    gate_action="llm_unavailable_fallback",
+                )
+            except OSError:
+                pass
             return InvariantSynthesisResult(
                 invariants=cached_invs,
                 gate_action="llm_unavailable_fallback",
@@ -424,6 +453,17 @@ def synthesize_tier2_invariants(
     except LockSupersededError:
         raise
     except Exception as exc:
+        try:
+            _persist_invariants_cache(
+                resolved_root,
+                skeleton,
+                cached_invs,
+                model=cached_model,
+                tokens_used=0,
+                gate_action="llm_unavailable_fallback",
+            )
+        except OSError:
+            pass
         return InvariantSynthesisResult(
             invariants=cached_invs,
             gate_action="llm_unavailable_fallback",

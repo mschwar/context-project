@@ -1,18 +1,18 @@
 ---
-generated: '2026-11-01T03:21:14Z'
+generated: '2026-11-01T03:52:27Z'
 generator: ctx/1.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:e12b9cbcfcd23d646e5666af1249e70f4551b362d560cb0015a41dc23ead32c9
+content_hash: sha256:8dc91c0105603b4577334fa81c50bd71da61fc215e34ba5446c58c5e232f71aa
 files: 1
 dirs: 0
-tokens_total: 1334
+tokens_total: 1524
 ---
 # docs/benchmarks
 
-Empirical agent navigation, token-efficiency, and blast-radius benchmark reports for ctx.
+Reproducible deterministic static-oracle navigation, token-efficiency, and blast-radius benchmark reports for ctx.
 
 ## Files
-- **phase27-1-navigation-benchmark.md** — Reproducible Phase 27.1 A/B/C agent navigation and blast-radius benchmark report across context-project, project-ledger, and machina.
+- **phase27-1-navigation-benchmark.md** — Reproducible Phase 27.1 deterministic static-oracle A/B/C navigation and blast-radius benchmark report across context-project, project-ledger, and machina.
 
 ## Subdirectories
 - None

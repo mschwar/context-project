@@ -105,17 +105,6 @@ def _build_polyglot_surface_repo(root: Path) -> Path:
         "from demo.store import CoreLedgerStore\n\n"
         "def build_parser() -> argparse.ArgumentParser:\n"
         '    parser = argparse.ArgumentParser(prog="admin-tool")\n'
-        "    sub = parser.add_subparsers(dest='cmd')\n"
-        '    p_ audit = sub.add_parser("audit")\n'
-        "    return parser\n",
-        encoding="utf-8",
-    )
-    # Fix valid identifier in admin_tool.py
-    (scripts_dir / "admin_tool.py").write_text(
-        "import argparse\n"
-        "from demo.store import CoreLedgerStore\n\n"
-        "def build_parser() -> argparse.ArgumentParser:\n"
-        '    parser = argparse.ArgumentParser(prog="admin-tool")\n'
         '    parser.add_argument("--dry-run", action="store_true")\n'
         "    sub = parser.add_subparsers(dest='cmd')\n"
         '    p_audit = sub.add_parser("audit")\n'

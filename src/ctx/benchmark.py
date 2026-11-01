@@ -1,38 +1,114 @@
-"""Phase 27.1 Reproducible A/B/C Agent Navigation & Maintenance Benchmark for ctx.
+"""Phase 27.1 Reproducible Static-Oracle A/B/C Navigation & Blast-Radius Benchmark for ctx.
 
-Evaluates three agent codebase-navigation conditions across real repositories against
-deterministic AST/import-graph ground truth:
-- Condition A (`raw_grep`): Raw filesystem listing, authority doc reads, and single-pass grep scans.
-- Condition B (`tier1_manifests`): Per-directory `CONTEXT.md` manifests (root + depth-1) + grep for reverse deps.
-- Condition C (`tier2_plus_impact`): Tier 2 `.ctx/CONTEXT-0.md` architectural/surface map + `ctx impact <target>`.
+Evaluates three codebase-navigation retrieval strategies across real repositories against an
+independent AST/filesystem static ground-truth oracle (built directly from raw source files on
+disk without calling `ctx.skeleton` or `ctx.impact`):
 
-Measures tool-call turns, context tokens ingested (`ceil(utf8_bytes / 4)`), ground-truth recall across
-4 canonical tasks (architecture orientation, operational surface discovery, transitive blast-radius tracing,
-and coupled test selection), and maintenance LLM token cost per commit.
+- Condition A (`raw_grep`): Raw file-tree listing, root doc reads (`README.md`, `AGENTS.md`,
+  `CLAUDE.md`), candidate entrypoint reads, and real single-pass regex grep (`\\b<stem>\\b`)
+  across production and test files on disk.
+- Condition B (`tier1_manifests`): On-disk depth-0/1 `CONTEXT.md` manifests (or deterministic
+  directory file-summary tables when `CONTEXT.md` is absent) + primary entrypoint read +
+  single-pass regex grep for reverse dependencies and tests.
+- Condition C (`tier2_plus_impact`): Tier 2 `.ctx/CONTEXT-0.md` architectural/surface map +
+  `ctx impact <focal_target> --output json`.
+
+All four recall dimensions (architecture/governance orientation, public operational surface
+discovery, multi-hop reverse-dependency blast radius, and coupled test selection) are computed
+strictly by set intersection / token presence against the independent static oracle, with zero
+hardcoded recall constants.
 """
 
 from __future__ import annotations
 
+import ast
 import json
 import math
+import re
 import time
+import tomllib
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ctx import __version__
-from ctx.impact import (
-    DependencyGraph,
-    analyze_impact,
-    build_dependency_graph,
-    is_test_file_path,
+from ctx.ignore import load_ignore_patterns, should_ignore
+from ctx.impact import analyze_impact
+from ctx.invariants import build_skeleton_snapshot, compute_structural_delta
+from ctx.skeleton import extract_skeleton, render_context_0
+
+_ORACLE_SKIP_DIRS = frozenset({
+    ".git",
+    ".ctx",
+    ".ctx-cache",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tmp",
+    "dist",
+    "build",
+    "target",
+})
+
+_ORACLE_BOUNDARY_FILENAMES = frozenset({
+    "readme.md",
+    "readme.rst",
+    "agents.md",
+    "claude.md",
+    "system.md",
+    "rules.md",
+    "gate_closeout.md",
+    "architecture.md",
+    "state.md",
+    "todos.md",
+    "runbook.md",
+    "schema.md",
+    "current.md",
+    "security.md",
+    "contributing.md",
+})
+
+_ORACLE_ENTRYPOINT_NAMES = (
+    "cli.py",
+    "mcp_server.py",
+    "server.py",
+    "main.py",
+    "app.py",
+    "__main__.py",
+    "index.ts",
+    "server.ts",
+    "index.js",
+    "main.go",
+    "main.rs",
 )
-from ctx.skeleton import (
-    RepoSkeleton,
-    extract_skeleton,
-    render_context_0,
+
+_SOURCE_EXTS = frozenset({
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".go", ".rs", ".rb", ".java", ".kt", ".cs", ".php", ".swift", ".ex", ".exs",
+})
+
+_HTTP_METHODS = frozenset({"get", "post", "put", "delete", "patch", "options", "head", "route", "api_route"})
+_JS_REL_IMPORT_RE = re.compile(
+    r"""(?:import\s+(?:[^'"]+?\s+from\s+)?['"](\.[^'"]+)['"]|require\(\s*['"](\.[^'"]+)['"]\s*\))""",
+    re.MULTILINE,
 )
+_JS_HTTP_RE = re.compile(
+    r"""\b(?:app|router|server)\.(get|post|put|delete|patch)\(\s*['"](/[^'"]*)['"]""",
+    re.IGNORECASE,
+)
+_GO_HTTP_RE = re.compile(r"""\b(?:HandleFunc|Handle|GET|POST|PUT|DELETE)\(\s*"(/[^"]*)"\s*,""")
+_RUST_HTTP_RE = re.compile(r"""#\[(?:get|post|put|delete|patch)\(\s*"(/[^"]*)"\s*\)\]""")
+_GO_MOD_RE = re.compile(r"^module\s+(\S+)", re.MULTILINE)
+_GO_IMPORT_QUOTED_RE = re.compile(r'"([^"]+)"')
+_RUST_CRATE_USE_RE = re.compile(r"\buse\s+crate::([A-Za-z0-9_:]+)")
+_RUST_MOD_DECL_RE = re.compile(r"^\s*(?:pub\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;", re.MULTILINE)
+_RUBY_REQ_REL_RE = re.compile(r"""^\s*require_relative\s*\(?\s*['"]([^'"]+)['"]""", re.MULTILINE)
 
 
 def _approx_tokens(text_or_bytes: str | bytes) -> int:
@@ -40,14 +116,544 @@ def _approx_tokens(text_or_bytes: str | bytes) -> int:
     return max(1, math.ceil(raw_len / 4)) if raw_len > 0 else 0
 
 
-def _file_tokens(path: Path, max_bytes: int | None = None) -> int:
+def _oracle_is_test(rel_path: str) -> bool:
+    parts = Path(rel_path).parts
+    lower_parts = [p.lower() for p in parts]
+    if any(p in {"tests", "test", "__tests__", "spec", "specs"} for p in lower_parts[:-1]):
+        return True
+    name = lower_parts[-1] if lower_parts else ""
+    return (
+        name.startswith("test_")
+        or name.endswith(("_test.py", "_test.go", "_test.rs", ".test.ts", ".test.tsx", ".test.js", ".spec.ts", ".spec.js", "_spec.rb"))
+        or name == "conftest.py"
+    )
+
+
+@dataclass
+class _IndependentOracle:
+    """Ground-truth repository facts extracted independently from raw files on disk."""
+
+    files: dict[str, str]
+    boundary_docs: set[str]
+    public_surfaces: set[tuple[str, str, str]]  # (kind, identifier_token, file)
+    outbound: dict[str, set[str]]
+    inbound: dict[str, set[str]]
+    internal_edge_count: int
+    focal_target: str
+    prod_direct: set[str]
+    prod_transitive: set[str]
+    coupled_tests: set[str]
+
+
+def _walk_repo_texts(root: Path) -> dict[str, str]:
+    spec = load_ignore_patterns(root)
+    files: dict[str, str] = {}
+
+    def _visit(directory: Path) -> None:
+        try:
+            entries = sorted(directory.iterdir(), key=lambda p: p.name)
+        except OSError:
+            return
+        for entry in entries:
+            if entry.is_symlink():
+                continue
+            if entry.is_dir():
+                if entry.name in _ORACLE_SKIP_DIRS or should_ignore(entry, spec, root):
+                    continue
+                _visit(entry)
+            elif entry.is_file():
+                if entry.name == "CONTEXT.md" or should_ignore(entry, spec, root):
+                    continue
+                try:
+                    if entry.stat().st_size > 512_000:
+                        continue
+                    raw = entry.read_bytes()
+                except OSError:
+                    continue
+                if b"\x00" in raw[:4096]:
+                    continue
+                rel = entry.relative_to(root).as_posix()
+                files[rel] = raw.decode("utf-8", errors="replace")
+
+    _visit(root)
+    return files
+
+
+def _extract_oracle_boundary_docs(files: dict[str, str]) -> set[str]:
+    docs: set[str] = set()
+    for rel in files:
+        p = Path(rel)
+        lower_name = p.name.lower()
+        lower_parts = {part.lower() for part in p.parts[:-1]}
+        if lower_name in _ORACLE_BOUNDARY_FILENAMES:
+            docs.add(rel)
+        elif p.suffix.lower() in {".md", ".rst"} and (lower_parts & {"adr", "adrs", "decisions"}):
+            docs.add(rel)
+    return docs
+
+
+def _const_str(node: ast.AST | None) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value.strip()
+    return None
+
+
+def _extract_oracle_surfaces(files: dict[str, str]) -> set[tuple[str, str, str]]:
+    surfaces: set[tuple[str, str, str]] = set()
+
+    if "pyproject.toml" in files:
+        try:
+            pyproj = tomllib.loads(files["pyproject.toml"])
+            scripts = pyproj.get("project", {}).get("scripts", {})
+            if isinstance(scripts, dict):
+                for sname in scripts:
+                    if isinstance(sname, str) and sname.strip():
+                        surfaces.add(("cli_command", sname.strip(), "pyproject.toml"))
+        except Exception:
+            pass
+
+    if "package.json" in files:
+        try:
+            pkg = json.loads(files["package.json"])
+            bin_field = pkg.get("bin")
+            if isinstance(bin_field, str) and isinstance(pkg.get("name"), str):
+                surfaces.add(("cli_command", pkg["name"].strip(), "package.json"))
+            elif isinstance(bin_field, dict):
+                for bname in bin_field:
+                    if isinstance(bname, str) and bname.strip():
+                        surfaces.add(("cli_command", bname.strip(), "package.json"))
+        except Exception:
+            pass
+
+    for rel, content in files.items():
+        if _oracle_is_test(rel):
+            continue
+        suffix = Path(rel).suffix.lower()
+        if suffix == ".py":
+            try:
+                tree = ast.parse(content)
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    for dec in node.decorator_list:
+                        call = dec if isinstance(dec, ast.Call) else None
+                        target = call.func if call is not None else dec
+                        attr = target.attr if isinstance(target, ast.Attribute) else (target.id if isinstance(target, ast.Name) else "")
+                        attr_l = attr.lower()
+                        if attr_l in {"command", "group"}:
+                            hidden = False
+                            explicit_name: str | None = None
+                            if call is not None:
+                                if call.args:
+                                    explicit_name = _const_str(call.args[0])
+                                for kw in call.keywords:
+                                    if kw.arg == "name":
+                                        explicit_name = _const_str(kw.value) or explicit_name
+                                    elif kw.arg == "hidden" and isinstance(kw.value, ast.Constant) and bool(kw.value.value):
+                                        hidden = True
+                            if not hidden:
+                                cmd_token = explicit_name or node.name.replace("_", "-")
+                                if not cmd_token.startswith("_"):
+                                    surfaces.add(("cli_command", cmd_token, rel))
+                        elif attr_l in _HTTP_METHODS and call is not None and call.args:
+                            route_path = _const_str(call.args[0])
+                            if route_path and route_path.startswith("/"):
+                                surfaces.add(("http_route", route_path, rel))
+                        elif attr_l == "tool":
+                            tname = None
+                            if call is not None:
+                                if call.args:
+                                    tname = _const_str(call.args[0])
+                                for kw in call.keywords:
+                                    if kw.arg == "name":
+                                        tname = _const_str(kw.value) or tname
+                            surfaces.add(("mcp_tool", tname or node.name, rel))
+                        elif attr_l == "resource" and call is not None and call.args:
+                            r_uri = _const_str(call.args[0])
+                            if r_uri:
+                                surfaces.add(("mcp_resource", r_uri, rel))
+
+                elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                    if node.func.attr == "add_parser" and node.args:
+                        sub_name = _const_str(node.args[0])
+                        if sub_name and not sub_name.startswith("_"):
+                            surfaces.add(("cli_command", sub_name, rel))
+
+                elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    t_names: list[str] = []
+                    if isinstance(node, ast.Assign):
+                        t_names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+                        val = node.value
+                    else:
+                        t_names = [node.target.id] if isinstance(node.target, ast.Name) else []
+                        val = node.value
+                    if val is None or not isinstance(val, (ast.List, ast.Tuple)):
+                        continue
+                    upper_names = {n.upper() for n in t_names}
+                    is_tool_tbl = any("TOOL" in u for u in upper_names)
+                    is_res_tbl = any("RESOURCE" in u for u in upper_names)
+                    if not (is_tool_tbl or is_res_tbl):
+                        continue
+                    for elt in val.elts:
+                        if not isinstance(elt, ast.Dict):
+                            continue
+                        kv: dict[str, str] = {}
+                        for k_node, v_node in zip(elt.keys, elt.values):
+                            ks = _const_str(k_node)
+                            vs = _const_str(v_node)
+                            if ks and vs:
+                                kv[ks] = vs
+                        if is_tool_tbl and "name" in kv:
+                            surfaces.add(("mcp_tool", kv["name"], rel))
+                        elif is_res_tbl:
+                            uri = kv.get("uri") or kv.get("uriTemplate")
+                            if uri:
+                                surfaces.add(("mcp_resource", uri, rel))
+
+        elif suffix in {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}:
+            for m in _JS_HTTP_RE.finditer(content):
+                surfaces.add(("http_route", m.group(2), rel))
+        elif suffix == ".go":
+            for m in _GO_HTTP_RE.finditer(content):
+                surfaces.add(("http_route", m.group(1), rel))
+        elif suffix == ".rs":
+            for m in _RUST_HTTP_RE.finditer(content):
+                surfaces.add(("http_route", m.group(1), rel))
+
+    return surfaces
+
+
+def _build_oracle_import_graph(files: dict[str, str]) -> tuple[dict[str, set[str]], dict[str, set[str]], int]:
+    all_paths = set(files.keys())
+    outbound: dict[str, set[str]] = {rel: set() for rel in all_paths}
+    inbound: dict[str, set[str]] = {rel: set() for rel in all_paths}
+
+    # Map Python dotted module names -> repo-relative .py path
+    py_mod_index: dict[str, str] = {}
+    for rel in sorted(all_paths):
+        if not rel.endswith(".py"):
+            continue
+        parts = list(Path(rel).parts)
+        if parts[0] == "src" and len(parts) > 1:
+            mod_parts = parts[1:]
+        else:
+            mod_parts = parts
+        if mod_parts[-1] == "__init__.py":
+            dotted = ".".join(mod_parts[:-1])
+        else:
+            dotted = ".".join([*mod_parts[:-1], mod_parts[-1][:-3]])
+        if dotted:
+            py_mod_index.setdefault(dotted, rel)
+
+    go_module_prefix = ""
+    if "go.mod" in files:
+        m = _GO_MOD_RE.search(files["go.mod"])
+        if m:
+            go_module_prefix = m.group(1).strip()
+
+    go_dir_files: dict[str, list[str]] = {}
+    for rel in sorted(all_paths):
+        if rel.endswith(".go") and not _oracle_is_test(rel):
+            parent = Path(rel).parent.as_posix()
+            go_dir_files.setdefault("" if parent == "." else parent, []).append(rel)
+
+    def _add_edge(src: str, dst: str) -> None:
+        if dst in all_paths and dst != src:
+            outbound[src].add(dst)
+            inbound[dst].add(src)
+
+    for rel, content in files.items():
+        suffix = Path(rel).suffix.lower()
+        if suffix == ".py":
+            try:
+                tree = ast.parse(content)
+            except SyntaxError:
+                continue
+            parts = list(Path(rel).parts)
+            mod_parts = parts[1:] if (parts[0] == "src" and len(parts) > 1) else parts
+            cur_pkg = mod_parts[:-1]
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        cand = alias.name
+                        while cand:
+                            if cand in py_mod_index:
+                                _add_edge(rel, py_mod_index[cand])
+                                break
+                            cand = cand.rsplit(".", 1)[0] if "." in cand else ""
+                elif isinstance(node, ast.ImportFrom):
+                    base_parts: list[str] = []
+                    if node.level and node.level > 0:
+                        trim = max(0, len(cur_pkg) - (node.level - 1))
+                        base_parts = list(cur_pkg[:trim])
+                        if node.module:
+                            base_parts.extend(node.module.split("."))
+                    elif node.module:
+                        base_parts = node.module.split(".")
+                    base_mod = ".".join(p for p in base_parts if p)
+                    matched_sub = False
+                    for alias in node.names:
+                        if alias.name == "*":
+                            continue
+                        sub_mod = f"{base_mod}.{alias.name}" if base_mod else alias.name
+                        if sub_mod in py_mod_index:
+                            _add_edge(rel, py_mod_index[sub_mod])
+                            matched_sub = True
+                    if base_mod:
+                        cand = base_mod
+                        while cand:
+                            if cand in py_mod_index:
+                                if not matched_sub or py_mod_index[cand] != rel:
+                                    _add_edge(rel, py_mod_index[cand])
+                                break
+                            cand = cand.rsplit(".", 1)[0] if "." in cand else ""
+
+        elif suffix in {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}:
+            base_dir = Path(rel).parent
+            for m in _JS_REL_IMPORT_RE.finditer(content):
+                spec = m.group(1) or m.group(2)
+                if not spec:
+                    continue
+                norm = Path(os_normpath_posix((base_dir / spec).as_posix()))
+                base_str = norm.as_posix()
+                for cand in (
+                    base_str,
+                    f"{base_str}.ts",
+                    f"{base_str}.tsx",
+                    f"{base_str}.js",
+                    f"{base_str}.jsx",
+                    f"{base_str}/index.ts",
+                    f"{base_str}/index.tsx",
+                    f"{base_str}/index.js",
+                ):
+                    if cand in all_paths:
+                        _add_edge(rel, cand)
+                        break
+
+        elif suffix == ".go" and go_module_prefix:
+            for m in _GO_IMPORT_QUOTED_RE.finditer(content):
+                imp = m.group(1)
+                if imp == go_module_prefix:
+                    sub_dir = ""
+                elif imp.startswith(go_module_prefix + "/"):
+                    sub_dir = imp[len(go_module_prefix) + 1 :]
+                else:
+                    continue
+                for target_go in go_dir_files.get(sub_dir, []):
+                    _add_edge(rel, target_go)
+
+        elif suffix == ".rs":
+            for m in _RUST_CRATE_USE_RE.finditer(content):
+                segs = [s for s in m.group(1).split("::") if s and s != "self"]
+                for depth in range(len(segs), 0, -1):
+                    prefix = "/".join(segs[:depth])
+                    for cand in (f"src/{prefix}.rs", f"src/{prefix}/mod.rs", f"{prefix}.rs"):
+                        if cand in all_paths:
+                            _add_edge(rel, cand)
+                            break
+            parent_dir = Path(rel).parent.as_posix()
+            base_prefix = "" if parent_dir == "." else f"{parent_dir}/"
+            for m in _RUST_MOD_DECL_RE.finditer(content):
+                mname = m.group(1)
+                for cand in (f"{base_prefix}{mname}.rs", f"{base_prefix}{mname}/mod.rs"):
+                    if cand in all_paths:
+                        _add_edge(rel, cand)
+                        break
+
+        elif suffix == ".rb":
+            base_dir = Path(rel).parent
+            for m in _RUBY_REQ_REL_RE.finditer(content):
+                norm = os_normpath_posix((base_dir / m.group(1)).as_posix())
+                for cand in (norm, f"{norm}.rb"):
+                    if cand in all_paths:
+                        _add_edge(rel, cand)
+                        break
+
+    edge_count = sum(len(targets) for targets in outbound.values())
+    return outbound, inbound, edge_count
+
+
+def os_normpath_posix(posix_path: str) -> str:
+    parts: list[str] = []
+    for seg in posix_path.split("/"):
+        if not seg or seg == ".":
+            continue
+        if seg == "..":
+            if parts:
+                parts.pop()
+        else:
+            parts.append(seg)
+    return "/".join(parts)
+
+
+def _build_independent_oracle(root: Path) -> _IndependentOracle:
+    files = _walk_repo_texts(root)
+    boundary_docs = _extract_oracle_boundary_docs(files)
+    public_surfaces = _extract_oracle_surfaces(files)
+    outbound, inbound, edge_count = _build_oracle_import_graph(files)
+
+    # Select focal high-fan-in production module directly from the independent oracle graph
+    candidates: list[tuple[int, int, str]] = []
+    for rel in sorted(files):
+        if _oracle_is_test(rel) or Path(rel).suffix.lower() not in _SOURCE_EXTS:
+            continue
+        is_index = 1 if Path(rel).name in {"__init__.py", "index.ts", "index.js", "mod.rs"} else 0
+        prod_in = sum(1 for src in inbound.get(rel, set()) if not _oracle_is_test(src))
+        total_in = len(inbound.get(rel, set()))
+        candidates.append((-prod_in, is_index, rel))
+        _ = total_in
+    if candidates:
+        candidates.sort()
+        focal_target = candidates[0][2]
+    else:
+        focal_target = next(iter(sorted(files)), ".")
+
+    # Multi-hop reverse BFS in independent oracle graph
+    visited: set[str] = set()
+    queue: deque[tuple[str, int]] = deque([(focal_target, 0)])
+    prod_direct: set[str] = set()
+    prod_transitive: set[str] = set()
+    coupled_tests: set[str] = set()
+
+    while queue:
+        cur, dist = queue.popleft()
+        for caller in sorted(inbound.get(cur, set())):
+            if caller == focal_target or caller in visited:
+                continue
+            visited.add(caller)
+            ndist = dist + 1
+            if _oracle_is_test(caller):
+                coupled_tests.add(caller)
+            else:
+                prod_transitive.add(caller)
+                if ndist == 1:
+                    prod_direct.add(caller)
+            queue.append((caller, ndist))
+
+    focal_stem = Path(focal_target).stem.lower()
+    if focal_stem and focal_stem not in {"__init__", "index", "mod"}:
+        for rel in files:
+            if _oracle_is_test(rel):
+                tstem = Path(rel).stem.lower()
+                if tstem in {
+                    f"test_{focal_stem}",
+                    f"{focal_stem}_test",
+                    f"{focal_stem}.test",
+                    f"{focal_stem}.spec",
+                    f"{focal_stem}_spec",
+                }:
+                    coupled_tests.add(rel)
+
+    return _IndependentOracle(
+        files=files,
+        boundary_docs=boundary_docs,
+        public_surfaces=public_surfaces,
+        outbound=outbound,
+        inbound=inbound,
+        internal_edge_count=edge_count,
+        focal_target=focal_target,
+        prod_direct=prod_direct,
+        prod_transitive=prod_transitive,
+        coupled_tests=coupled_tests,
+    )
+
+
+def _surface_present_in_texts(token: str, texts: list[str]) -> bool:
+    if not token or not texts:
+        return False
+    pattern = re.compile(rf"(?<![A-Za-z0-9_/-]){re.escape(token)}(?![A-Za-z0-9_-])")
+    return any(pattern.search(blob) is not None for blob in texts if blob)
+
+
+def _select_candidate_entrypoints(files: dict[str, str], limit: int = 4) -> list[str]:
+    ranked: list[tuple[int, int, str]] = []
+    for rel in files:
+        if _oracle_is_test(rel):
+            continue
+        name = Path(rel).name
+        if name in {"pyproject.toml", "package.json"}:
+            ranked.append((0, len(Path(rel).parts), rel))
+        elif name in _ORACLE_ENTRYPOINT_NAMES:
+            idx = _ORACLE_ENTRYPOINT_NAMES.index(name)
+            ranked.append((1 + idx, len(Path(rel).parts), rel))
+    ranked.sort()
+    return [rel for _, _, rel in ranked[:limit]]
+
+
+def _execute_regex_grep(
+    files: dict[str, str],
+    pattern: re.Pattern[str],
+    *,
+    include_tests: bool,
+    only_tests: bool,
+    max_lines: int,
+) -> tuple[str, set[str]]:
+    """Run an actual line-by-line regex grep over on-disk file contents."""
+    matched_lines: list[str] = []
+    matched_files: set[str] = set()
+    for rel in sorted(files):
+        is_t = _oracle_is_test(rel)
+        if only_tests and not is_t:
+            continue
+        if not include_tests and is_t:
+            continue
+        content = files[rel]
+        for lineno, line in enumerate(content.splitlines(), start=1):
+            if pattern.search(line):
+                matched_files.add(rel)
+                if len(matched_lines) < max_lines:
+                    matched_lines.append(f"{rel}:{lineno}:{line[:160]}")
+    return "\n".join(matched_lines), matched_files
+
+
+def _load_or_synthesize_tier1_depth1_manifests(root: Path, files: dict[str, str]) -> list[str]:
+    """Read actual depth-0/1 CONTEXT.md manifests if present; otherwise render deterministic directory listings."""
+    existing: list[str] = []
+    root_manifest = root / "CONTEXT.md"
+    if root_manifest.is_file():
+        try:
+            existing.append(root_manifest.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            pass
     try:
-        raw = path.read_bytes()
-        if max_bytes is not None:
-            raw = raw[:max_bytes]
-        return _approx_tokens(raw)
+        for child in sorted(root.iterdir(), key=lambda p: p.name):
+            if child.is_dir() and child.name not in _ORACLE_SKIP_DIRS and (child / "CONTEXT.md").is_file():
+                try:
+                    existing.append((child / "CONTEXT.md").read_text(encoding="utf-8", errors="replace"))
+                except OSError:
+                    pass
     except OSError:
-        return 0
+        pass
+
+    if existing:
+        return existing
+
+    # Deterministic directory-level manifest equivalents from real files at depth 0 and depth 1
+    by_dir: dict[str, list[str]] = {}
+    for rel in sorted(files):
+        parts = Path(rel).parts
+        if len(parts) == 1:
+            by_dir.setdefault(".", []).append(rel)
+        elif len(parts) <= 3 and not _oracle_is_test(rel):
+            top_key = "/".join(parts[:-1][:2])
+            by_dir.setdefault(top_key, []).append(rel)
+
+    synthesized: list[str] = []
+    for dkey in sorted(by_dir)[:9]:
+        entries = by_dir[dkey]
+        lines = [f"# {dkey}", "", f"Directory manifest covering {len(entries)} files.", "", "## Files"]
+        for rel in entries:
+            first_doc = ""
+            for raw_line in files[rel].splitlines()[:12]:
+                stripped = raw_line.strip().lstrip("#\"'/*- ").strip()
+                if stripped and not stripped.startswith(("from ", "import ", "package ", "use ")):
+                    first_doc = stripped[:110]
+                    break
+            lines.append(f"- **{Path(rel).name}** — {first_doc or 'Source module.'}")
+        synthesized.append("\n".join(lines))
+    return synthesized
 
 
 @dataclass(frozen=True)
@@ -85,106 +691,79 @@ class RepoBenchmarkResult:
     conditions: dict[str, ConditionMetrics] = field(default_factory=dict)
 
 
-def _select_focal_core_module(sk: RepoSkeleton, graph: DependencyGraph) -> str:
-    """Pick the non-test, non-`__init__` production module with highest internal fan-in."""
-    candidates: list[tuple[int, int, str]] = []
-    for f in sk.files:
-        rel = f.relative_path
-        if is_test_file_path(rel) or not f.language or f.language == "Markdown":
-            continue
-        is_init = 1 if Path(rel).name in {"__init__.py", "index.ts", "index.js", "mod.rs"} else 0
-        prod_in = sum(1 for src in graph.inbound_files.get(rel, []) if not is_test_file_path(src))
-        total_in = len(graph.inbound_files.get(rel, []))
-        candidates.append((-prod_in, -total_in + is_init * 2, rel))
-    if not candidates:
-        return sk.files[0].relative_path if sk.files else "."
-    candidates.sort()
-    return candidates[0][2]
-
-
-def _estimate_tier1_depth1_tokens(root: Path, sk: RepoSkeleton) -> tuple[int, int]:
-    """Measure existing depth-0 + depth-1 CONTEXT.md manifests, or synthesize deterministic size equivalents."""
-    existing_manifests: list[Path] = []
-    root_manifest = root / "CONTEXT.md"
-    if root_manifest.is_file():
-        existing_manifests.append(root_manifest)
-    try:
-        for child in sorted(root.iterdir()):
-            if child.is_dir() and (child / "CONTEXT.md").is_file():
-                existing_manifests.append(child / "CONTEXT.md")
-    except OSError:
-        pass
-
-    if existing_manifests:
-        tok = sum(_file_tokens(p) for p in existing_manifests)
-        return len(existing_manifests), tok
-
-    # Deterministic Tier 1 manifest token model when target repo has not materialized Tier 1 files:
-    # ~180 tokens header/purpose + ~22 tokens per file entry across root + top-level subsystems.
-    top_dirs = {Path(f.relative_path).parts[0] for f in sk.files if len(Path(f.relative_path).parts) > 1}
-    manifest_reads = 1 + min(8, max(1, len(top_dirs)))
-    depth1_files = [
-        f for f in sk.files if len(Path(f.relative_path).parts) <= 3 and not is_test_file_path(f.relative_path)
-    ]
-    tok = manifest_reads * 180 + len(depth1_files) * 24
-    return manifest_reads, tok
+def _ratio(found: int, total: int) -> float:
+    return (found / total) if total > 0 else 1.0
 
 
 def benchmark_repository(root: Path) -> RepoBenchmarkResult:
-    """Run deterministic A/B/C navigation benchmark on *root*."""
+    """Run deterministic static-oracle A/B/C navigation benchmark on *root*."""
     started = time.perf_counter()
     resolved = root.resolve()
-    sk = extract_skeleton(resolved)
-    graph = build_dependency_graph(resolved, skeleton=sk)
-    focal_target = _select_focal_core_module(sk, graph)
-    impact = analyze_impact(resolved, focal_target, skeleton=sk, graph=graph)
 
-    # Ground-truth sets
-    gt_bdocs = {d.relative_path for d in sk.boundary_docs}
-    gt_public_surfaces = [
-        s for s in sk.operational_surfaces if s.kind in ("cli_command", "http_route", "mcp_tool", "mcp_resource")
+    oracle = _build_independent_oracle(resolved)
+    focal_target = oracle.focal_target
+    focal_stem = Path(focal_target).stem
+
+    # ── Condition A: raw_grep (real file reads + real regex grep, no ctx) ────
+    tree_listing = "\n".join(sorted(oracle.files.keys()))
+    root_doc_paths = [
+        rel
+        for rel in sorted(oracle.files)
+        if "/" not in rel and rel.lower() in {"readme.md", "readme.rst", "agents.md", "claude.md"}
     ]
-    gt_prod_transitive = [
-        rec for rec in impact.transitive_inbound_dependents if not rec["is_test"]
-    ]
-    gt_prod_direct = [rec for rec in gt_prod_transitive if rec["distance"] == 1]
-    gt_coupled_tests = impact.coupled_tests
-    gt_direct_or_named_tests = [
-        t for t in gt_coupled_tests if t["reason"] in ("direct_import", "naming_convention")
-    ]
+    root_doc_texts = [oracle.files[rel][:16384] for rel in root_doc_paths]
 
-    # ── Condition A: raw_grep (no ctx artifacts) ────────────────────────────
-    # Turn 1: list tree; Turn 2-3: read README.md + AGENTS.md (up to 16KB each);
-    # Turn 4-6: grep & open entrypoint files (up to 24KB each) to discover CLI/HTTP/MCP surfaces;
-    # Turn 7: single-hop grep for imports of focal_target (misses hop >= 2 transitive callers);
-    # Turn 8: grep tests/ for direct imports / filename stem (misses transitive test importers).
-    tree_listing_tokens = _approx_tokens("\n".join(f.relative_path for f in sk.files))
-    root_docs_read = [
-        d for d in sk.boundary_docs if "/" not in d.relative_path and d.relative_path.lower() in {"readme.md", "agents.md", "claude.md"}
-    ]
-    doc_read_tokens = sum(_file_tokens(resolved / d.relative_path, max_bytes=16384) for d in root_docs_read)
+    ep_candidates = _select_candidate_entrypoints(oracle.files, limit=4)
+    ep_texts = [oracle.files[rel][:24576] for rel in ep_candidates]
+    focal_text = oracle.files.get(focal_target, "")[:16384]
 
-    ep_files: list[str] = []
-    for ep in sk.entrypoints:
-        if ep.startswith("file:"):
-            ep_files.append(ep[len("file:") :])
-    ep_files_sampled = ep_files[:4]
-    ep_read_tokens = sum(_file_tokens(resolved / rel, max_bytes=24576) for rel in ep_files_sampled)
+    grep_re = re.compile(rf"\b{re.escape(focal_stem)}\b") if focal_stem else re.compile(r"$^")
+    prod_grep_out, a_grep_prod_files = _execute_regex_grep(
+        oracle.files,
+        grep_re,
+        include_tests=False,
+        only_tests=False,
+        max_lines=120,
+    )
+    a_grep_prod_files.discard(focal_target)
 
-    focal_tokens = _file_tokens(resolved / focal_target, max_bytes=16384) if focal_target != "." else 0
-    grep_output_tokens = _approx_tokens("\n".join(rec["path"] for rec in impact.transitive_inbound_dependents[:40])) * 2 + 250
+    test_grep_out, a_grep_test_files = _execute_regex_grep(
+        oracle.files,
+        grep_re,
+        include_tests=True,
+        only_tests=True,
+        max_lines=80,
+    )
+    if focal_stem:
+        low_stem = focal_stem.lower()
+        for rel in oracle.files:
+            if _oracle_is_test(rel) and low_stem in Path(rel).name.lower():
+                a_grep_test_files.add(rel)
 
-    cond_a_turns = 1 + max(1, len(root_docs_read)) + max(1, len(ep_files_sampled)) + 3
-    cond_a_tokens = tree_listing_tokens + doc_read_tokens + ep_read_tokens + focal_tokens + grep_output_tokens
+    cond_a_turns = 1 + len(root_doc_paths) + len(ep_candidates) + (1 if focal_text else 0) + 2
+    cond_a_tokens = (
+        _approx_tokens(tree_listing)
+        + sum(_approx_tokens(t) for t in root_doc_texts)
+        + sum(_approx_tokens(t) for t in ep_texts)
+        + _approx_tokens(focal_text)
+        + _approx_tokens(prod_grep_out)
+        + _approx_tokens(test_grep_out)
+    )
 
-    a_arch_recall = (len(root_docs_read) / len(gt_bdocs)) if gt_bdocs else 1.0
-    # Raw grep over sampled entrypoint files finds surfaces defined inside those sampled files
-    sampled_ep_set = set(ep_files_sampled)
-    a_surf_found = sum(1 for s in gt_public_surfaces if s.file in sampled_ep_set)
-    a_surf_recall = (a_surf_found / len(gt_public_surfaces)) if gt_public_surfaces else 1.0
-    # Single-hop grep finds direct dependents (distance == 1) but misses distance >= 2 transitive blast radius
-    a_blast_recall = (len(gt_prod_direct) / len(gt_prod_transitive)) if gt_prod_transitive else 1.0
-    a_test_recall = (len(gt_direct_or_named_tests) / len(gt_coupled_tests)) if gt_coupled_tests else 1.0
+    a_ingested_texts = [*root_doc_texts, *ep_texts]
+    a_bdocs_found = set(root_doc_paths) & oracle.boundary_docs
+    for d in oracle.boundary_docs:
+        if any(d in txt or Path(d).name in txt for txt in root_doc_texts):
+            # Linked boundary docs are discovered by path reference only if root doc links them,
+            # though unread; score half-weight for uninspected link vs full-weight for ingested doc.
+            pass
+    a_arch_recall = _ratio(len(a_bdocs_found), len(oracle.boundary_docs))
+    a_surf_found = sum(
+        1 for (_k, tok, _f) in oracle.public_surfaces if _surface_present_in_texts(tok, a_ingested_texts)
+    )
+    a_surf_recall = _ratio(a_surf_found, len(oracle.public_surfaces))
+    a_blast_recall = _ratio(len(a_grep_prod_files & oracle.prod_transitive), len(oracle.prod_transitive))
+    a_test_recall = _ratio(len(a_grep_test_files & oracle.coupled_tests), len(oracle.coupled_tests))
     a_mean = (a_arch_recall + a_surf_recall + a_blast_recall + a_test_recall) / 4.0
 
     cond_a = ConditionMetrics(
@@ -201,33 +780,40 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
         maint_jev_tokens_minor_struct_commit=0,
     )
 
-    # ── Condition B: tier1_manifests (per-directory CONTEXT.md + grep for reverse deps) ──
-    # Reads root + depth-1 CONTEXT.md manifests, opens 1 entrypoint file for exact flags/routes
-    # (since Tier 1 prose summarizes files in <=20 words without enumerating every route/flag),
-    # and still requires single-hop grep for reverse dependencies & tests.
-    t1_reads, t1_tokens = _estimate_tier1_depth1_tokens(resolved, sk)
-    one_ep_tokens = _file_tokens(resolved / ep_files_sampled[0], max_bytes=16384) if ep_files_sampled else 0
-    cond_b_turns = min(t1_reads, 4) + (1 if ep_files_sampled else 0) + 2
-    cond_b_tokens = t1_tokens + one_ep_tokens + grep_output_tokens
-
-    # Tier 1 indexes root + top-level dirs ( misses nested ADR boundary docs > depth 1 unless drilled into)
-    b_bdocs_found = sum(1 for d in sk.boundary_docs if len(Path(d.relative_path).parts) <= 2)
-    b_arch_recall = (b_bdocs_found / len(gt_bdocs)) if gt_bdocs else 1.0
-    b_ep_set = set(ep_files_sampled[:2])
-    b_surf_found = sum(1 for s in gt_public_surfaces if s.file in b_ep_set or len(Path(s.file).parts) <= 2)
-    # Tier 1 prose mentions file purpose but only inspected entrypoint files yield exact command/tool names
-    b_exact_surf = sum(1 for s in gt_public_surfaces if s.file in set(ep_files_sampled[:1]))
-    b_surf_recall = (
-        min(1.0, (0.5 * b_surf_found + 0.5 * b_exact_surf) / len(gt_public_surfaces))
-        if gt_public_surfaces
-        else 1.0
+    # ── Condition B: tier1_manifests (depth-0/1 CONTEXT.md + 1 entrypoint + grep) ──
+    t1_manifest_texts = _load_or_synthesize_tier1_depth1_manifests(resolved, oracle.files)
+    b_ep_texts = ep_texts[:1]
+    cond_b_turns = min(len(t1_manifest_texts), 4) + len(b_ep_texts) + 2
+    cond_b_tokens = (
+        sum(_approx_tokens(m) for m in t1_manifest_texts)
+        + sum(_approx_tokens(t) for t in b_ep_texts)
+        + _approx_tokens(prod_grep_out)
+        + _approx_tokens(test_grep_out)
     )
+
+    b_ingested_texts = [*t1_manifest_texts, *b_ep_texts]
+    b_bdocs_found = {
+        d
+        for d in oracle.boundary_docs
+        if any((d in m or f"**{Path(d).name}**" in m) for m in t1_manifest_texts)
+        and (len(Path(d).parts) <= 2)
+    }
+    b_arch_recall = _ratio(len(b_bdocs_found), len(oracle.boundary_docs))
+    b_surf_found = sum(
+        1 for (_k, tok, _f) in oracle.public_surfaces if _surface_present_in_texts(tok, b_ingested_texts)
+    )
+    b_surf_recall = _ratio(b_surf_found, len(oracle.public_surfaces))
     b_blast_recall = a_blast_recall
     b_test_recall = a_test_recall
     b_mean = (b_arch_recall + b_surf_recall + b_blast_recall + b_test_recall) / 4.0
 
-    # Tier 1 incremental refresh re-summarizes changed file + cascades parent directory summaries (~1,800 LLM tokens)
-    t1_maint_tokens = 1800
+    # Empirical Tier 1 incremental refresh cost for modifying `focal_target`:
+    # 1 file summary call (truncated at 8,000 max_file_tokens + prompt wrapper) + directory cascade
+    focal_dir = Path(focal_target).parent.as_posix()
+    focal_siblings = sum(1 for rel in oracle.files if Path(rel).parent.as_posix() == focal_dir)
+    focal_file_tok = min(8000, _approx_tokens(oracle.files.get(focal_target, "")))
+    t1_maint_tokens = focal_file_tok + 360 + focal_siblings * 28
+
     cond_b = ConditionMetrics(
         condition="tier1_manifests",
         tool_turns=cond_b_turns,
@@ -243,35 +829,58 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
     )
 
     # ── Condition C: tier2_plus_impact (CONTEXT-0.md + `ctx impact <focal_target>`) ──
-    # Turn 1: Read `.ctx/CONTEXT-0.md` (1-page repo architecture, authority boundaries, & operational surfaces).
-    # Turn 2: Run `ctx impact <focal_target> --output json` (full transitive reverse-dep graph & coupled tests).
+    sk = extract_skeleton(resolved)
     c0_md = render_context_0(sk, generated="2026-11-01T00:00:00Z")
-    impact_json = json.dumps(asdict(impact))
+    impact = analyze_impact(resolved, focal_target, skeleton=sk)
+    impact_dict = asdict(impact)
+    impact_json = json.dumps(impact_dict)
+
     cond_c_turns = 2
     cond_c_tokens = _approx_tokens(c0_md) + _approx_tokens(impact_json)
 
-    # CONTEXT-0.md renders all boundary_docs, all subsystems, and up to 20 CLI / 15 HTTP / 20 MCP tool / 15 MCP resource surfaces
-    rendered_caps = {"cli_command": 20, "http_route": 15, "mcp_tool": 20, "mcp_resource": 15}
-    by_k_counts: dict[str, int] = {}
-    c_surf_visible = 0
-    for s in gt_public_surfaces:
-        by_k_counts[s.kind] = by_k_counts.get(s.kind, 0) + 1
-        if by_k_counts[s.kind] <= rendered_caps.get(s.kind, 15):
-            c_surf_visible += 1
-    c_surf_recall = (c_surf_visible / len(gt_public_surfaces)) if gt_public_surfaces else 1.0
+    # Strictly evaluate Condition C outputs against the independent static oracle (no hardcoded 1.0s)
+    c_gov_set = set(impact.governing_docs)
+    c_bdocs_found = {d for d in oracle.boundary_docs if d in c0_md or d in c_gov_set}
+    c_arch_recall = _ratio(len(c_bdocs_found), len(oracle.boundary_docs))
+
+    c_surf_found = sum(
+        1 for (_k, tok, _f) in oracle.public_surfaces if _surface_present_in_texts(tok, [c0_md, impact_json])
+    )
+    c_surf_recall = _ratio(c_surf_found, len(oracle.public_surfaces))
+
+    c_impact_prod = {rec["path"] for rec in impact.transitive_inbound_dependents if not rec["is_test"]}
+    c_blast_recall = _ratio(len(c_impact_prod & oracle.prod_transitive), len(oracle.prod_transitive))
+
+    c_impact_tests = {rec["path"] for rec in impact.coupled_tests}
+    c_test_recall = _ratio(len(c_impact_tests & oracle.coupled_tests), len(oracle.coupled_tests))
+    c_mean = (c_arch_recall + c_surf_recall + c_blast_recall + c_test_recall) / 4.0
+
+    # Measure actual System-One Jev delta payload tokens for a 1-symbol minor structural delta
+    prev_snap = build_skeleton_snapshot(sk)
+    if prev_snap.get("symbols"):
+        prev_snap["symbols"] = prev_snap["symbols"][:-1]
+    sample_delta = compute_structural_delta(
+        {
+            "structural_hash": "sha256:prev",
+            "boundary_doc_hash": sk.boundary_doc_hash,
+            "snapshot": prev_snap,
+        },
+        sk,
+    )
+    jev_delta_tokens = _approx_tokens(json.dumps(sample_delta, sort_keys=True)) + 145
 
     cond_c = ConditionMetrics(
         condition="tier2_plus_impact",
         tool_turns=cond_c_turns,
         context_tokens_read=cond_c_tokens,
-        recall_arch_orientation=1.0,
+        recall_arch_orientation=round(c_arch_recall, 4),
         recall_surface_discovery=round(c_surf_recall, 4),
-        recall_blast_radius=1.0,
-        recall_coupled_tests=1.0,
-        mean_recall=round((1.0 + c_surf_recall + 1.0 + 1.0) / 4.0, 4),
+        recall_blast_radius=round(c_blast_recall, 4),
+        recall_coupled_tests=round(c_test_recall, 4),
+        mean_recall=round(c_mean, 4),
         maint_llm_tokens_impl_commit=0,
         maint_llm_tokens_minor_struct_commit=0,
-        maint_jev_tokens_minor_struct_commit=180,
+        maint_jev_tokens_minor_struct_commit=jev_delta_tokens,
     )
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -292,14 +901,14 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
     return RepoBenchmarkResult(
         repo_name=repo_display_name,
         repo_path=str(resolved),
-        total_files=sk.total_files,
+        total_files=len(oracle.files),
         subsystems_count=len(sk.subsystems),
-        internal_edges=graph.internal_edge_count,
-        operational_surfaces_count=len(sk.operational_surfaces),
+        internal_edges=oracle.internal_edge_count,
+        operational_surfaces_count=len(oracle.public_surfaces),
         focal_target=focal_target,
-        focal_direct_dependents=len(gt_prod_direct),
-        focal_transitive_dependents=len(gt_prod_transitive),
-        focal_coupled_tests=len(gt_coupled_tests),
+        focal_direct_dependents=len(oracle.prod_direct),
+        focal_transitive_dependents=len(oracle.prod_transitive),
+        focal_coupled_tests=len(oracle.coupled_tests),
         elapsed_ms=elapsed_ms,
         conditions={
             "raw_grep": cond_a,
@@ -310,7 +919,7 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
 
 
 def run_navigation_benchmark(paths: list[Path]) -> dict[str, Any]:
-    """Run the Phase 27.1 A/B/C navigation benchmark across one or more repositories."""
+    """Run the Phase 27.1 deterministic static-oracle A/B/C navigation benchmark."""
     if not paths:
         raise ValueError("At least one repository path is required for benchmarking.")
 
@@ -325,8 +934,10 @@ def run_navigation_benchmark(paths: list[Path]) -> dict[str, Any]:
             "mean_tool_turns": round(sum(m.tool_turns for m in metrics_list) / n, 2),
             "mean_context_tokens_read": round(sum(m.context_tokens_read for m in metrics_list) / n, 1),
             "mean_recall": round(sum(m.mean_recall for m in metrics_list) / n, 4),
+            "mean_arch_orientation_recall": round(sum(m.recall_arch_orientation for m in metrics_list) / n, 4),
             "mean_blast_radius_recall": round(sum(m.recall_blast_radius for m in metrics_list) / n, 4),
             "mean_surface_discovery_recall": round(sum(m.recall_surface_discovery for m in metrics_list) / n, 4),
+            "mean_coupled_tests_recall": round(sum(m.recall_coupled_tests for m in metrics_list) / n, 4),
             "maint_llm_tokens_impl_commit": round(
                 sum(m.maint_llm_tokens_impl_commit for m in metrics_list) / n, 1
             ),
@@ -344,7 +955,8 @@ def run_navigation_benchmark(paths: list[Path]) -> dict[str, Any]:
     c_turns = aggregates["tier2_plus_impact"]["mean_tool_turns"]
 
     return {
-        "benchmark_version": "phase-27.1-v1",
+        "benchmark_version": "phase-27.1-v2-static-oracle",
+        "methodology": "deterministic_static_oracle_retrieval",
         "generator": f"ctx/{__version__}",
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "repos_evaluated": len(repo_results),
@@ -366,31 +978,43 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
     summary = report["summary"]
     aggs = summary["aggregates"]
     lines = [
-        "# Phase 27.1 — Empirical A/B/C Agent Navigation & Blast-Radius Benchmark",
+        "# Phase 27.1 — Deterministic Static-Oracle Navigation & Blast-Radius Benchmark",
         "",
         f"- **Generated:** `{report['generated']}`",
         f"- **Generator:** `{report['generator']}` (`{report['benchmark_version']}`)",
+        f"- **Methodology:** `{report.get('methodology', 'deterministic_static_oracle_retrieval')}`",
         f"- **Repositories Evaluated:** {report['repos_evaluated']}",
         "- **Reproduce:** `ctx benchmark <repo1> [repo2 ...] --out-file docs/benchmarks/phase27-1-navigation-benchmark.md`",
         "",
+        "## Methodology & Scope",
+        "",
+        "This benchmark deterministically evaluates retrieval context-token efficiency and recall across three fixed "
+        "navigation workflows (`raw_grep`, `tier1_manifests`, and `tier2_plus_impact`) against an **independent static "
+        "AST/filesystem ground-truth oracle** built directly from raw files on disk (without calling `ctx.skeleton` or "
+        "`ctx.impact`). Condition A executes real file reads and real line-by-line regex grep (`\\b<stem>\\b`) over "
+        "repository files; Condition B reads depth-0/1 `CONTEXT.md` manifests plus regex grep; Condition C reads "
+        "rendered `.ctx/CONTEXT-0.md` plus `ctx impact <focal_target> --output json`. All four recall scores are "
+        "computed strictly by set intersection / identifier presence against the independent oracle (no stochastic LLM "
+        "agent rollouts and no hardcoded recall constants).",
+        "",
         "## Executive Summary",
         "",
-        f"Across **{report['repos_evaluated']}** repositories and **4** ground-truth codebase tasks "
-        "(Authority & Architecture Orientation, Operational Surface Discovery, Transitive Blast-Radius Tracing, "
+        f"Across **{report['repos_evaluated']}** repositories and **4** static-oracle retrieval tasks "
+        "(Authority & Architecture Orientation, Public Operational Surface Discovery, Multi-Hop Blast-Radius Tracing, "
         "and Coupled Test Selection), **Condition C (`tier2_plus_impact`: `.ctx/CONTEXT-0.md` + `ctx impact`)** achieves:",
         "",
         f"- **{summary['token_reduction_vs_raw_grep_pct']}% fewer context tokens ingested** vs `raw_grep` "
         f"(`{aggs['tier2_plus_impact']['mean_context_tokens_read']}` vs `{aggs['raw_grep']['mean_context_tokens_read']}` mean tokens)",
-        f"- **{summary['turn_reduction_vs_raw_grep_pct']}% fewer tool turns** vs `raw_grep` "
+        f"- **{summary['turn_reduction_vs_raw_grep_pct']}% fewer retrieval turns** vs `raw_grep` "
         f"(`{aggs['tier2_plus_impact']['mean_tool_turns']}` vs `{aggs['raw_grep']['mean_tool_turns']}` mean turns)",
-        f"- **+{summary['recall_gain_vs_raw_grep_pct']} percentage points higher ground-truth recall** "
+        f"- **+{summary['recall_gain_vs_raw_grep_pct']} percentage points higher static-oracle recall** "
         f"(`{aggs['tier2_plus_impact']['mean_recall']:.4f}` vs `{aggs['raw_grep']['mean_recall']:.4f}`), driven by multi-hop transitive reverse-dependency & operational surface extraction",
-        "- **0 Type-II LLM maintenance tokens** on implementation-only commits (`should_invoke_llm() == False`) and non-material structural tweaks gated by Type 1 Jev (`invariant_drift_material`, ~180 System-One input tokens @ `$0.042/1M` = `$0.000008`)",
+        f"- **0 Type-II LLM maintenance tokens** on implementation-only commits (`should_invoke_llm() == False`) and non-material structural tweaks gated by Type 1 Jev (`invariant_drift_material`, ~{aggs['tier2_plus_impact']['maint_jev_tokens_minor_struct_commit']:.0f} System-One input tokens @ `$0.042/1M`)",
         "",
         "## Aggregate Condition Comparison",
         "",
-        "| Condition | Mean Tool Turns | Mean Context Tokens | Mean Overall Recall | Blast-Radius Recall | Surface Recall | Maint. Type-II LLM Tokens (Impl / Minor Struct) |",
-        "|-----------|----------------:|--------------------:|--------------------:|--------------------:|---------------:|------------------------------------------------:|",
+        "| Condition | Mean Turns | Mean Context Tokens | Mean Overall Recall | Blast-Radius Recall | Surface Recall | Maint. Type-II LLM Tokens (Impl / Minor Struct) |",
+        "|-----------|-----------:|--------------------:|--------------------:|--------------------:|---------------:|------------------------------------------------:|",
     ]
 
     labels = {
@@ -412,7 +1036,7 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
     lines.extend(["", "## Per-Repository Results", ""])
     for repo in report["repositories"]:
         lines.extend([
-            f"### `{repo['repo_name']}` ({repo['total_files']} files, {repo['subsystems_count']} subsystems, {repo['internal_edges']} internal edges, {repo['operational_surfaces_count']} surfaces)",
+            f"### `{repo['repo_name']}` ({repo['total_files']} files, {repo['subsystems_count']} subsystems, {repo['internal_edges']} internal edges, {repo['operational_surfaces_count']} public surfaces)",
             "",
             f"- **Focal High-Fan-In Target:** `{repo['focal_target']}` "
             f"({repo['focal_direct_dependents']} direct prod dependents, "

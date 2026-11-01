@@ -234,7 +234,11 @@ def _refresh_tier2_locked(
     from datetime import datetime, timezone
 
     from ctx.init import _restore_dir_snapshot, _snapshot_dir
-    from ctx.invariants import load_cached_invariants, synthesize_tier2_invariants
+    from ctx.invariants import (
+        has_cached_synthesis_for_hashes,
+        load_cached_invariants,
+        synthesize_tier2_invariants,
+    )
     from ctx.skeleton import (
         extract_skeleton,
         render_context_0,
@@ -265,9 +269,10 @@ def _refresh_tier2_locked(
         not (ctx_dir / name).is_file() or (ctx_dir / name).stat().st_size == 0
         for name in expected_exports
     )
-    cached_inv_doc = load_cached_invariants(root)
-    missing_synth_cache = should_synth and not (
-        isinstance(cached_inv_doc, dict) and bool(cached_inv_doc.get("invariants"))
+    missing_synth_cache = should_synth and not has_cached_synthesis_for_hashes(
+        root,
+        skeleton.structural_hash,
+        skeleton.boundary_doc_hash,
     )
     needs_update = force or exports_missing or missing_synth_cache or should_invoke_llm(meta, skeleton)
     subsystem_count = max(1, len(skeleton.subsystems))
@@ -314,9 +319,11 @@ def _refresh_tier2_locked(
             if synthesize:
                 meta["synthesize_invariants"] = True
             meta["invariants_gate_action"] = inv_res.gate_action
-        elif isinstance(cached_inv_doc, dict) and isinstance(cached_inv_doc.get("invariants"), list):
-            if cached_inv_doc.get("structural_hash") == skeleton.structural_hash:
-                synthesized_invs = cached_inv_doc["invariants"] or None
+        else:
+            cached_inv_doc = load_cached_invariants(root)
+            if isinstance(cached_inv_doc, dict) and isinstance(cached_inv_doc.get("invariants"), list):
+                if cached_inv_doc.get("structural_hash") == skeleton.structural_hash:
+                    synthesized_invs = cached_inv_doc["invariants"] or None
 
         rendered_c0 = render_context_0(skeleton, synthesized_invariants=synthesized_invs)
         rendered_c1 = render_context_1(skeleton, synthesized_invariants=synthesized_invs)

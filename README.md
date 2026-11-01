@@ -49,7 +49,7 @@ For MCP clients, copy [`mcp.json`](./mcp.json) into `.mcp.json` / `.cursor/mcp.j
 | `ctx setup [path]` | Detect provider, write `.ctxconfig`, or run `--check` preflight gate |
 | `ctx impact <target>` | Analyze reverse-dependency blast radius, coupled tests, and governing docs |
 | `ctx jev <subcmd>` | List, execute (`decide`), or evaluate (`eval`) Type 1 Jev System-One heads |
-| `ctx benchmark [paths]` | Run Phase 27.1 A/B/C agent navigation & blast-radius benchmark |
+| `ctx benchmark [paths]` | Run Phase 27.1 static-oracle A/B/C navigation & blast-radius benchmark |
 | `ctx reset <path>` | Remove generated `CONTEXT.md` manifests |
 | `ctx serve --mcp` | Expose tools and `.ctx/` resources via MCP (stdio JSON-RPC) |
 

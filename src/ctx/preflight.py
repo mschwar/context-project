@@ -99,6 +99,14 @@ def probe_model_quality(config) -> tuple[bool, str | None]:
         summary = results[0].text if results else ""
         if not summary or not summary.strip() or len(summary.strip()) < 5:
             return False, None
+        if getattr(config, "provider", "") in (*LOCAL_PROVIDERS, "openai"):
+            from ctx.llm import get_structured_output_capability, probe_structured_output_support
+
+            if (
+                get_structured_output_capability(config) is None
+                and str(getattr(config, "structured_outputs", "auto")).lower() != "off"
+            ):
+                probe_structured_output_support(config)
         return True, None
     except TimeoutError:
         return False, "timeout"

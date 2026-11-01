@@ -1,11 +1,11 @@
 ---
-generated: '2026-11-01T03:21:14Z'
+generated: '2026-11-01T04:01:30Z'
 generator: ctx/1.1.0
 model: claude-haiku-4-5-20251001
-content_hash: sha256:c65c797c098bbd13dea3520d6a92a40f323a108549e0909da8dacddbbc47ae20
+content_hash: sha256:afad0bc78615938fff797d1af0da0e045b6e7bc690ac11307acd3b829f5c3044
 files: 27
 dirs: 1
-tokens_total: 108801
+tokens_total: 155241
 ---
 # src/ctx
 
@@ -16,7 +16,7 @@ Core Python package implementing manifest generation, deterministic structural s
 - **__init__.py** — Version number for the ctx package.
 - **__main__.py** — Entry point for the CLI application.
 - **api.py** — Unified API layer for canonical refresh, check, export, reset, Tier 2 synthesis, and fleet capsule generation.
-- **benchmark.py** — Evaluates Phase 27.1 A/B/C agent navigation conditions against deterministic AST and import-graph ground truth.
+- **benchmark.py** — Evaluates Phase 27.1 A/B/C navigation workflows against an independent static AST and filesystem ground-truth oracle.
 - **cli.py** — Click CLI entry point implementing refresh, check, export, reset, init, uninit, stats, setup, and serve commands.
 - **config.py** — Configuration loading and resolution with environment variable and .ctxconfig file support.
 - **generator.py** — Core generation engine walking a directory tree to produce CONTEXT.md files.
@@ -26,7 +26,7 @@ Core Python package implementing manifest generation, deterministic structural s
 - **impact.py** — Builds a multi-language directed dependency graph and computes reverse blast radius, coupled tests, affected surfaces, and governing docs.
 - **init.py** — Bootstraps transactional .ctx/ exports, git worktree-aware hooks, kernel-locked PID debouncing, and hook telemetry.
 - **invariants.py** — Synthesizes cross-module Tier 2 invariants through the Determinism Gradient (structural hash -> Type 1 Jev judge -> Type-II LLM).
-- **jev.py** — Pure-stdlib Type 1 Jev (jev-1.13.0) System-One client, head validator, governor, trace writer, and 14-case gold evaluator.
+- **jev.py** — Pure-stdlib Type 1 Jev (jev-1.13.0) System-One client, head validator, governor, trace writer, and 18-case gold evaluator.
 - **language_detector.py** — Detects the primary programming language of a file or directory based on extensions and configuration files.
 - **llm.py** — Anthropic, OpenAI-compatible, and disk-cached LLM summarization clients with exact token accounting and lazy SDK loading.
 - **lock.py** — Cross-platform OS kernel-backed exclusive file lock with atomic metadata publication and active heartbeat.

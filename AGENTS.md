@@ -296,11 +296,11 @@ Inspect, execute, or benchmark governed Type 1 Jev (`jev-1.13.0` via `POST https
 Subcommands:
 - `ctx jev heads [path]` — list validated Jev head contracts
 - `ctx jev decide [path] --head <id> --state <json-or-@file> [--provider code|jev] [--live] [--no-trace]` — execute governed head(s)
-- `ctx jev eval [path] [--provider code|jev] [--head <id>] [--live] [--skip-pre-rule]` — evaluate against the 14-case gold corpus
+- `ctx jev eval [path] [--provider code|jev] [--head <id>] [--live] [--skip-pre-rule]` — evaluate against the 18-case gold corpus (`pre_rule_hits` and `live_model_calls` reported separately)
 
 ### `ctx benchmark [paths...]`
 
-Run the reproducible Phase 27.1 A/B/C agent navigation & blast-radius benchmark (`raw_grep` vs `tier1_manifests` vs `tier2_plus_impact`).
+Run the reproducible Phase 27.1 deterministic static-oracle A/B/C navigation & blast-radius benchmark (`raw_grep` vs `tier1_manifests` vs `tier2_plus_impact`).
 
 Common flags:
 - `--out-file <file>` (or `-o <file>`) — write Markdown or `.json` benchmark report

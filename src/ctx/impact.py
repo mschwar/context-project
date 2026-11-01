@@ -211,7 +211,7 @@ def _resolve_python_file_edges(
                 base_parts: list[str] = []
                 if node.level > 0:
                     up = node.level - 1
-                    anchor = cur_pkg_parts if is_pkg_init else cur_pkg_parts
+                    anchor = cur_pkg_parts
                     if up <= len(anchor):
                         base_parts = anchor[: len(anchor) - up]
                     else:

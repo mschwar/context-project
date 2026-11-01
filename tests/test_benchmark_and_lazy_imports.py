@@ -20,6 +20,7 @@ def _build_benchmark_fixture(root: Path) -> Path:
     (root / ".git").mkdir(exist_ok=True)
     (root / "AGENTS.md").write_text("# AGENTS\n\nGovernance contract.\n", encoding="utf-8")
     (root / "architecture.md").write_text("# Architecture\n\nSystem architecture.\n", encoding="utf-8")
+    (root / "CONTRIBUTING.md").write_text("# Contributing\n\nPR workflow.\n", encoding="utf-8")
     (root / "pyproject.toml").write_text(
         '[project]\nname = "bench-demo"\nversion = "0.1.0"\n'
         '[project.scripts]\nbench = "bench.cli:app"\n',
@@ -70,12 +71,20 @@ def test_navigation_benchmark_and_cli_report_generation(tmp_path: Path) -> None:
     assert report["repos_evaluated"] == 1
     aggs = report["summary"]["aggregates"]
     assert set(aggs.keys()) == {"raw_grep", "tier1_manifests", "tier2_plus_impact"}
-    assert aggs["tier2_plus_impact"]["mean_recall"] >= aggs["raw_grep"]["mean_recall"]
+    assert aggs["tier2_plus_impact"]["mean_recall"] > aggs["raw_grep"]["mean_recall"]
     assert aggs["tier2_plus_impact"]["mean_tool_turns"] < aggs["raw_grep"]["mean_tool_turns"]
     assert aggs["tier2_plus_impact"]["maint_llm_tokens_impl_commit"] == 0.0
+    # Independent static oracle checks:
+    # 1) CONTRIBUTING.md is in independent oracle boundary docs but not in skeleton._AUTHORITY_DOC_NAMES -> < 1.0 (proves non-hardcoded recall!)
+    repo_cond_c = report["repositories"][0]["conditions"]["tier2_plus_impact"]
+    repo_cond_a = report["repositories"][0]["conditions"]["raw_grep"]
+    assert 0.5 <= repo_cond_c["recall_arch_orientation"] < 1.0
+    # 2) Multi-hop cli.py -> middle.py -> core.py: raw regex grep for \bcore\b finds middle.py (0.5) while ctx impact finds both (1.0)
+    assert repo_cond_a["recall_blast_radius"] == 0.5
+    assert repo_cond_c["recall_blast_radius"] == 1.0
 
     md = render_benchmark_markdown(report)
-    assert "# Phase 27.1 — Empirical A/B/C Agent Navigation & Blast-Radius Benchmark" in md
+    assert "# Phase 27.1 — Deterministic Static-Oracle Navigation & Blast-Radius Benchmark" in md
     assert "| `tier2_plus_impact` |" in md
 
     # CLI `ctx benchmark` writing both Markdown and JSON reports

@@ -94,10 +94,10 @@
 ### Phase 32 — Directed Blast-Radius Graph (`ctx impact` / `ctx_impact`) & Operational Surface Extraction ✓ ([#78](https://github.com/mschwar/context-project/issues/78))
 - **Status:** Complete — implemented `src/ctx/impact.py`, `ctx impact`, MCP `ctx_impact`, cross-file reference-ranked `key_symbols`, and polyglot CLI/HTTP/MCP/env operational surface extraction in `src/ctx/skeleton.py` and `api.build_fleet_capsule`.
 
-### Phase 33 — Optional Cloud LLM SDK Extras & Phase 27.1 A/B/C Agent Navigation Benchmark ✓ ([#79](https://github.com/mschwar/context-project/issues/79))
-- **Status:** Complete — shipped `[anthropic]`, `[openai]`, `[cloud]`, `[watch]`, `[all]` extras, lazy `watchdog` import, `src/ctx/benchmark.py` (`ctx benchmark`), and empirical benchmark report `docs/benchmarks/phase27-1-navigation-benchmark.md`.
+### Phase 33 — Granular Extras, Lazy Heavy-SDK Isolation & Phase 27.1 Static-Oracle Benchmark ✓ ([#79](https://github.com/mschwar/context-project/issues/79))
+- **Status:** Complete — shipped `[anthropic]`, `[openai]`, `[cloud]`, `[watch]`, `[all]` extras (retaining 1.1.x core `dependencies` for backward compatibility), lazy `watchdog`/cloud-SDK runtime imports, `src/ctx/benchmark.py` (`ctx benchmark`), and reproducible static-oracle benchmark report `docs/benchmarks/phase27-1-navigation-benchmark.md` (**88.0% fewer context tokens**, **79.3% fewer turns**, **+18.0 pp higher recall**).
 
 ### Phase 34 — Type 1 Jev (`jev-1.13.0`) System-One Decision Layer ✓ ([#81](https://github.com/mschwar/context-project/issues/81))
-- **Status:** Complete — shipped pure-stdlib `src/ctx/jev.py` (`invariant_drift_material`, `subsystem_arch_role`, `operational_surface_exposure`), `ctx jev heads|decide|eval`, and MCP `ctx_jev` (14/14 = 100.0% accuracy on both deterministic `code` and live `jev-1.13.0`).
+- **Status:** Complete — shipped pure-stdlib `src/ctx/jev.py` (`invariant_drift_material`, `subsystem_arch_role`, `operational_surface_exposure`), `ctx jev heads|decide|eval`, and MCP `ctx_jev` (**18/18 = 100.0%** accuracy across deterministic `code`, full governed pipeline, and `--skip-pre-rule` pure live `jev-1.13.0`).
 
 

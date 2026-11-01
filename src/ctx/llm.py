@@ -340,12 +340,10 @@ def _should_use_structured_outputs(config: Config, model: str) -> bool:
     mode = str(getattr(config, "structured_outputs", "auto") or "auto").strip().lower()
     if mode in {"off", "false", "0", "disabled", "none"}:
         return False
-    cached = get_structured_output_capability(config, model)
-    if cached is False:
-        return False
     if mode in {"on", "true", "1", "yes"}:
         return True
-    return True
+    cached = get_structured_output_capability(config, model)
+    return cached is not False
 
 
 def _is_unsupported_response_format_error(exc: Exception) -> bool:

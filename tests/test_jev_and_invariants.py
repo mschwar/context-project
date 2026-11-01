@@ -73,13 +73,45 @@ def test_noul_decision_from_prob_threshold_and_confidence() -> None:
 
 
 def test_jev_gold_eval_code_provider_100_percent() -> None:
+    import inspect
+    import ctx.jev as jev_mod
+
+    # Public PyPI hygiene: zero hardcoded private 1Password `op://` vault URIs in source
+    assert "op://" not in inspect.getsource(jev_mod)
+
+    assert len(GOLD_EVAL_CASES) == 18
     report = evaluate_heads(provider="code")
-    assert report["total"] == len(GOLD_EVAL_CASES)
-    assert report["evaluated"] == len(GOLD_EVAL_CASES)
+    assert report["total"] == 18
+    assert report["evaluated"] == 18
     assert report["abstained"] == 0
     assert report["accuracy"] == 1.0
+    assert "pre_rule_hits" in report
+    assert "live_model_calls" in report
+    assert report["live_model_calls"] == 0
     assert report["total_input_tokens"] == 0
     assert report["total_cost_usd"] == 0.0
+
+    # Segment-level path matching: "cli" inside "api_client", "ui" inside "query_builder", "git" inside "digit_parser"
+    for tricky_path, expected_role in (
+        ("src/api_client", "adapter_integration"),
+        ("src/query_builder", "core_domain"),
+        ("src/digit_parser", "core_domain"),
+    ):
+        dec = decide(
+            ["subsystem_arch_role"],
+            {
+                "path": tricky_path,
+                "file_count": 3,
+                "languages": ["Python"],
+                "key_symbols": ["mod.py:fn run"],
+                "internal_deps": [],
+                "external_deps": ["httpx"] if "api_client" in tricky_path else [],
+                "operational_surface_kinds": [],
+            },
+            provider="code",
+            record_trace=False,
+        )
+        assert dec["decisions"][0]["effective_output"] == expected_role
 
 
 def test_jev_systemone_http_wire_batching_error_hygiene_and_trace(
@@ -296,12 +328,27 @@ def test_tier2_hybrid_invariant_synthesis_three_stage_gating(
     (pkg / "engine.py").write_text("class Engine:\n    def run(self) -> int:\n        return 1\n", encoding="utf-8")
     (pkg / "worker.py").write_text("from core.engine import Engine\ndef work() -> int:\n    return Engine().run()\n", encoding="utf-8")
 
-    # Fallback gracefully when no LLM key is configured
+    # Fallback gracefully when no LLM key is configured AND persist attempted=True so subsequent refreshes skip cleanly
+    from ctx.api import refresh as api_refresh
+
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     init_res = init_project(tmp_path, tier2=True, synthesize=True)
     assert init_res["mode"] == "tier2"
     assert (tmp_path / ".ctx" / "CONTEXT-0.md").is_file()
+    no_key_cache = load_cached_invariants(tmp_path)
+    assert no_key_cache is not None
+    assert no_key_cache["attempted"] is True
+    assert no_key_cache["gate_action"] == "llm_unavailable_fallback"
+
+    # Second refresh on unchanged commit with no API key MUST skip (`dirs_processed == 0`) instead of looping on missing_synth_cache
+    repeat_refresh = api_refresh(tmp_path)
+    assert repeat_refresh.strategy == "tier2"
+    assert repeat_refresh.dirs_processed == 0
+    assert repeat_refresh.dirs_skipped >= 1
+
+    # Remove attempted fallback cache so the mocked Type-II LLM test below exercises fresh synthesis
+    (tmp_path / ".ctx" / "invariants.json").unlink(missing_ok=True)
 
     # Now mock LLM client `complete_json` to verify the 3-stage Determinism Gradient
     llm_calls: list[dict[str, object]] = []
@@ -469,3 +516,30 @@ def test_structured_output_json_schema_capability_and_400_fallback() -> None:
     assert "response_format" in legacy_calls[0]
     assert "response_format" not in legacy_calls[1]
     assert get_structured_output_capability(cfg_legacy) is False
+
+    # Explicit structured_outputs="on" MUST override a cached False capability entry
+    cfg_forced = Config(
+        provider="lmstudio",
+        model="legacy-local-model",
+        api_key="local",
+        base_url="http://127.0.0.1:1234/v1",
+        structured_outputs="on",
+    )
+    forced_calls: list[dict[str, object]] = []
+
+    def _create_forced_ok(**kwargs):
+        forced_calls.append(kwargs)
+        msg = SimpleNamespace(content='{"summaries": ["Forced structured summary."]}')
+        usage = SimpleNamespace(prompt_tokens=15, completion_tokens=8)
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)], usage=usage)
+
+    fake_forced_client = MagicMock()
+    fake_forced_client.chat.completions.create.side_effect = _create_forced_ok
+    with patch("ctx.llm._get_openai_cls", return_value=MagicMock(return_value=fake_forced_client)):
+        client3 = OpenAIClient(cfg_forced, cfg_forced.prompts)
+        res3 = client3.summarize_files(
+            Path("."),
+            [{"name": "c.py", "content": "def c(): pass\n", "language": "Python", "metadata": {}}],
+        )
+    assert res3[0].text == "Forced structured summary."
+    assert "response_format" in forced_calls[0]
