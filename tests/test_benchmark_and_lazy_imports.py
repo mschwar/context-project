@@ -178,3 +178,31 @@ def test_pyproject_optional_extras_and_deduplicated_reset_clean(tmp_path: Path) 
     neg_md = render_benchmark_markdown(sample_report)
     assert "+-" not in neg_md
     assert "-3.4 percentage points" in neg_md
+
+    # Round-3 QA Findings 6 & 7: Python 3.10 `tomllib=None` fallback + grep cap scoring alignment
+    import ctx.benchmark as bench_mod
+
+    sample_toml = '[project]\nname = "demo"\n\n[project.scripts]\nctx = "ctx.cli:cli"\nctx-mcp = "ctx.mcp_server:main"\n\n[tool.pytest]\naddopts = "-q"\n'
+    orig_tomllib = bench_mod.tomllib
+    try:
+        bench_mod.tomllib = None
+        assert bench_mod._extract_pyproject_script_names(sample_toml) == ["ctx", "ctx-mcp"]
+    finally:
+        bench_mod.tomllib = orig_tomllib
+
+    files_for_cap = {
+        "a_first.py": "\n".join(f"hit_token_{i}" for i in range(5)),
+        "z_beyond_cap.py": "hit_token_late",
+    }
+    import re as _re
+
+    emitted_text, scored_files = bench_mod._execute_regex_grep(
+        files_for_cap,
+        _re.compile(r"hit_token"),
+        include_tests=True,
+        only_tests=False,
+        max_lines=3,
+    )
+    assert len(emitted_text.splitlines()) == 3
+    assert scored_files == {"a_first.py"}
+    assert "z_beyond_cap.py" not in scored_files

@@ -452,3 +452,22 @@ def test_round2_qa_iterative_tarjan_deep_graphs_dotdir_js_and_test_token_boundar
     assert "tests/test_init.py" in coupled_paths
     assert "tests/test_init_hooks.py" in coupled_paths
     assert "tests/test_uninit.py" not in coupled_paths
+
+    # Round-3 QA Finding 5: Rust `super::` from ordinary file modules (`src/beta.rs`) and nested modules
+    rs_repo = tmp_path / "rust_super_repo"
+    (rs_repo / "src" / "sub").mkdir(parents=True)
+    (rs_repo / "Cargo.toml").write_text('[package]\nname = "demo_rs"\nversion = "0.1.0"\n', encoding="utf-8")
+    (rs_repo / "src" / "lib.rs").write_text("pub mod alpha;\npub mod beta;\npub mod sub;\n", encoding="utf-8")
+    (rs_repo / "src" / "alpha.rs").write_text("pub fn work() -> i32 { 42 }\n", encoding="utf-8")
+    (rs_repo / "src" / "beta.rs").write_text(
+        "use super::alpha::work;\npub fn call_alpha() -> i32 { work() }\n",
+        encoding="utf-8",
+    )
+    (rs_repo / "src" / "sub" / "mod.rs").write_text("pub mod gamma;\n", encoding="utf-8")
+    (rs_repo / "src" / "sub" / "gamma.rs").write_text(
+        "use super::super::alpha::work;\npub fn deep_call() -> i32 { work() }\n",
+        encoding="utf-8",
+    )
+    rs_impact = analyze_impact(rs_repo, "src/alpha.rs")
+    assert "src/beta.rs" in rs_impact.direct_inbound_dependents
+    assert "src/sub/gamma.rs" in rs_impact.direct_inbound_dependents

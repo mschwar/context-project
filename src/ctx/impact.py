@@ -384,10 +384,20 @@ def _resolve_rust_edges(
             base = cur_dir if p.name in ("lib.rs", "main.rs", "mod.rs") else f"{cur_dir}/{p.stem}".strip("/")
             _probe_rs(segs[1:], base)
         elif head == "super" and len(segs) >= 2:
-            parent_dir = Path(cur_dir).parent.as_posix() if cur_dir else ""
-            if parent_dir == ".":
-                parent_dir = ""
-            _probe_rs(segs[1:], parent_dir)
+            own_mod_dir = (
+                cur_dir
+                if p.name in ("lib.rs", "main.rs", "mod.rs")
+                else f"{cur_dir}/{p.stem}".strip("/")
+            )
+            super_count = 0
+            while super_count < len(segs) and segs[super_count] == "super":
+                super_count += 1
+            rem = segs[super_count:]
+            if rem:
+                mod_parts = [part for part in own_mod_dir.split("/") if part]
+                if super_count <= len(mod_parts):
+                    parent_dir = "/".join(mod_parts[: len(mod_parts) - super_count])
+                    _probe_rs(rem, parent_dir)
 
     try:
         content = (root / rel_posix).read_text(encoding="utf-8")

@@ -670,3 +670,124 @@ def test_round2_qa_invariants_retry_cumulative_drift_disable_and_head_confinemen
         assert "## Synthesized Cross-Module Invariants & Footguns" not in (
             tmp_path / ".ctx" / "CONTEXT-0.md"
         ).read_text(encoding="utf-8")
+
+
+def test_round3_qa_symlink_confinement_nan_confidence_budget_guardrails_and_surface_hashing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression coverage for Round-3 Codex QA findings 1, 2, 3, and 4."""
+    import os
+    import types
+    from ctx.api import refresh as api_refresh
+    from ctx.init import init_project
+    from ctx.jev import append_decision_traces, decide, list_head_ids, load_head
+
+    # Finding 1: Symlinks escaping `root` for `.ctx-cache`, `jev_decisions.jsonl`, and `.ctx/heads` MUST fail closed
+    repo = tmp_path / "confined_repo"
+    outside = tmp_path / "outside_dir"
+    repo.mkdir()
+    outside.mkdir()
+    (outside / "evil_head.json").write_text('{"id": "evil_head"}', encoding="utf-8")
+
+    (repo / ".ctx").mkdir()
+    (repo / ".ctx" / "heads").symlink_to(outside, target_is_directory=True)
+    assert "evil_head" not in list_head_ids(repo)
+    with pytest.raises(ValueError, match="symlink"):
+        load_head("evil_head", repo)
+
+    (repo / ".ctx-cache").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        append_decision_traces(repo, [{"head_id": "subsystem_arch_role"}])
+    assert not (outside / "jev_decisions.jsonl").exists()
+
+    # Finding 4: Malformed non-finite (`NaN`, `Inf`) or out-of-range (`2.0`, `-0.1`) confidence/probabilities MUST abstain
+    state = {
+        "path": "misc",
+        "file_count": 3,
+        "languages": ["Python"],
+        "key_symbols": [],
+        "internal_deps": [],
+        "external_deps": [],
+        "operational_surface_kinds": [],
+    }
+    for bad_conf in (float("nan"), float("inf"), 2.0, -0.1):
+        raw = json.dumps(
+            {
+                "answers": {
+                    "subsystem_arch_role": {
+                        "choice": "docs_governance",
+                        "confidence": bad_conf,
+                    }
+                },
+                "usage": {"input_tokens": 5},
+            },
+            allow_nan=True,
+        ).encode("utf-8")
+        with (
+            patch.dict(os.environ, {"CTX_JEV": "routing", "TYPESAFE_API_KEY": "ts-test-key"}),
+            patch("urllib.request.urlopen", side_effect=lambda req, timeout=15.0, b=raw: io.BytesIO(b)),
+        ):
+            dec = decide(
+                ["subsystem_arch_role"],
+                state,
+                provider="jev",
+                record_trace=False,
+            )["decisions"][0]
+        assert dec["abstained"] is True
+        assert dec["acted"] is False
+        assert dec["route"].startswith("fallback:")
+
+    # Finding 2 & Finding 3: Tier 2 surface/env hash updates + semantic synthesis token/USD guardrails
+    t2_repo = tmp_path / "t2_budget_surface"
+    (t2_repo / ".git" / "hooks").mkdir(parents=True)
+    (t2_repo / "src" / "app").mkdir(parents=True)
+    (t2_repo / "AGENTS.md").write_text("# AGENTS\n\nRule: Enforce budgets.\n", encoding="utf-8")
+    (t2_repo / "src" / "app" / "cli.py").write_text(
+        'import os, click\n\n@click.command()\n@click.option("--old", is_flag=True)\ndef run(old: bool) -> str:\n    return os.environ.get("APP_OLD", "")\n',
+        encoding="utf-8",
+    )
+    init_project(t2_repo, tier2=True)
+    c0_before = (t2_repo / ".ctx" / "CONTEXT-0.md").read_text(encoding="utf-8")
+    assert "--old" in c0_before
+    assert "APP_OLD" in c0_before
+
+    # Renaming `--old` -> `--new` and `APP_OLD` -> `APP_NEW` MUST change structural_hash and refresh CONTEXT-0.md
+    (t2_repo / "src" / "app" / "cli.py").write_text(
+        'import os, click\n\n@click.command()\n@click.option("--new", is_flag=True)\ndef run(new: bool) -> str:\n    return os.environ.get("APP_NEW", "")\n',
+        encoding="utf-8",
+    )
+    surf_ref = api_refresh(t2_repo)
+    assert surf_ref.dirs_processed >= 1
+    c0_after = (t2_repo / ".ctx" / "CONTEXT-0.md").read_text(encoding="utf-8")
+    assert "--new" in c0_after and "--old" not in c0_after
+    assert "APP_NEW" in c0_after and "APP_OLD" not in c0_after
+
+    # Budget guardrails (`token_budget=1`, `max_tokens_per_run: 1`, `max_usd_per_run: 0.000001`) MUST block LLM call
+    (t2_repo / ".ctxconfig").write_text(
+        "provider: openai\nmodel: gpt-4.1-mini\nmax_tokens_per_run: 1\nmax_usd_per_run: 0.000001\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-budget-guard")
+    monkeypatch.setenv("CTX_JEV", "off")
+    llm_calls = {"n": 0}
+
+    class _CountingStubClient:
+        provider = "openai"
+        model = "gpt-4.1-mini"
+
+        def complete_json(self, *args, **kwargs):
+            llm_calls["n"] += 1
+            return types.SimpleNamespace(
+                text='{"invariants": [{"category": "invariant", "scope": ".", "statement": "Should not have been called under 1-token budget."}]}',
+                input_tokens=900,
+                output_tokens=150,
+            )
+
+    with patch("ctx.llm.create_client", return_value=_CountingStubClient()):
+        bud_ref = api_refresh(t2_repo, synthesize=True, token_budget=1)
+
+    assert llm_calls["n"] == 0
+    assert bud_ref.tokens_used == 0
+    assert bud_ref.budget_exhausted is True
+    assert bud_ref.budget_guardrail is not None

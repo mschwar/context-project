@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ctx.config import MissingApiKeyError, estimate_cost, load_config
-from ctx.jev import decide as jev_decide
+from ctx.jev import _resolve_confined_path, decide as jev_decide
 from ctx.lock import LockSupersededError
 from ctx.skeleton import RepoSkeleton, _subsystem_key_for_rel_path, should_invoke_llm
 from ctx.stats_board import save_json_atomic
@@ -49,10 +49,12 @@ class InvariantSynthesisResult:
     est_cost_usd: float = 0.0
     model: str = ""
     warning: str | None = None
+    budget_exhausted: bool = False
+    budget_guardrail: str | None = None
 
 
 def invariants_cache_path(root: Path) -> Path:
-    return root.resolve() / ".ctx" / "invariants.json"
+    return _resolve_confined_path(root, ".ctx", "invariants.json")
 
 
 def build_invariants_json_schema() -> dict[str, object]:
@@ -93,9 +95,8 @@ def build_skeleton_snapshot(skeleton: RepoSkeleton) -> dict[str, Any]:
     """Build a compact structural signature snapshot for delta computation across commits."""
     bdocs = {d.relative_path: d.content_hash for d in skeleton.boundary_docs}
     surfaces = sorted(
-        f"{s.kind}:{s.name}@{s.file}"
+        f"{s.kind}:{s.name}@{s.file}" + (f"[{s.detail}]" if s.detail else "")
         for s in skeleton.operational_surfaces
-        if s.kind in ("cli_command", "http_route", "mcp_tool", "mcp_resource")
     )
     symbols = sorted(
         f"{f.relative_path}:{sym}"
@@ -185,7 +186,10 @@ def compute_structural_delta(
 
 
 def load_cached_invariants(root: Path) -> dict[str, Any] | None:
-    cache_file = invariants_cache_path(root)
+    try:
+        cache_file = invariants_cache_path(root)
+    except ValueError:
+        return None
     if not cache_file.is_file():
         return None
     try:
@@ -292,7 +296,7 @@ def _build_invariant_synthesis_prompt(root: Path, skeleton: RepoSkeleton) -> str
         "repo_name": skeleton.repo_name,
         "entrypoints": skeleton.entrypoints[:20],
         "operational_surfaces": [
-            {"kind": s.kind, "name": s.name, "file": s.file}
+            {"kind": s.kind, "name": s.name, "file": s.file, "detail": s.detail}
             for s in skeleton.operational_surfaces[:30]
         ],
         "subsystems": [
@@ -360,6 +364,7 @@ def synthesize_tier2_invariants(
     force: bool = False,
     provider: str | None = None,
     model: str | None = None,
+    token_budget: int | None = None,
     base_url: str | None = None,
     llm_client: Any | None = None,
 ) -> InvariantSynthesisResult:
@@ -406,6 +411,61 @@ def synthesize_tier2_invariants(
             model=cached_model,
         )
 
+    # Resolve budget & spend guardrails from explicit arg, env vars, and `.ctxconfig`
+    budget_cfg = None
+    try:
+        budget_cfg = load_config(
+            resolved_root,
+            provider=provider,
+            model=model,
+            token_budget=token_budget,
+            base_url=base_url,
+            require_api_key=False,
+        )
+    except Exception:
+        budget_cfg = None
+
+    token_caps = [
+        cap
+        for cap in (
+            token_budget,
+            budget_cfg.token_budget if budget_cfg is not None else None,
+            budget_cfg.max_tokens_per_run if budget_cfg is not None else None,
+        )
+        if cap is not None
+    ]
+    effective_token_cap = min(token_caps) if token_caps else None
+    hard_token_cap = budget_cfg.max_tokens_per_run if budget_cfg is not None else None
+    effective_usd_cap = budget_cfg.max_usd_per_run if budget_cfg is not None else None
+
+    if effective_token_cap is not None and effective_token_cap <= 0:
+        guard_msg = (
+            f"Token budget guardrail reached: 0 tokens available (limit {hard_token_cap:,})."
+            if hard_token_cap is not None and hard_token_cap <= 0
+            else None
+        )
+        return InvariantSynthesisResult(
+            invariants=cached_invs,
+            gate_action="budget_exhausted",
+            tokens_used=0,
+            est_cost_usd=0.0,
+            model=cached_model,
+            warning="Semantic invariant synthesis skipped (token budget exhausted).",
+            budget_exhausted=True,
+            budget_guardrail=guard_msg,
+        )
+    if effective_usd_cap is not None and effective_usd_cap <= 0.0:
+        return InvariantSynthesisResult(
+            invariants=cached_invs,
+            gate_action="budget_exhausted",
+            tokens_used=0,
+            est_cost_usd=0.0,
+            model=cached_model,
+            warning="Semantic invariant synthesis skipped (USD budget exhausted).",
+            budget_exhausted=True,
+            budget_guardrail=f"USD budget guardrail reached: $0.0000 estimated spend (limit ${effective_usd_cap:.4f}).",
+        )
+
     # Stage 2 (`judge` — Type 1 Jev `invariant_drift_material`):
     # Compare strictly against `baseline_snapshot` (the structure at the last successful LLM synthesis)
     # so cumulative small commits eventually exceed materiality thresholds and trigger a rebuild.
@@ -445,8 +505,8 @@ def synthesize_tier2_invariants(
 
     # Stage 3 (`deliberate` — Type-II LLM synthesis)
     client = llm_client
-    resolved_provider = provider or "openai"
-    resolved_model_name = model or ""
+    resolved_provider = provider or (budget_cfg.provider if budget_cfg is not None else "openai")
+    resolved_model_name = model or (budget_cfg.resolved_model() if budget_cfg is not None else "")
     if client is None:
         try:
             from ctx.llm import create_client
@@ -455,6 +515,7 @@ def synthesize_tier2_invariants(
                 resolved_root,
                 provider=provider,
                 model=model,
+                token_budget=token_budget,
                 base_url=base_url,
                 require_api_key=True,
             )
@@ -504,12 +565,72 @@ def synthesize_tier2_invariants(
         resolved_model_name = resolved_model_name or getattr(client, "model", "custom-llm")
 
     user_prompt = _build_invariant_synthesis_prompt(resolved_root, skeleton)
+    est_prompt_tokens = max(
+        1,
+        (len(INVARIANT_SYNTHESIS_SYSTEM_PROMPT.encode("utf-8")) + len(user_prompt.encode("utf-8"))) // 4,
+    )
+    projected_min_tokens = jev_tokens + est_prompt_tokens
+    est_min_cost = round(
+        jev_cost
+        + estimate_cost(
+            est_prompt_tokens,
+            resolved_provider,
+            resolved_model_name,
+            input_tokens=est_prompt_tokens,
+            output_tokens=0,
+        ),
+        9,
+    )
+
+    if effective_token_cap is not None and projected_min_tokens > effective_token_cap:
+        guard_msg = (
+            f"Token budget guardrail reached: {projected_min_tokens:,} estimated tokens "
+            f"(limit {hard_token_cap:,})."
+            if hard_token_cap is not None and projected_min_tokens > hard_token_cap
+            else None
+        )
+        return InvariantSynthesisResult(
+            invariants=cached_invs,
+            gate_action="budget_exhausted",
+            tokens_used=jev_tokens,
+            jev_input_tokens=jev_tokens,
+            est_cost_usd=round(jev_cost, 9),
+            model=cached_model,
+            warning=(
+                f"Semantic invariant synthesis skipped: {projected_min_tokens:,} estimated prompt tokens "
+                f"exceed token budget ({effective_token_cap:,})."
+            ),
+            budget_exhausted=True,
+            budget_guardrail=guard_msg,
+        )
+    if effective_usd_cap is not None and est_min_cost > effective_usd_cap:
+        guard_msg = (
+            f"USD budget guardrail reached: ${est_min_cost:.6f} estimated spend "
+            f"(limit ${effective_usd_cap:.6f})."
+        )
+        return InvariantSynthesisResult(
+            invariants=cached_invs,
+            gate_action="budget_exhausted",
+            tokens_used=jev_tokens,
+            jev_input_tokens=jev_tokens,
+            est_cost_usd=round(jev_cost, 9),
+            model=cached_model,
+            warning=f"Semantic invariant synthesis skipped ({guard_msg})",
+            budget_exhausted=True,
+            budget_guardrail=guard_msg,
+        )
+
+    max_out_tokens = (
+        2048
+        if effective_token_cap is None
+        else max(1, min(2048, effective_token_cap - projected_min_tokens))
+    )
     try:
         llm_res = client.complete_json(
             INVARIANT_SYNTHESIS_SYSTEM_PROMPT,
             user_prompt,
             json_schema=build_invariants_json_schema(),
-            max_tokens=2048,
+            max_tokens=max_out_tokens,
         )
         invariants = parse_invariants_response(llm_res.text)
     except LockSupersededError:
@@ -530,6 +651,7 @@ def synthesize_tier2_invariants(
     in_tok = int(getattr(llm_res, "input_tokens", 0) or 0)
     out_tok = int(getattr(llm_res, "output_tokens", 0) or 0)
     total_tok = in_tok + out_tok
+    combined_tok = total_tok + jev_tokens
     llm_cost = estimate_cost(
         total_tok,
         resolved_provider,
@@ -538,6 +660,23 @@ def synthesize_tier2_invariants(
         output_tokens=out_tok,
     )
     total_cost = round(llm_cost + jev_cost, 9)
+
+    post_guardrail: str | None = None
+    post_exhausted = False
+    if effective_token_cap is not None and combined_tok >= effective_token_cap:
+        post_exhausted = True
+    if hard_token_cap is not None and combined_tok >= hard_token_cap:
+        post_exhausted = True
+        post_guardrail = (
+            f"Token budget guardrail reached: {combined_tok:,} tokens used "
+            f"(limit {hard_token_cap:,})."
+        )
+    elif effective_usd_cap is not None and total_cost >= effective_usd_cap:
+        post_exhausted = True
+        post_guardrail = (
+            f"USD budget guardrail reached: ${total_cost:.6f} estimated spend "
+            f"(limit ${effective_usd_cap:.6f})."
+        )
 
     _persist_invariants_cache(
         resolved_root,
@@ -556,4 +695,6 @@ def synthesize_tier2_invariants(
         jev_input_tokens=jev_tokens,
         est_cost_usd=total_cost,
         model=resolved_model_name,
+        budget_exhausted=post_exhausted,
+        budget_guardrail=post_guardrail,
     )

@@ -1368,8 +1368,9 @@ def extract_skeleton(
     for ep in entrypoints:
         struct_hasher.update(f"ep:{ep}\n".encode("utf-8"))
     for surf in operational_surfaces:
-        if surf.kind in ("cli_command", "http_route", "mcp_tool", "mcp_resource"):
-            struct_hasher.update(f"surf:{surf.kind}|{surf.name}|{surf.file}\n".encode("utf-8"))
+        struct_hasher.update(
+            f"surf:{surf.kind}|{surf.name}|{surf.file}|{surf.detail}\n".encode("utf-8")
+        )
     for f in file_skeletons:
         struct_hasher.update(
             f"file:{f.relative_path}|lang:{f.language or ''}|sym:{','.join(f.symbols)}|imp:{','.join(f.imports)}\n".encode(

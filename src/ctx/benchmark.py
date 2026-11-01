@@ -26,8 +26,12 @@ import json
 import math
 import re
 import time
-import tomllib
 from collections import deque
+
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
+    tomllib = None  # type: ignore[assignment]
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -198,19 +202,40 @@ def _const_str(node: ast.AST | None) -> str | None:
     return None
 
 
+def _extract_pyproject_script_names(toml_text: str) -> list[str]:
+    """Extract `[project.scripts]` CLI entrypoint names with a Python 3.10-safe fallback."""
+    if tomllib is not None:
+        try:
+            pyproj = tomllib.loads(toml_text)
+            scripts = pyproj.get("project", {}).get("scripts", {})
+            if isinstance(scripts, dict):
+                return [s.strip() for s in scripts if isinstance(s, str) and s.strip()]
+        except Exception:
+            return []
+        return []
+
+    names: list[str] = []
+    in_scripts = False
+    for raw_line in toml_text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_scripts = stripped[1:-1].strip() == "project.scripts"
+            continue
+        if in_scripts and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip().strip("\"'")
+            if key and re.fullmatch(r"[A-Za-z0-9_.-]+", key):
+                names.append(key)
+    return names
+
+
 def _extract_oracle_surfaces(files: dict[str, str]) -> set[tuple[str, str, str]]:
     surfaces: set[tuple[str, str, str]] = set()
 
     if "pyproject.toml" in files:
-        try:
-            pyproj = tomllib.loads(files["pyproject.toml"])
-            scripts = pyproj.get("project", {}).get("scripts", {})
-            if isinstance(scripts, dict):
-                for sname in scripts:
-                    if isinstance(sname, str) and sname.strip():
-                        surfaces.add(("cli_command", sname.strip(), "pyproject.toml"))
-        except Exception:
-            pass
+        for sname in _extract_pyproject_script_names(files["pyproject.toml"]):
+            surfaces.add(("cli_command", sname, "pyproject.toml"))
 
     if "package.json" in files:
         try:
@@ -587,22 +612,35 @@ def _execute_regex_grep(
     include_tests: bool,
     only_tests: bool,
     max_lines: int,
+    only_source: bool = False,
+    max_per_file: int | None = None,
 ) -> tuple[str, set[str]]:
-    """Run an actual line-by-line regex grep over on-disk file contents."""
+    """Run an actual line-by-line regex grep over on-disk file contents.
+
+    Only files with at least one line emitted within `max_lines` are added to `matched_files`,
+    guaranteeing 1:1 parity between counted token payloads and scored retrieval hits.
+    """
     matched_lines: list[str] = []
     matched_files: set[str] = set()
     for rel in sorted(files):
+        if only_source and Path(rel).suffix.lower() not in _SOURCE_EXTS:
+            continue
         is_t = _oracle_is_test(rel)
         if only_tests and not is_t:
             continue
         if not include_tests and is_t:
             continue
         content = files[rel]
+        file_hits = 0
         for lineno, line in enumerate(content.splitlines(), start=1):
             if pattern.search(line):
+                if len(matched_lines) >= max_lines:
+                    return "\n".join(matched_lines), matched_files
                 matched_files.add(rel)
-                if len(matched_lines) < max_lines:
-                    matched_lines.append(f"{rel}:{lineno}:{line[:160]}")
+                matched_lines.append(f"{rel}:{lineno}:{line[:160]}")
+                file_hits += 1
+                if max_per_file is not None and file_hits >= max_per_file:
+                    break
     return "\n".join(matched_lines), matched_files
 
 
@@ -786,6 +824,8 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
         include_tests=False,
         only_tests=False,
         max_lines=120,
+        only_source=True,
+        max_per_file=3,
     )
     a_grep_prod_files.discard(focal_target)
     a_steps.append(("grep_prod", prod_grep_out))
@@ -796,6 +836,8 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
         include_tests=True,
         only_tests=True,
         max_lines=80,
+        only_source=True,
+        max_per_file=3,
     )
     a_steps.append(("grep_tests", test_grep_out))
     if focal_stem:
@@ -863,6 +905,8 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
         include_tests=False,
         only_tests=False,
         max_lines=120,
+        only_source=True,
+        max_per_file=3,
     )
     b_grep_prod_files.discard(focal_target)
     b_steps.append(("grep_prod_symbols", b_prod_grep_out))
@@ -873,6 +917,8 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
         include_tests=True,
         only_tests=True,
         max_lines=80,
+        only_source=True,
+        max_per_file=3,
     )
     b_steps.append(("grep_tests_symbols", b_test_grep_out))
 

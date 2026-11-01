@@ -226,6 +226,7 @@ def _refresh_tier2_locked(
     synthesize: bool = False,
     provider: str | None = None,
     model: str | None = None,
+    token_budget: int | None = None,
     base_url: str | None = None,
 ) -> RefreshResult | None:
     """Refresh Tier 2 (.ctx/) maps while the caller already holds CtxLock(root).
@@ -306,6 +307,8 @@ def _refresh_tier2_locked(
     in_tok = 0
     out_tok = 0
     est_cost = 0.0
+    budget_exhausted = False
+    budget_guardrail: str | None = None
     refresh_warnings: list[str] = []
     try:
         fenced_mkdir(ctx_dir, parents=True, exist_ok=True)
@@ -318,6 +321,7 @@ def _refresh_tier2_locked(
                 force=force,
                 provider=provider,
                 model=model,
+                token_budget=token_budget,
                 base_url=base_url,
             )
             synthesized_invs = inv_res.invariants or None
@@ -325,6 +329,8 @@ def _refresh_tier2_locked(
             in_tok = inv_res.input_tokens
             out_tok = inv_res.output_tokens
             est_cost = inv_res.est_cost_usd
+            budget_exhausted = inv_res.budget_exhausted
+            budget_guardrail = inv_res.budget_guardrail
             meta["synthesize_invariants"] = True
             meta["invariants_gate_action"] = inv_res.gate_action
             if inv_res.warning:
@@ -359,10 +365,11 @@ def _refresh_tier2_locked(
         files_processed=skeleton.total_files,
         tokens_used=tokens_used,
         errors=[],
-        budget_exhausted=False,
+        budget_exhausted=budget_exhausted,
         strategy="tier2",
         est_cost_usd=est_cost,
         stale_directories=[],
+        budget_guardrail=budget_guardrail,
         input_tokens=in_tok,
         output_tokens=out_tok,
         warnings=refresh_warnings,
@@ -379,6 +386,7 @@ def _refresh_tier2(
     synthesize: bool = False,
     provider: str | None = None,
     model: str | None = None,
+    token_budget: int | None = None,
     base_url: str | None = None,
     _allow_fallback: bool = True,
     _from_hook: bool = False,
@@ -425,6 +433,7 @@ def _refresh_tier2(
             synthesize=synthesize,
             provider=provider,
             model=model,
+            token_budget=token_budget,
             base_url=base_url,
         )
         if locked_result is not None:
@@ -607,6 +616,7 @@ def refresh(
             synthesize=synthesize,
             provider=provider,
             model=model,
+            token_budget=token_budget,
             base_url=base_url,
             _allow_fallback=_mode_hops < 4,
             _mode_hops=_mode_hops,

@@ -477,12 +477,44 @@ def validate_head(head: Any, expected_id: str | None = None) -> list[str]:
 _HEAD_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
+def _is_valid_prob(value: Any) -> bool:
+    """Return True iff `value` is a finite non-boolean number in [0.0, 1.0]."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and 0.0 <= float(value) <= 1.0
+    )
+
+
+def _resolve_confined_path(root: Path, *rel_parts: str) -> Path:
+    """Resolve `root / rel_parts` while rejecting symlinks along `rel_parts` or escape outside `root`."""
+    resolved_root = root.resolve()
+    cur = resolved_root
+    for part in rel_parts:
+        cur = cur / part
+        if cur.is_symlink():
+            raise ValueError(f"Refusing to traverse symlink outside confined root: {cur}")
+    resolved_target = cur.resolve()
+    if resolved_target != resolved_root and not resolved_target.is_relative_to(resolved_root):
+        raise ValueError(f"Path {resolved_target} escapes confined root {resolved_root}")
+    return resolved_target
+
+
 def list_head_ids(root: Path | None = None) -> list[str]:
     ids = set(BUILTIN_HEADS.keys())
     if root is not None:
-        custom_dir = root.resolve() / ".ctx" / "heads"
+        try:
+            custom_dir = _resolve_confined_path(root, ".ctx", "heads")
+        except ValueError:
+            return sorted(ids)
+        resolved_root = root.resolve()
         if custom_dir.is_dir():
             for p in custom_dir.glob("*.json"):
+                if p.is_symlink():
+                    continue
+                if not p.resolve().is_relative_to(resolved_root):
+                    continue
                 if _HEAD_ID_RE.fullmatch(p.stem):
                     ids.add(p.stem)
     return sorted(ids)
@@ -494,9 +526,8 @@ def load_head(head_id: str, root: Path | None = None) -> dict[str, Any]:
             f"Invalid Jev head ID {head_id!r}: must match ^[A-Za-z0-9_-]+$"
         )
     if root is not None:
-        custom_dir = (root.resolve() / ".ctx" / "heads").resolve()
-        custom = (custom_dir / f"{head_id}.json").resolve()
-        if custom.parent == custom_dir and custom.is_file():
+        custom = _resolve_confined_path(root, ".ctx", "heads", f"{head_id}.json")
+        if custom.is_file():
             try:
                 raw = json.loads(custom.read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -728,11 +759,12 @@ def _parse_jev_answer(head: dict[str, Any], answer: Any) -> dict[str, Any]:
         }
 
     probs = answer.get("probabilities")
-    distribution = (
-        {str(k): float(v) for k, v in probs.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
-        if isinstance(probs, dict)
-        else None
-    )
+    if probs is not None:
+        if not isinstance(probs, dict) or any(not _is_valid_prob(v) for v in probs.values()):
+            return {"abstain_reason": "JEV_BAD_RESPONSE: invalid probabilities"}
+        distribution: dict[str, float] | None = {str(k): float(v) for k, v in probs.items()}
+    else:
+        distribution = None
     extra: dict[str, Any] = {}
     if head["type"] == "choice":
         output = answer.get("choice")
@@ -741,19 +773,30 @@ def _parse_jev_answer(head: dict[str, Any], answer: Any) -> dict[str, Any]:
             return {"abstain_reason": "JEV_BAD_RESPONSE: score probabilities missing"}
         modal = max(distribution, key=distribution.get)  # type: ignore[arg-type]
         output = int(modal) if modal.isdigit() else None
-        extra["expected_score"] = answer.get("score")
+        raw_score = answer.get("score")
+        if raw_score is not None and (
+            not isinstance(raw_score, (int, float))
+            or isinstance(raw_score, bool)
+            or not math.isfinite(float(raw_score))
+        ):
+            return {"abstain_reason": "JEV_BAD_RESPONSE: invalid score"}
+        extra["expected_score"] = None if raw_score is None else float(raw_score)
 
     if output not in valid_outputs(head):
         return {"abstain_reason": f"JEV_INVALID_OUTPUT: {output!r}"}
-    confidence = answer.get("confidence")
-    source = "vendor"
-    if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
+    raw_confidence = answer.get("confidence")
+    if raw_confidence is not None:
+        if not _is_valid_prob(raw_confidence):
+            return {"abstain_reason": "JEV_BAD_RESPONSE: invalid confidence"}
+        confidence: float | None = float(raw_confidence)
+        source: str | None = "vendor"
+    else:
         confidence = max(distribution.values()) if distribution else None
         source = "derived" if confidence is not None else None
     return {
         "output": output,
         "distribution": distribution,
-        "confidence": None if confidence is None else float(confidence),
+        "confidence": confidence,
         "confidence_source": source,
         **extra,
     }
@@ -885,7 +928,8 @@ def route_decision(
     if pstate == "SHADOW":
         return {"route": fallback, "acted": False, "promotion_state": pstate, "reason": "SHADOW: recorded only"}
     threshold = float(head["thresholds"]["act_min_confidence"])
-    confidence = result.get("confidence")
+    raw_conf = result.get("confidence")
+    confidence = float(raw_conf) if _is_valid_prob(raw_conf) else None
     if pstate == "ADVISORY":
         gov: dict[str, Any] = {
             "route": fallback,
@@ -908,7 +952,7 @@ def route_decision(
             "route": fallback,
             "acted": False,
             "promotion_state": pstate,
-            "reason": f"{pstate}: confidence {confidence} below {threshold}",
+            "reason": f"{pstate}: confidence {raw_conf} below {threshold}",
         }
     return {
         "route": "head",
@@ -919,15 +963,19 @@ def route_decision(
 
 
 def decisions_trace_path(root: Path) -> Path:
-    return root.resolve() / ".ctx-cache" / "jev_decisions.jsonl"
+    return _resolve_confined_path(root, ".ctx-cache", "jev_decisions.jsonl")
 
 
 def append_decision_traces(root: Path, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not records:
         return []
-    trace_file = decisions_trace_path(root)
-    guard_file = trace_file.parent / ".jev_decisions.guard"
-    trace_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_dir = _resolve_confined_path(root, ".ctx-cache")
+    trace_file = _resolve_confined_path(root, ".ctx-cache", "jev_decisions.jsonl")
+    guard_file = _resolve_confined_path(root, ".ctx-cache", ".jev_decisions.guard")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    # Re-verify confinement after mkdir in case of concurrent path replacement
+    _resolve_confined_path(root, ".ctx-cache", "jev_decisions.jsonl")
+    _resolve_confined_path(root, ".ctx-cache", ".jev_decisions.guard")
 
     fd: int | None = None
     deadline = time.monotonic() + 2.0
