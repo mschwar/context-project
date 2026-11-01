@@ -370,6 +370,18 @@ def synthesize_tier2_invariants(
 ) -> InvariantSynthesisResult:
     """Run the 3-stage gated Tier 2 invariant synthesis pipeline (`code -> Jev judge -> LLM deliberate`)."""
     resolved_root = root.resolve()
+    try:
+        invariants_cache_path(resolved_root)
+    except ValueError as exc:
+        # Refuse symlinked `.ctx` / `.ctx/invariants.json` BEFORE any Jev or paid LLM call
+        # so refreshes and git hooks never bill tokens on an unwritable confined cache path.
+        return InvariantSynthesisResult(
+            invariants=[],
+            gate_action="unwritable_cache_skipped",
+            tokens_used=0,
+            est_cost_usd=0.0,
+            warning=f"Semantic invariant synthesis skipped ({exc}); using deterministic Tier 2 map.",
+        )
     cached = load_cached_invariants(resolved_root)
     cached_invs = _normalize_invariants_list(cached.get("invariants")) if cached else []
     cached_model = str(cached.get("model") or "") if cached else ""
@@ -537,7 +549,7 @@ def synthesize_tier2_invariants(
                     synthesized_structural_hash=synth_struct_hash,
                     synthesized_boundary_doc_hash=synth_bdoc_hash,
                 )
-            except OSError:
+            except (OSError, ValueError):
                 pass
             return InvariantSynthesisResult(
                 invariants=cached_invs,

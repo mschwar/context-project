@@ -894,3 +894,29 @@ def test_round4_qa_parse_failure_billing_symlink_trace_graceful_and_tier2_dry_ru
     assert dec_env["result"] == "DECIDED"
     assert dec_env["decisions"][0]["effective_output"] is False
     assert not (outside_cache / "jev_decisions.jsonl").exists()
+
+    # Round-5 check: Symlinked `.ctx` MUST skip paid synthesis BEFORE calling the LLM (zero tokens billed)
+    sym_ctx_repo = tmp_path / "sym_ctx_repo"
+    outside_ctx = tmp_path / "outside_ctx_dir"
+    (sym_ctx_repo / "src").mkdir(parents=True)
+    (sym_ctx_repo / "src" / "main.py").write_text("def run() -> int:\n    return 1\n", encoding="utf-8")
+    outside_ctx.mkdir()
+    (outside_ctx / "metadata.json").write_text('{"mode": "tier2"}', encoding="utf-8")
+    (sym_ctx_repo / ".ctx").symlink_to(outside_ctx, target_is_directory=True)
+
+    paid_sym_calls = {"n": 0}
+
+    class _NeverCalledClient:
+        provider = "openai"
+        model = "gpt-4.1-mini"
+
+        def complete_json(self, *args, **kwargs):
+            paid_sym_calls["n"] += 1
+            raise AssertionError("Paid LLM must not be invoked when .ctx is a symlink!")
+
+    with patch("ctx.llm.create_client", return_value=_NeverCalledClient()):
+        sym_ref = api_refresh(sym_ctx_repo, synthesize=True)
+
+    assert paid_sym_calls["n"] == 0
+    assert sym_ref.tokens_used == 0
+    assert any("symlink" in w.lower() for w in sym_ref.warnings)
