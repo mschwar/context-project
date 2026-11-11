@@ -1,24 +1,25 @@
-import pytest
-from click.testing import CliRunner
-from fastapi.testclient import TestClient
+"""Tests for the optional FastAPI HTTP server (`ctx.server`)."""
+
+from __future__ import annotations
+
+from importlib import import_module
 from pathlib import Path
 from unittest.mock import MagicMock
-from importlib import import_module
 
-# Import app for TestClient directly
+from click.testing import CliRunner
+from fastapi.testclient import TestClient
+import pytest
+
 from ctx.server import app
-# Import write_manifest for creating test data
-from ctx.manifest import write_manifest
+
 
 @pytest.fixture
 def cli_runner():
     return CliRunner()
 
+
 @pytest.fixture
 def test_client(tmp_path):
-    """Create a test client with a tmp_path as the served root."""
-    from ctx.server import app
-    # Set the served root to tmp_path for all tests using this fixture
     app.state.served_root = tmp_path.resolve()
     return TestClient(app)
 
@@ -26,18 +27,16 @@ def test_client(tmp_path):
 def test_serve_command_calls_start_server(cli_runner, monkeypatch):
     cli_module = import_module("ctx.cli")
     mock_start_server = MagicMock()
-    # Patch start_server in ctx.server module, as it's imported within the cli.serve function
     monkeypatch.setattr("ctx.server.start_server", mock_start_server)
 
     result = cli_runner.invoke(cli_module.cli, ["serve", "--host", "127.0.0.2", "--port", "8001"])
 
     assert result.exit_code == 0
-    # Default path is "." which resolves to the current test directory
     mock_start_server.assert_called_once()
     call_kwargs = mock_start_server.call_args[1]
     assert call_kwargs["host"] == "127.0.0.2"
     assert call_kwargs["port"] == 8001
-    assert "root" in call_kwargs  # root should be passed
+    assert "root" in call_kwargs
     assert "Starting ctx HTTP server on http://127.0.0.2:8001" in result.output
 
 
@@ -46,7 +45,6 @@ def test_serve_command_with_explicit_path(cli_runner, monkeypatch, tmp_path):
     mock_start_server = MagicMock()
     monkeypatch.setattr("ctx.server.start_server", mock_start_server)
 
-    # Create a test directory to serve
     serve_root = tmp_path / "project"
     serve_root.mkdir()
 
@@ -81,57 +79,38 @@ def test_serve_command_with_mcp_calls_stdio_server(cli_runner, monkeypatch, tmp_
     assert result.output == ""
 
 
-def test_get_mcp_context_success(test_client, tmp_path):
-    # test_client fixture sets served_root to tmp_path
-    # Create manifest under tmp_path/project/subdir
-    test_dir = tmp_path / "project" / "subdir"
-    test_dir.mkdir(parents=True)
-    manifest_body = """# Subdir
-- file.py - a python file"""
-    write_manifest(
-        path=test_dir,
-        model="test-model",
-        content_hash="sha256:dummy_hash",
-        files=1,
-        dirs=0,
-        tokens_total=20,
-        body=manifest_body
+def test_get_mcp_context_serves_deterministic_ctx_map(test_client, tmp_path):
+    ctx_dir = tmp_path / ".ctx"
+    ctx_dir.mkdir(parents=True)
+    (ctx_dir / "CONTEXT.md").write_text(
+        "---\nmode: tier2\n---\n# repo — Architecture\n",
+        encoding="utf-8",
     )
 
-    # Use path relative to served root (tmp_path)
-    relative_path = f"project/subdir"
-    response = test_client.get(f"/mcp/context/{relative_path}")
+    for endpoint in ("/mcp/context", "/mcp/context/."):
+        response = test_client.get(endpoint)
+        assert response.status_code == 200
+        assert "mode: tier2" in response.json()["content"]
 
-    assert response.status_code == 200
-    assert "content" in response.json()
-    returned_content = response.json()["content"]
-    assert "# Subdir" in returned_content
-    assert "- file.py - a python file" in returned_content
-    assert "content_hash: sha256:dummy_hash" in returned_content
-    assert "model: test-model" in returned_content
+    assert test_client.get("/mcp/context/.ctx").status_code == 404
 
 
-def test_get_mcp_context_not_found(test_client, tmp_path):
-    # Create the directory, but don't put a CONTEXT.md in it
-    non_existent_manifest_dir = tmp_path / "dir_without_manifest"
-    non_existent_manifest_dir.mkdir()
-    # Use relative path
-    response = test_client.get(f"/mcp/context/dir_without_manifest")
+def test_get_mcp_context_not_found_when_uninitialized(test_client, tmp_path):
+    sub = tmp_path / "dir_without_manifest"
+    sub.mkdir()
+    response = test_client.get("/mcp/context/dir_without_manifest")
     assert response.status_code == 404
-    assert "CONTEXT.md not found" in response.json()["detail"]
 
 
 def test_get_mcp_context_not_a_directory(test_client, tmp_path):
     test_file = tmp_path / "test_file.txt"
-    test_file.write_text("hello")
-    # Use relative path
-    response = test_client.get(f"/mcp/context/test_file.txt")
+    test_file.write_text("hello", encoding="utf-8")
+    response = test_client.get("/mcp/context/test_file.txt")
     assert response.status_code == 404
     assert "is not a directory" in response.json()["detail"]
 
 
 def test_http_root_reports_http_server(test_client):
     response = test_client.get("/")
-
     assert response.status_code == 200
     assert response.json()["message"] == "ctx HTTP server is running"

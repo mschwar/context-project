@@ -40,7 +40,6 @@ from typing import Any
 from ctx import __version__
 from ctx.ignore import load_ignore_patterns, should_ignore
 from ctx.impact import analyze_impact
-from ctx.invariants import build_skeleton_snapshot, compute_structural_delta
 from ctx.skeleton import extract_skeleton, render_context_0
 
 _ORACLE_SKIP_DIRS = frozenset({
@@ -997,13 +996,6 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
     c_test_recall, c_test_prec, c_test_f1 = _precision_and_f1(c_impact_tests, oracle.coupled_tests)
     c_mean = (c_arch_recall + c_surf_recall + c_blast_recall + c_test_recall) / 4.0
 
-    # Modeled System-One Jev delta payload tokens for a 1-symbol minor structural delta
-    prev_snap = build_skeleton_snapshot(sk)
-    if prev_snap.get("symbols"):
-        prev_snap["symbols"] = prev_snap["symbols"][:-1]
-    sample_delta = compute_structural_delta(prev_snap, sk)
-    jev_delta_tokens = _approx_tokens(json.dumps(sample_delta, sort_keys=True)) + 145
-
     cond_c = ConditionMetrics(
         condition="tier2_plus_impact",
         tool_turns=cond_c_turns,
@@ -1019,7 +1011,7 @@ def benchmark_repository(root: Path) -> RepoBenchmarkResult:
         mean_recall=round(c_mean, 4),
         maint_llm_tokens_impl_commit=0,
         maint_llm_tokens_minor_struct_commit=0,
-        maint_jev_tokens_minor_struct_commit=jev_delta_tokens,
+        maint_jev_tokens_minor_struct_commit=0,
     )
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -1175,8 +1167,8 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
         f"(`{aggs['tier2_plus_impact']['mean_recall']:.4f}` vs `{aggs['raw_grep']['mean_recall']:.4f}`) and "
         f"**{blast_f1_delta:+.1f} percentage points blast-radius F1 delta** "
         f"(`{aggs['tier2_plus_impact'].get('mean_blast_radius_f1', 0.0):.4f}` vs `{aggs['raw_grep'].get('mean_blast_radius_f1', 0.0):.4f}`)",
-        f"- **0 modeled Type-II LLM maintenance tokens** on implementation-only commits (`should_invoke_llm() == False`) "
-        f"and non-material structural tweaks gated by Type 1 Jev (`invariant_drift_material`, ~{aggs['tier2_plus_impact']['maint_jev_tokens_minor_struct_commit']:.0f} modeled System-One input tokens @ `$0.042/1M`)",
+        f"- **0 LLM maintenance tokens** across both implementation-only commits and structural commits "
+        f"(100% deterministic local AST & import-graph extraction)",
         "",
         "## Aggregate Condition Comparison",
         "",

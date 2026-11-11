@@ -1,344 +1,76 @@
-"""Tests for ctx.config — config file, env var, and CLI resolution."""
+"""Tests for deterministic zero-LLM ctx.config."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 import pytest
-import yaml
 
-from ctx.config import Config, estimate_cost, load_config
-
-
-def _clear_ctx_env(monkeypatch) -> None:
-    for name in (
-        "CTX_PROVIDER",
-        "CTX_MODEL",
-        "CTX_BASE_URL",
-        "CTX_MAX_FILE_TOKENS",
-        "CTX_MAX_DEPTH",
-        "CTX_TOKEN_BUDGET",
-        "CTX_MAX_TOKENS_PER_RUN",
-        "CTX_MAX_USD_PER_RUN",
-        "CTX_BATCH_SIZE",
-        "CTX_CACHE_PATH",
-        "CTX_MAX_CACHE_ENTRIES",
-        "CTX_WATCH_DEBOUNCE",
-        "CTX_EXTENSIONS",
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-    ):
-        monkeypatch.delenv(name, raising=False)
+from ctx.config import (
+    Config,
+    load_config,
+    resolve_configured_extensions,
+    resolve_project_anchor,
+)
+from ctx.hasher import normalize_extensions
 
 
-def _write_ctxconfig(path, data: dict) -> None:
-    (path / ".ctxconfig").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+def test_default_config_and_normalized_extensions() -> None:
+    cfg = Config()
+    assert cfg.max_depth is None
+    assert cfg.extensions is None
+
+    cfg2 = Config(max_depth=4, extensions=["py", " .TS ", ".py", ""])
+    assert cfg2.max_depth == 4
+    assert normalize_extensions(cfg2.extensions) == {".py", ".ts"}
 
 
-def _placeholder(label: str) -> str:
-    return f"{label}-value"
-
-
-def test_load_config_defaults(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    anthropic_value = _placeholder("anthropic")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", anthropic_value)
-
-    config = load_config(tmp_path)
-
-    assert config.provider == "anthropic"
-    assert config.model == "claude-haiku-4-5-20251001"
-    assert config.api_key == anthropic_value
-    assert config.max_file_tokens == 8000
-    assert config.max_depth is None
-    assert config.extensions is None
-
-
-def test_config_repr_redacts_api_key() -> None:
-    value = _placeholder("repr")
-    secret_field = next(name for name in Config.__dataclass_fields__ if name.endswith("_key"))
-    config = Config(**{secret_field: value})
-
-    assert value not in repr(config)
-
-
-def test_load_config_reads_nearest_parent_ctxconfig(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    root_dir = tmp_path / "root"
-    nested_dir = root_dir / "project" / "src"
-    nested_dir.mkdir(parents=True)
-
-    _write_ctxconfig(root_dir, {"provider": "anthropic", "model": "root-model"})
-    _write_ctxconfig(
-        root_dir / "project",
-        {
-            "provider": "openai",
-            "model": "gpt-5-mini",
-            "max_file_tokens": 1234,
-            "max_depth": 2,
-            "extensions": [".py", ".md"],
-        },
+def test_load_config_precedence_file_env_and_cli_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".ctxconfig").write_text(
+        "max_depth: 5\nextensions:\n  - .py\n  - .go\n",
+        encoding="utf-8",
     )
-    openai_value = _placeholder("openai")
-    monkeypatch.setenv("OPENAI_API_KEY", openai_value)
+    cfg_file = load_config(tmp_path)
+    assert cfg_file.max_depth == 5
+    assert cfg_file.extensions == [".py", ".go"]
 
-    config = load_config(nested_dir)
+    monkeypatch.setenv("CTX_MAX_DEPTH", "3")
+    monkeypatch.setenv("CTX_EXTENSIONS", ".rs, ts")
+    cfg_env = load_config(tmp_path)
+    assert cfg_env.max_depth == 3
+    assert normalize_extensions(cfg_env.extensions) == {".rs", ".ts"}
 
-    assert config.provider == "openai"
-    assert config.model == "gpt-5-mini"
-    assert config.api_key == openai_value
-    assert config.max_file_tokens == 1234
-    assert config.max_depth == 2
-    assert config.extensions == [".py", ".md"]
-
-
-def test_load_config_env_overrides_file(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    _write_ctxconfig(tmp_path, {"provider": "anthropic", "model": "file-model", "max_depth": 1})
-    monkeypatch.setenv("CTX_PROVIDER", "openai")
-    monkeypatch.setenv("CTX_MODEL", "env-model")
-    openai_value = _placeholder("openai")
-    monkeypatch.setenv("OPENAI_API_KEY", openai_value)
-
-    config = load_config(tmp_path)
-
-    assert config.provider == "openai"
-    assert config.model == "env-model"
-    assert config.max_depth == 1
-    assert config.api_key == openai_value
+    cfg_cli = load_config(tmp_path, max_depth=1, extensions=[".py"])
+    assert cfg_cli.max_depth == 1
+    assert cfg_cli.extensions == [".py"]
 
 
-def test_load_config_cli_overrides_env(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    _write_ctxconfig(tmp_path, {"provider": "anthropic", "model": "file-model"})
-    monkeypatch.setenv("CTX_PROVIDER", "anthropic")
-    monkeypatch.setenv("CTX_MODEL", "env-model")
-    anthropic_value = _placeholder("anthropic")
-    openai_value = _placeholder("openai")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", anthropic_value)
-    monkeypatch.setenv("OPENAI_API_KEY", openai_value)
+def test_load_config_invalid_yaml_and_invalid_max_depth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".ctxconfig").write_text("- not-a-mapping\n", encoding="utf-8")
+    with pytest.raises(click.UsageError, match="mapping"):
+        load_config(tmp_path)
 
-    config = load_config(tmp_path, provider="openai", model="cli-model", max_depth=5)
+    (tmp_path / ".ctxconfig").write_text("max_depth: -1\n", encoding="utf-8")
+    with pytest.raises(click.UsageError, match="non-negative"):
+        load_config(tmp_path)
 
-    assert config.provider == "openai"
-    assert config.model == "cli-model"
-    assert config.max_depth == 5
-    assert config.api_key == openai_value
-
-
-def test_load_config_uses_openai_default_model(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    monkeypatch.setenv("CTX_PROVIDER", "openai")
-    openai_value = _placeholder("openai")
-    monkeypatch.setenv("OPENAI_API_KEY", openai_value)
-
-    config = load_config(tmp_path)
-
-    assert config.provider == "openai"
-    assert config.model == "gpt-4o-mini"
-    assert config.api_key == openai_value
-
-
-def test_load_config_missing_api_key(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-
-    with pytest.raises(click.UsageError, match="ANTHROPIC_API_KEY"):
+    (tmp_path / ".ctxconfig").write_text("max_depth: 2\n", encoding="utf-8")
+    monkeypatch.setenv("CTX_MAX_DEPTH", "not-an-int")
+    with pytest.raises(ValueError):
         load_config(tmp_path)
 
 
-def test_load_config_ollama_no_api_key_required(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
+def test_resolve_project_anchor_and_configured_extensions(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".ctxconfig").write_text("extensions: ['.py', '.md']\n", encoding="utf-8")
+    nested = repo / "src" / "sub"
+    nested.mkdir(parents=True)
 
-    config = load_config(tmp_path, provider="ollama")
-
-    assert config.provider == "ollama"
-    assert config.model == "llama3.2"
-    assert config.base_url == "http://localhost:11434/v1"
-    assert config.api_key == "not-needed"
-
-
-def test_load_config_lmstudio_no_api_key_required(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-
-    config = load_config(tmp_path, provider="lmstudio")
-
-    assert config.provider == "lmstudio"
-    assert config.model == "loaded-model"
-    assert config.base_url == "http://localhost:1234/v1"
-
-
-def test_load_config_local_provider_custom_base_url(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-
-    config = load_config(tmp_path, provider="ollama", base_url="http://gpu-server:11434/v1")
-
-    assert config.base_url == "http://gpu-server:11434/v1"
-
-
-def test_load_config_token_budget_from_cli(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", _placeholder("anthropic"))
-
-    config = load_config(tmp_path, token_budget=50000)
-
-    assert config.token_budget == 50000
-
-
-def test_load_config_token_budget_from_ctxconfig(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", _placeholder("anthropic"))
-    _write_ctxconfig(tmp_path, {"token_budget": 100000})
-
-    config = load_config(tmp_path)
-
-    assert config.token_budget == 100000
-
-
-def test_load_config_prompts(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    anthropic_value = _placeholder("anthropic")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", anthropic_value)
-
-    _write_ctxconfig(
-        tmp_path,
-        {
-            "prompts": {
-                "file_summary": "Summarize this file: {json_payload}",
-                "directory_summary_system": "You are a custom directory summarizer.",
-            }
-        },
-    )
-
-    config = load_config(tmp_path)
-
-    assert config.prompts == {
-        "file_summary": "Summarize this file: {json_payload}",
-        "directory_summary_system": "You are a custom directory summarizer.",
-    }
-
-
-def test_load_config_env_parity_for_scalar_fields(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    monkeypatch.setenv("OPENAI_API_KEY", _placeholder("openai"))
-    monkeypatch.setenv("CTX_PROVIDER", "openai")
-    monkeypatch.setenv("CTX_MODEL", "gpt-env")
-    monkeypatch.setenv("CTX_BASE_URL", "https://example.invalid/v1")
-    monkeypatch.setenv("CTX_MAX_FILE_TOKENS", "4096")
-    monkeypatch.setenv("CTX_MAX_DEPTH", "5")
-    monkeypatch.setenv("CTX_TOKEN_BUDGET", "20000")
-    monkeypatch.setenv("CTX_MAX_TOKENS_PER_RUN", "15000")
-    monkeypatch.setenv("CTX_MAX_USD_PER_RUN", "0.75")
-    monkeypatch.setenv("CTX_FILES_PER_CALL", "4")
-    monkeypatch.setenv("CTX_CACHE_PATH", "")
-    monkeypatch.setenv("CTX_MAX_CACHE_ENTRIES", "5000")
-    monkeypatch.setenv("CTX_WATCH_DEBOUNCE", "1.5")
-    monkeypatch.setenv("CTX_EXTENSIONS", ".py,.md")
-
-    config = load_config(tmp_path)
-
-    assert config.provider == "openai"
-    assert config.model == "gpt-env"
-    assert config.base_url == "https://example.invalid/v1"
-    assert config.max_file_tokens == 4096
-    assert config.max_depth == 5
-    assert config.token_budget == 20000
-    assert config.max_tokens_per_run == 15000
-    assert config.max_usd_per_run == pytest.approx(0.75)
-    assert config.files_per_call == 4
-    assert config.cache_path == ""
-    assert config.max_cache_entries == 5000
-    assert config.watch_debounce_seconds == pytest.approx(1.5)
-    assert config.extensions == [".py", ".md"]
-
-
-def test_load_config_env_supports_none_sentinels(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", _placeholder("anthropic"))
-    monkeypatch.setenv("CTX_MAX_DEPTH", "none")
-    monkeypatch.setenv("CTX_TOKEN_BUDGET", "none")
-    monkeypatch.setenv("CTX_MAX_TOKENS_PER_RUN", "none")
-    monkeypatch.setenv("CTX_MAX_USD_PER_RUN", "none")
-    monkeypatch.setenv("CTX_FILES_PER_CALL", "none")
-
-    config = load_config(tmp_path)
-
-    assert config.max_depth is None
-    assert config.token_budget is None
-    assert config.max_tokens_per_run is None
-    assert config.max_usd_per_run is None
-    assert config.files_per_call is None
-
-
-def test_load_config_infers_openai_provider_from_api_key(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    monkeypatch.setenv("OPENAI_API_KEY", _placeholder("openai"))
-
-    config = load_config(tmp_path)
-
-    assert config.provider == "openai"
-    assert config.api_key == _placeholder("openai")
-
-
-def test_cli_overrides_env_guardrail_related_fields(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    monkeypatch.setenv("OPENAI_API_KEY", _placeholder("openai"))
-    monkeypatch.setenv("CTX_PROVIDER", "openai")
-    monkeypatch.setenv("CTX_MODEL", "env-model")
-    monkeypatch.setenv("CTX_MAX_DEPTH", "2")
-    monkeypatch.setenv("CTX_TOKEN_BUDGET", "999")
-    monkeypatch.setenv("CTX_BASE_URL", "https://env.example/v1")
-    monkeypatch.setenv("CTX_CACHE_PATH", "env-cache.json")
-
-    config = load_config(
-        tmp_path,
-        model="cli-model",
-        max_depth=7,
-        token_budget=111,
-        base_url="https://cli.example/v1",
-        cache_path="cli-cache.json",
-    )
-
-    assert config.model == "cli-model"
-    assert config.max_depth == 7
-    assert config.token_budget == 111
-    assert config.base_url == "https://cli.example/v1"
-    assert config.cache_path == "cli-cache.json"
-
-
-def test_load_config_reads_guardrails_from_ctxconfig(monkeypatch, tmp_path) -> None:
-    _clear_ctx_env(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", _placeholder("anthropic"))
-    _write_ctxconfig(
-        tmp_path,
-        {
-            "max_tokens_per_run": 12345,
-            "max_usd_per_run": 0.25,
-        },
-    )
-
-    config = load_config(tmp_path)
-
-    assert config.max_tokens_per_run == 12345
-    assert config.max_usd_per_run == pytest.approx(0.25)
-
-
-def test_estimate_cost_shared_helper() -> None:
-    assert 2.5 < estimate_cost(1_000_000, "anthropic", "claude-3-sonnet") < 3.5
-    assert estimate_cost(1_000_000, "ollama", "llama3.2") == pytest.approx(0.0)
-
-
-def test_estimate_cost_specific_models_and_output_tokens() -> None:
-    # Substring specificity: mini/nano variants must not match parent model prefixes
-    assert estimate_cost(1_000_000, "openai", "gpt-4o-mini") == pytest.approx(0.15)
-    assert estimate_cost(1_000_000, "openai", "gpt-4o") == pytest.approx(2.50)
-    assert estimate_cost(1_000_000, "openai", "gpt-4.1-nano") == pytest.approx(0.10)
-    assert estimate_cost(1_000_000, "openai", "gpt-4.1-mini") == pytest.approx(0.40)
-    assert estimate_cost(1_000_000, "openai", "gpt-4.1") == pytest.approx(2.00)
-    # Split input/output pricing (Claude Haiku 4.5 official rates: $1.00/MTok in, $5.00/MTok out)
-    split_cost = estimate_cost(
-        2_000_000,
-        "anthropic",
-        "claude-haiku-4-5-20251001",
-        input_tokens=1_000_000,
-        output_tokens=1_000_000,
-    )
-    assert split_cost == pytest.approx(1.00 + 5.00)
+    assert resolve_project_anchor(nested) == repo.resolve()
+    assert resolve_configured_extensions(nested) == [".py", ".md"]

@@ -4,9 +4,8 @@
 1
 
 ## What ctx Is
-`ctx` generates `CONTEXT.md` manifests for every directory in a codebase.
-Each manifest stores YAML frontmatter plus a Markdown summary of files, subdirectories, and purpose so agents can navigate without opening every file.
-Use `ctx refresh` to keep manifests fresh, `ctx check` to validate them, `ctx export` to ingest them, and `ctx reset` to remove them.
+`ctx` is a deterministic, zero-LLM static AST, import-graph, and blast-radius structural analyzer for AI agents.
+It compiles gitignored `.ctx/` tiered maps (`CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`), structured fleet capsules (`ctx export --capsule`), and directed reverse-dependency impact graphs (`ctx impact <target>`) across 11 programming languages — with zero LLM calls, zero API keys, zero background git hooks, and zero per-directory `CONTEXT.md` clutter.
 
 ## Install
 ```bash
@@ -14,164 +13,114 @@ pip install ctx-tool
 ```
 
 - Requires Python 3.10+
-- Current CLI command: `ctx`
-- Current release line: `1.1.0`
-- Machine-readable mode: set `CTX_OUTPUT=json` or pass `--output json`
-- HTTP server mode: install `ctx-tool[serve]`
+- CLI entrypoint: `ctx` (or `python -m ctx`)
+- Machine-readable JSON envelope mode: set `CTX_OUTPUT=json` or pass `--output json`
+- Optional HTTP server extras: `pip install ctx-tool[serve]`
 
 ## Configure
-### Zero-config
+`ctx` works with zero configuration and requires no external credentials.
 
-- Cloud providers: export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, then run `ctx refresh .`
-- Local providers: run `ctx refresh . --setup` to detect Ollama or LM Studio and write `.ctxconfig`
-- Explicit provider selection: set `CTX_PROVIDER` or write `.ctxconfig`
-
-### `.ctxconfig`
-
+### `.ctxconfig` (optional)
 ```yaml
-provider: anthropic
-model: claude-haiku-4-5-20251001
-max_tokens_per_run: 100000
-max_usd_per_run: 1.00
-cache_path: .ctx-cache/llm_cache.json
+max_depth: 6
+extensions:
+  - .py
+  - .ts
+  - .go
 ```
 
 ### Environment Variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ANTHROPIC_API_KEY` | unset | Anthropic credential |
-| `OPENAI_API_KEY` | unset | OpenAI credential or local OpenAI-compatible placeholder |
 | `CTX_OUTPUT` | `human` | Output mode: `human` or `json` |
-| `CTX_PROVIDER` | inferred or `anthropic` | Provider override |
-| `CTX_MODEL` | provider default | Model override |
-| `CTX_BASE_URL` | provider default | Custom API base URL |
-| `CTX_MAX_FILE_TOKENS` | `8000` | Per-file truncation cap before summarization |
 | `CTX_MAX_DEPTH` | unlimited | Directory traversal depth cap |
-| `CTX_TOKEN_BUDGET` | unlimited | Generator token budget |
-| `CTX_MAX_TOKENS_PER_RUN` | unlimited | Hard token guardrail |
-| `CTX_MAX_USD_PER_RUN` | unlimited | Hard spend guardrail |
-| `CTX_FILES_PER_CALL` | unlimited | Files per LLM call |
-| `CTX_MAX_CONCURRENT_DIRS` | `1` (cloud & local) | Max parallel directory workers |
-| `CTX_CACHE_PATH` | `.ctx-cache/llm_cache.json` | Disk cache location |
-| `CTX_MAX_CACHE_ENTRIES` | `10000` | Cache entry cap |
-| `CTX_WATCH_DEBOUNCE` | `0.5` | Watch debounce seconds |
-| `CTX_EXTENSIONS` | all text files | Comma-separated extension allowlist |
-| `CTX_GLOBAL_STATS_PATH` | `~/.ctx/run_stats.json` | Global running-board ledger path override |
-| `CTX_TIER2_SYNTHESIZE` | `false` | Enable gated Tier 2 semantic invariant synthesis |
-| `CTX_STRUCTURED_OUTPUTS` | `auto` | OpenAI-compatible `json_schema` mode: `auto`, `on`, or `off` |
-| `CTX_JEV` | `auto` | Type 1 Jev System-One mode: `auto`, `off`, `shadow`, `advisory`, `routing`, `actuating` |
-| `TYPESAFE_API_KEY` | unset | TypeSafe System-One (`jev-1.13.0`) API credential |
+| `CTX_EXTENSIONS` | all text/code files | Comma-separated file extension allowlist |
 
 ## Commands
 ### `ctx init [path]`
 
-Bootstrap self-maintaining `.ctx/` infrastructure in a git repository. This is the recommended first command for any new repo.
+Bootstrap deterministic `.ctx/` structural maps in a git repository without installing git hooks or writing per-directory sidecars.
 
 What it does:
-1. Generates initial manifests via `ctx refresh`
-2. Creates `.ctx/` directory with depth-tiered exports (CONTEXT.md, CONTEXT-1.md, CONTEXT-0.md)
-3. Writes `metadata.json` and `.ctx/.gitignore`
-4. Installs git hooks (post-commit, post-checkout, post-merge) that auto-refresh manifests in the background
-5. Adds `.ctx/` to root `.gitignore`
+1. Extracts static AST/parser symbols, imports, entrypoints, operational surfaces, and governance docs (`ctx.skeleton.extract_skeleton`)
+2. Creates `.ctx/` with `CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`, `metadata.json`, and `.ctx/.gitignore`
+3. Adds `.ctx/` to root `.gitignore`
+4. Cleans up any legacy `# >>> ctx-hook-start` git hook blocks if present
 
 Common flags:
 - `--force` — reinitialize even if `.ctx/` already exists
-- `--tier2` — synthesize a gitignored `.ctx/` architectural & invariant map (`CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`) deterministically with zero LLM calls and without writing per-directory `CONTEXT.md` files
-- `--synthesize` — layer gated Type-II LLM semantic cross-module invariants onto Tier 2 `.ctx/` maps (`code -> Type 1 Jev judge -> Type-II LLM deliberate`, cached in `.ctx/invariants.json`)
-
-After init, manifests auto-refresh on every git commit, checkout, and merge via background hooks. No manual `ctx refresh` needed.
+- `--output json` — emit JSON envelope
 
 ### `ctx uninit [path]`
 
-Remove `.ctx/` infrastructure and git hooks from a repository. Reverses everything `ctx init` created.
-
-What it does:
-1. Removes ctx blocks from git hook files (preserves non-ctx hook content)
-2. Removes `.ctx/` directory
-3. Removes `.ctx/` entry from root `.gitignore`
+Remove `.ctx/` infrastructure, strip `.ctx/` from root `.gitignore`, and remove any legacy ctx git hook blocks.
 
 ### `.ctx/` Directory Structure
 
-After `ctx init`, the `.ctx/` directory contains:
-
 | File | Purpose |
 |------|---------|
-| `CONTEXT.md` | Full-depth export of all manifests |
-| `CONTEXT-1.md` | Depth-1 export (root + immediate children) |
-| `CONTEXT-0.md` | Depth-0 export (root only) |
-| `metadata.json` | Init metadata: version, timestamps, repo ID, hook list |
-| `hook_log.json` | Hook telemetry: trigger type, duration, success/failure |
+| `CONTEXT-0.md` | 1-page repository architecture, authority boundaries, entrypoints, and subsystem overview |
+| `CONTEXT-1.md` | Cross-directory dependency flows, exported symbols, and boundary contracts |
+| `CONTEXT.md` | Full structural map including file-level public signatures |
+| `metadata.json` | Deterministic metadata (`repo_id`, `structural_hash`, `boundary_doc_hash`, timestamps) |
 | `.gitignore` | Ignores all `.ctx/` contents from git |
 
-The `.ctx/` exports are refreshed automatically by git hooks after every commit, checkout, or merge. SDK consumers and agents can read these pre-compiled exports without running `ctx export`.
+### `ctx refresh [path]`
 
-### `ctx refresh <path>`
-
-Generate or update `CONTEXT.md` manifests using the fastest valid strategy for the tree.
-When git metadata is available, refresh can use smart changed-file selection; on extracted or non-git trees it falls back cleanly to incremental refresh.
+Deterministically refresh `.ctx/` maps when `structural_hash` or `boundary_doc_hash` has drifted (skipping writes when unchanged).
 
 Common flags:
-- `--force` — regenerate every directory
-- `--setup` — detect provider and write `.ctxconfig` before refreshing
-- `--watch` — refresh once, then watch for changes
-- `--until-complete` — loop automatically until all directories are covered (useful for large trees that exceed rate limits or token budgets)
-- `--synthesize` — run gated Tier 2 semantic cross-module invariant synthesis (`code -> Type 1 Jev judge -> Type-II LLM deliberate`) when refreshing a Tier 2 `.ctx/` repo
-- `--dry-run` — report stale directories without writing
-- `--output json` — emit the JSON envelope only
+- `--force` — rewrite `.ctx/` maps even if hashes match
+- `--dry-run` — check whether `.ctx/` maps are stale without writing
+- `--max-depth <n>` — limit directory traversal depth
+- `--output json` — emit JSON envelope
 
 ```json
 {
   "status": "success",
   "command": "refresh",
   "metadata": {
-    "version": "1.0.0",
-    "elapsed_ms": 4523,
-    "tokens_used": 12400,
-    "est_cost_usd": 0.037
+    "version": "1.1.0",
+    "elapsed_ms": 38,
+    "tokens_used": 0,
+    "est_cost_usd": 0.0
   },
   "data": {
-    "dirs_processed": 18,
+    "dirs_processed": 3,
     "dirs_skipped": 0,
-    "files_processed": 64,
-    "tokens_used": 12400,
+    "files_processed": 24,
+    "tokens_used": 0,
     "errors": [],
     "budget_exhausted": false,
-    "strategy": "incremental",
-    "est_cost_usd": 0.037,
+    "strategy": "tier2",
+    "est_cost_usd": 0.0,
     "stale_directories": [],
-    "budget_guardrail": null,
-    "config_written": false,
-    "setup_provider": null,
-    "setup_model": null,
-    "setup_detected_via": null,
-    "local_batch_fallbacks": 0
+    "warnings": []
   },
   "errors": [],
   "recommended_next": null
 }
 ```
 
-### `ctx check <path>`
+### `ctx check [path]`
 
-Report manifest health, validation results, coverage stats, or manifest diffs.
+Evaluate `.ctx/` structural freshness, frontmatter/export integrity, token footprint, or diff status.
 
 Common flags:
-- `--verify` — validate frontmatter, body structure, freshness, and coverage
-- `--stats` — emit aggregate coverage statistics
-- `--diff` — compare manifest changes via git or mtime fallback
-- `--check-exit` — exit `1` when health checks find issues
-- `--since <ref>` — git diff base for `--diff`
-- `--quiet` / `--stat` — diff-only output shaping
-- `--output json` — emit the JSON envelope only
+- `--verify` — validate frontmatter, presence of all `.ctx/` tiers, and structural hash freshness
+- `--stats` — emit aggregate coverage and estimated token statistics (`--verbose` for row breakdown)
+- `--diff` — report whether `.ctx/CONTEXT.md` is stale (`--quiet` / `--stat`)
+- `--check-exit` — exit `1` when maps are stale or missing
+- `--output json` — emit JSON envelope
 
 ```json
 {
   "status": "success",
   "command": "check",
   "metadata": {
-    "version": "1.0.0",
-    "elapsed_ms": 93,
+    "version": "1.1.0",
+    "elapsed_ms": 19,
     "tokens_used": 0,
     "est_cost_usd": 0.0
   },
@@ -181,16 +130,15 @@ Common flags:
       {
         "path": ".",
         "status": "fresh"
-      },
-      {
-        "path": "src",
-        "status": "fresh"
       }
     ],
     "summary": {
-      "fresh": 20,
+      "total": 1,
+      "fresh": 1,
       "stale": 0,
-      "missing": 0
+      "missing": 0,
+      "check_exit": false,
+      "tier2": true
     }
   },
   "errors": [],
@@ -198,139 +146,103 @@ Common flags:
 }
 ```
 
-### `ctx export <path>`
+### `ctx export [path]`
 
-Concatenate generated manifests for agent ingestion.
+Export `.ctx/` structural maps (rendering deterministically on the fly even if `ctx init` has not been run) or emit a structured fleet capsule.
 
 Common flags:
-- `--filter all|stale|missing` — select which manifests to export
-- `--depth <n>` — limit traversal depth
-- `--capsule` — emit a deterministic structural & invariant capsule for `project-ledger` and `gbrain` ingestion
-- `--out-file <file>` (or `-o <file>`) — write export text or capsule JSON to a file
-- `--output json` — emit the JSON envelope only
+- `--depth 0|1` — select `CONTEXT-0.md` (`0`), `CONTEXT-1.md` (`1`), or full `CONTEXT.md` (omitted)
+- `--filter all|stale|missing` — filter exported maps
+- `--capsule` — emit a deterministic `FleetCapsuleResult` for `project-ledger` and `gbrain` ingestion
+- `--out-file <file>` (or `-o <file>`) — write markdown or `.json` capsule to disk
+- `--output json` — emit JSON envelope
 
 ```json
 {
   "status": "success",
   "command": "export",
   "metadata": {
-    "version": "1.0.0",
-    "elapsed_ms": 41,
+    "version": "1.1.0",
+    "elapsed_ms": 24,
     "tokens_used": 0,
     "est_cost_usd": 0.0
   },
   "data": {
-    "manifests_exported": 3,
+    "manifests_exported": 1,
     "filter": "all",
-    "depth": 1,
-    "content": "# CONTEXT.md\n\n---\ngenerated: \"2026-03-18T19:00:00Z\"\n"
+    "depth": 0,
+    "content": "# .ctx/CONTEXT-0.md\n\n---\ngenerated: \"2026-11-10T00:00:00Z\"\n"
   },
   "errors": [],
   "recommended_next": null
 }
 ```
 
-### `ctx reset <path>`
+### `ctx impact <target> [path]`
 
-Remove generated manifests from a tree.
+Analyze directed reverse-dependency blast radius, coupled test suites, affected entrypoints/surfaces, cycles, and governing authority documents for a file path, subsystem directory, or symbol name.
 
 Common flags:
-- `--yes` — required for non-interactive deletion
-- `--dry-run` — preview manifest removals
-- `--output json` — emit the JSON envelope only
+- `--depth <n>` — cap reverse-dependency BFS hops (`>= 1`)
+- `--output json` — emit JSON envelope
+
+### `ctx reset [path]`
+
+Remove legacy per-directory `CONTEXT.md` files from a source tree without touching `.ctx/`.
+
+Common flags:
+- `--yes` (`-y`) — required for non-interactive deletion
+- `--dry-run` — list legacy `CONTEXT.md` files without deleting them
+- `--output json` — emit JSON envelope
 
 ```json
 {
   "status": "success",
   "command": "reset",
   "metadata": {
-    "version": "1.0.0",
-    "elapsed_ms": 18,
+    "version": "1.1.0",
+    "elapsed_ms": 6,
     "tokens_used": 0,
     "est_cost_usd": 0.0
   },
   "data": {
-    "manifests_removed": 3,
-    "paths": [
-      "CONTEXT.md",
-      "src/CONTEXT.md",
-      "src/ctx/CONTEXT.md"
-    ]
+    "manifests_removed": 0,
+    "paths": []
   },
   "errors": [],
   "recommended_next": null
 }
 ```
 
-### `ctx stats [path]`
-
-Show coverage summary or refresh history for a directory tree.
-
-Common flags:
-- `--board` — show the running board (refresh history) instead of coverage table
-- `--global` — show global running board across all repos (with `--board`)
-- `--since <window>` — filter board runs to a time window (e.g. `7d`, `4w`, `2026-03-01`)
-- `--trend` — show cost and cache-hit sparklines in board output
-- `--format text|json|csv` — output format (`csv` available with `--board`)
-- `--verbose` — per-directory breakdown (coverage mode)
-
-### `ctx setup [path]`
-
-Auto-detect an available LLM provider and write `.ctxconfig`, or run the preflight readiness gate.
-
-Common flags:
-- `--check` — run preflight checks (configured/detected provider, `.ctxconfig` syntax, live endpoint connectivity, sample model summary quality, constrained `json_schema` structured-output capability, target directory write permissions, git detection, ignore rules) without writing `.ctxconfig`
-- `--output json` — emit the JSON envelope only
-
-### `ctx impact <target> [path]`
-
-Analyze the directed reverse-dependency blast radius, coupled tests, affected operational surfaces, and governing authority documents for a file, subsystem/directory, or symbol target with zero LLM calls.
-
-Common flags:
-- `--depth <n>` — cap reverse-dependency BFS hops (`>= 1`)
-- `--output json` — emit the JSON envelope only
-
-### `ctx jev <heads|decide|eval> [path]`
-
-Inspect, execute, or benchmark governed Type 1 Jev (`jev-1.13.0` via `POST https://api.typesafe.ai/v1/systemone`) System-One decision heads (`invariant_drift_material`, `subsystem_arch_role`, `operational_surface_exposure` with permanent `ADVISORY` authority ceiling and deterministic `code` fallback).
-
-Subcommands:
-- `ctx jev heads [path]` — list validated Jev head contracts
-- `ctx jev decide [path] --head <id> --state <json-or-@file> [--provider code|jev] [--live] [--no-trace]` — execute governed head(s)
-- `ctx jev eval [path] [--provider code|jev] [--head <id>] [--live] [--skip-pre-rule]` — evaluate against the 18-case gold corpus (`pre_rule_hits` and `live_model_calls` reported separately)
-
 ### `ctx benchmark [paths...]`
 
 Run the reproducible Phase 27.1 deterministic static-oracle A/B/C navigation & blast-radius benchmark (`raw_grep` vs `tier1_manifests` vs `tier2_plus_impact`).
 
 Common flags:
-- `--out-file <file>` (or `-o <file>`) — write Markdown or `.json` benchmark report
-- `--output json` — emit the JSON envelope only
+- `--out-file <file>` (`-o <file>`) — write Markdown or `.json` benchmark report
+- `--output json` — emit JSON envelope
 
 ## Exit Codes
 | Code | Meaning |
 |------|---------|
-| `0` | Success — all directories processed |
-| `1` | Error — one or more directories failed |
-| `2` | Partial success — budget exhausted but no real errors; re-run to continue |
+| `0` | Success |
+| `1` | Validation failure, stale/missing `.ctx/` with `--check-exit`, or invalid arguments |
 
 ## Error Codes
 | Code | Meaning | Recommended Action |
 |------|---------|-------------------|
-| `provider_not_configured` | No provider configuration resolved | Set API keys, `CTX_PROVIDER`, or run `ctx refresh . --setup` |
-| `provider_unreachable` | Provider endpoint could not be reached | Check connectivity, proxy settings, or local provider status |
-| `auth_failed` | Provider rejected credentials | Rotate or replace credentials |
-| `budget_exhausted` | Hard token or USD guardrail stopped the run | Raise the guardrail or reduce scope |
+| `init_failed` | `ctx init` failed (e.g., not a git repo or already initialized) | Pass `--force` or run inside a git repository |
+| `uninit_failed` | `ctx uninit` failed (e.g., `.ctx/` not present or locked) | Verify `.ctx/` exists and no write lock is active |
+| `stale_manifests` | `.ctx/` maps are stale or missing under `--check-exit` | Run `ctx refresh .` or `ctx init .` |
+| `invalid_manifests` | `.ctx/` verification found missing or malformed tier files | Run `ctx refresh . --force` |
+| `invalid_target` | `ctx impact` target did not match any file, subsystem, or symbol | Pass a valid repo-relative path or symbol name |
+| `confirmation_required` | `ctx reset` invoked non-interactively without `--yes` | Re-run with `--yes` |
 | `lock_held` | Another `ctx` write operation owns the lock | Wait and retry |
-| `partial_failure` | Some directories failed while others succeeded | Retry after inspecting reported errors |
-| `no_manifests` | No manifests exist in the target tree | Run `ctx refresh .` |
-| `stale_manifests` | Existing manifests are out of date | Run `ctx refresh .` |
-| `invalid_manifests` | Manifest validation found malformed entries | Run `ctx refresh . --force` |
-| `git_unavailable` | A git-dependent path could not use git | Install git or remove the git-specific flag |
-| `unknown_error` | Unclassified failure | Inspect the error message and retry or report a bug |
+| `invalid_usage` | Invalid CLI flag or argument | Check `ctx <cmd> --help` |
+| `unknown_error` | Unclassified runtime failure | Inspect error message |
 
 ## Integration Patterns
-### MCP Server (recommended for IDE-hosted agents)
+### MCP Server
 
 Project-local `.mcp.json`:
 
@@ -345,28 +257,24 @@ Project-local `.mcp.json`:
 }
 ```
 
-Available MCP tools exposed by `ctx serve --mcp`:
+Available MCP tools (`ctx serve --mcp`):
 
 | Tool | Description |
 |------|-------------|
-| `ctx_refresh` | Generate or update manifests for a path |
-| `ctx_check` | Validate manifest health and coverage |
-| `ctx_export` | Concatenate manifests for ingestion |
-| `ctx_reset` | Remove generated manifests |
-| `ctx_board` | Read the per-repo running board (refresh history, cost analytics, per-model breakdown) |
-| `ctx_global_board` | Read the global running board across all repos |
-| `ctx_impact` | Analyze directed reverse-dependency blast radius, coupled tests, affected surfaces, and governing docs |
-| `ctx_jev` | List, execute (`decide`), or evaluate (`eval`) governed Type 1 Jev System-One decision heads |
+| `ctx_refresh` | Deterministically refresh `.ctx/` structural maps |
+| `ctx_check` | Validate `.ctx/` freshness, structure, and token stats |
+| `ctx_export` | Export `.ctx/` maps or structured `--capsule` payload |
+| `ctx_reset` | Remove legacy per-directory `CONTEXT.md` files |
+| `ctx_impact` | Compute reverse-dependency blast radius and coupled tests |
 
-Available read-only MCP resources exposed by `ctx serve --mcp` (after `ctx init`):
+Available read-only MCP resources (`ctx serve --mcp` after `ctx init` or `ctx refresh`):
 
 | Resource URI | MIME Type | Description |
 |--------------|-----------|-------------|
-| `ctx://.ctx/CONTEXT.md` | `text/markdown` | Full-depth export of all `CONTEXT.md` manifests (or full Tier 2 synthesis) |
-| `ctx://.ctx/CONTEXT-1.md` | `text/markdown` | Depth-1 export (or Tier 2 module dependency & invariant map) |
-| `ctx://.ctx/CONTEXT-0.md` | `text/markdown` | Depth-0 export (or Tier 2 1-page repo architecture, authority boundaries & entrypoints) |
-| `ctx://.ctx/metadata.json` | `application/json` | Init metadata: version, timestamps, repo ID, installed hooks, structural/boundary hashes |
-| `ctx://.ctx/hook_log.json` | `application/json` | Git hook execution telemetry: trigger types, durations, and success/failure status |
+| `ctx://.ctx/CONTEXT.md` | `text/markdown` | Full structural & signature map |
+| `ctx://.ctx/CONTEXT-1.md` | `text/markdown` | Depth-1 module dependency & boundary map |
+| `ctx://.ctx/CONTEXT-0.md` | `text/markdown` | Depth-0 1-page architecture, entrypoints & authority map |
+| `ctx://.ctx/metadata.json` | `application/json` | Init metadata and structural/boundary SHA-256 hashes |
 
 ### Python Consumer SDK (`ctx.sdk`)
 
@@ -380,143 +288,30 @@ context_0 = proj.get_context(depth=0)
 stale = proj.is_stale()
 ```
 
-### Session Bootstrap
+### Agent Orientation Workflow
 
 ```bash
-export CTX_OUTPUT=json
-export ANTHROPIC_API_KEY="sk-..."
-ctx refresh .
-ctx check . --check-exit --output json
-ctx export . --depth 1 --output json
+ctx export . --depth 0                  # zero-setup 1-page architectural orientation
+ctx impact src/pkg/module.py .          # inspect reverse dependents + coupled tests before editing
 ```
-
-### Session-End Manifest Refresh
-
-Before ending a coding session that changed source files:
-
-```bash
-ctx refresh .
-ctx check . --check-exit
-```
-
-If `ctx check` still reports stale manifests, rerun `ctx refresh . --force` on the affected path.
-
-### Agent Handoff Protocol
-
-When one agent ends a session and a second agent will continue work in the same repo, the exiting agent must update manifests so the incoming agent can orient without re-reading all source files.
-
-**Exiting agent — close-out sequence:**
-```bash
-ctx refresh .
-ctx check . --check-exit --output json
-```
-
-The incoming agent gets a guaranteed-fresh manifest tree. If `ctx check` exits 1, fix the stale directories before handing off.
-
-**Incoming agent — session-start sequence:**
-```bash
-ctx check . --output json          # verify freshness before trusting manifests
-ctx export . --depth 1 --output json   # ingest top-level context
-```
-
-Drill into subdirectories on demand:
-```bash
-ctx export ./src --depth 2 --output json
-```
-
-**Why this works:** `ctx refresh` at session end costs near-zero tokens when only a few files changed (incremental strategy skips unchanged directories). The incoming agent reads finished manifests instead of re-summarizing — no LLM calls needed at session start.
-
-**Cost model (Haiku 4.5):** ~$0.004–$0.007 per directory on initial generation; subsequent incremental refreshes typically $0.00–$0.02 per session on active repos.
-
-### First 3 Commands
-
-When an incoming agent lands in an unfamiliar repo:
-
-```bash
-ctx init .                          # one-time: creates .ctx/ + hooks + manifests
-ctx check . --output json           # verify health
-ctx export . --depth 1 --output json  # ingest manifests
-```
-
-If already initialized (`.ctx/` exists), skip `ctx init` and use `ctx refresh .` to update.
-
-### CI Freshness Gate
-
-```bash
-CTX_OUTPUT=json python -m ctx check . --check-exit
-```
-
-### Pre-commit Hook
-
-```yaml
-repos:
-  - repo: https://github.com/mschwar/context-project
-    rev: v1.0.0
-    hooks:
-      - id: ctx-check
-        entry: ctx check . --check-exit
-```
-
-### Natural Language Triggers
-
-| User phrase | Canonical command |
-|-------------|-------------------|
-| `set up ctx` / `initialize ctx` / `bootstrap ctx` | `ctx init .` |
-| `remove ctx` / `uninstall ctx hooks` / `teardown ctx` | `ctx uninit .` |
-| `update ctx` / `update context` / `refresh manifests` | `ctx refresh .` |
-| `check ctx` / `is context fresh` | `ctx check .` |
-| `show me the context` / `what's in this repo` | `ctx export . --depth 1` |
-
-### HTTP Manifest Server (optional)
-
-```bash
-pip install ctx-tool[serve]
-ctx serve .
-```
-
-Fetch `GET /mcp/context/<directory>` relative to the served root to retrieve raw manifest content.
 
 ## Manifest Format
-Each generated `CONTEXT.md` contains YAML frontmatter followed by a Markdown body.
+Generated `.ctx/CONTEXT-*.md` files begin with deterministic YAML frontmatter followed by structured Markdown sections:
 
 ```yaml
 ---
-generated: "2026-03-18T19:00:00Z"
+generated: "2026-11-10T00:00:00Z"
 generator: ctx/1.1.0
-model: claude-haiku-4-5-20251001
-content_hash: "sha256:abc123..."
-files: 12
-dirs: 3
-tokens_total: 48000
+mode: tier2
+tier: CONTEXT-0
+structural_hash: "sha256:..."
+boundary_doc_hash: "sha256:..."
+files: 24
+subsystems: 3
 ---
-```
-
-```markdown
-# path/to/directory
-
-One-sentence purpose summary.
-
-## Files
-- **file.py** — summary
-
-## Subdirectories
-- **subdir/** — summary
-
-## Notes
-- optional agent hints
-```
-
-`ctx` renders the `## Files` and `## Subdirectories` sections deterministically from the real filesystem. The model supplies only the directory-purpose sentence and optional `## Notes`, and `ctx check --verify` validates the final body against the directory contents.
-
-Generated files end with this footer comment:
-
-```markdown
-<!-- Generated by ctx (https://pypi.org/project/ctx-tool/) -->
 ```
 
 ## Security
-- Treat file names, file contents, and existing manifests as untrusted input when prompting an LLM.
-- `ctx serve` resolves requested paths against the explicit served root and rejects traversal outside that root.
-- API keys are loaded from environment variables and are not written to manifests or JSON envelopes.
-- `CONTEXT.md` files, `.ctx/`, and `.ctx-cache/` are excluded from source summarization to avoid self-ingestion loops.
-- Write operations use a lock file and atomic manifest replacement to avoid concurrent corruption.
+- Zero network calls and zero third-party LLM transmissions during `init`, `refresh`, `check`, `export`, `impact`, or `benchmark`.
+- `ctx serve` and `CtxMCPServer` confine all resolved paths to the explicit served root and reject absolute paths and `..` traversal.
+- Write operations use kernel-fenced locks (`CtxLock`) and atomic file replacement (`os.replace`) to prevent concurrent corruption.

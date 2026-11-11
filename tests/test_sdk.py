@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
+from ctx.init import init_project
 from ctx.sdk import CtxProject, CtxProjectNotFoundError
 
 
@@ -20,13 +23,13 @@ def _seed_ctx_dir(root: Path) -> Path:
         json.dumps(
             {
                 "schema_version": 1,
-                "initialized_at": "2026-10-29T00:00:00Z",
+                "initialized_at": "2026-11-10T00:00:00Z",
                 "initialized_by": "prime",
                 "ctx_version": "1.1.0",
                 "repo_id": "sha256:abc123",
-                "last_refresh": "2026-10-29T01:00:00Z",
+                "last_refresh": "2026-11-10T01:00:00Z",
                 "python_executable": "/usr/bin/python3",
-                "hooks_installed": ["post-commit", "post-checkout", "post-merge"],
+                "hooks_installed": [],
                 "mode": "tier2",
                 "structural_hash": "sha256:struct1",
                 "boundary_doc_hash": "sha256:doc1",
@@ -34,26 +37,10 @@ def _seed_ctx_dir(root: Path) -> Path:
         ),
         encoding="utf-8",
     )
-    (ctx_dir / "hook_log.json").write_text(
-        json.dumps(
-            {
-                "runs": [
-                    {
-                        "timestamp": "2026-10-29T01:00:00Z",
-                        "trigger": "post-commit",
-                        "duration_ms": 42,
-                        "success": True,
-                        "error": None,
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
     return ctx_dir
 
 
-def test_sdk_load_reads_exports_metadata_and_hooks(tmp_path: Path) -> None:
+def test_sdk_load_reads_exports_and_metadata(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     nested = repo / "src" / "pkg"
     nested.mkdir(parents=True)
@@ -73,13 +60,7 @@ def test_sdk_load_reads_exports_metadata_and_hooks(tmp_path: Path) -> None:
     assert meta.mode == "tier2"
     assert meta.structural_hash == "sha256:struct1"
     assert meta.boundary_doc_hash == "sha256:doc1"
-    assert meta.hooks_installed == ["post-commit", "post-checkout", "post-merge"]
-
-    hooks = project.hook_runs
-    assert len(hooks) == 1
-    assert hooks[0].trigger == "post-commit"
-    assert hooks[0].duration_ms == 42
-    assert hooks[0].success is True
+    assert meta.hooks_installed == []
 
     snapshot = project.to_dict()
     assert snapshot["available_tiers"] == {
@@ -103,21 +84,26 @@ def test_sdk_get_export_rejects_invalid_depth(tmp_path: Path) -> None:
         project.get_export(2)
 
 
-def test_sdk_get_context_and_is_stale_for_tier2_repo(tmp_path: Path) -> None:
-    import subprocess
-    from ctx.init import init_project
-
+def test_sdk_get_context_and_is_stale_for_deterministic_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo = tmp_path / "tier2_repo"
     repo.mkdir()
     subprocess.run(["git", "init", str(repo)], capture_output=True, check=True)
     (repo / "app.py").write_text("def run() -> None:\n    pass\n", encoding="utf-8")
-    init_project(repo, tier2=True)
+    init_project(repo)
 
     proj = CtxProject.load(repo, walk_parents=False)
     assert "Architecture & Authority Map (CONTEXT-0)" in proj.get_context(depth=0)
     assert proj.is_stale() is False
 
-    # Adding a new public symbol makes tier2 stale
+    # Adding a new public symbol makes .ctx/ stale
     (repo / "app.py").write_text("def run() -> None:\n    pass\n\ndef extra() -> None:\n    pass\n", encoding="utf-8")
     assert proj.is_stale() is True
 
+    # Standalone mode without ctx.skeleton still verifies file existence & embedded hashes
+    init_project(repo, force=True)
+    monkeypatch.setitem(sys.modules, "ctx.skeleton", None)
+    assert proj.is_stale() is False
+    (repo / ".ctx" / "CONTEXT-0.md").unlink()
+    assert proj.is_stale() is True

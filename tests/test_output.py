@@ -78,11 +78,11 @@ def test_output_broker_partial_status_with_data_and_errors(capsys) -> None:
 
 def test_output_broker_handles_usage_error_exception(capsys) -> None:
     with OutputBroker(command="refresh", json_mode=True):
-        raise click.UsageError("No LLM provider configured")
+        raise click.UsageError("Invalid flag combination")
 
     envelope = _parse_single_envelope(capsys.readouterr().out)
     assert envelope["status"] == "error"
-    assert envelope["errors"][0]["code"] == "provider_not_configured"
+    assert envelope["errors"][0]["code"] == "invalid_usage"
 
 
 def test_output_broker_handles_generic_runtime_exception(capsys) -> None:

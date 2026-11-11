@@ -1,5 +1,5 @@
 name: 'CTX Check'
-description: 'Checks if CONTEXT.md files are valid and fresh in a ctx project.'
+description: 'Validates deterministic .ctx/ structural maps in a ctx project.'
 inputs:
   path:
     description: 'Path to the ctx project root.'
@@ -71,8 +71,11 @@ runs:
           python -m pip install "ctx-tool${CTX_VERSION_SPEC}"
         fi
 
-    - name: Run ctx check verification gate
+    - name: Run deterministic ctx verification gate
       shell: bash
       working-directory: '${{ inputs.path }}'
       run: |
+        if [ ! -f .ctx/metadata.json ]; then
+          CTX_OUTPUT=json python -m ctx refresh .
+        fi
         CTX_OUTPUT=json python -m ctx check . --verify --check-exit

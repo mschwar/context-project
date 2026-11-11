@@ -1159,6 +1159,63 @@ def _select_diversified_key_symbols(
     return selected
 
 
+def _pre_subsystem_arch_role(state: dict[str, object]) -> str | None:
+    raw_path = str(state.get("path") or "").strip().lower().strip("/")
+    tokens = {tok for tok in re.split(r"[/_\-.]+", raw_path) if tok}
+    if tokens & {"tests", "test", "benchmarks", "benchmark", "qa", "e2e", "specs", "fixtures"}:
+        return "verification_tooling"
+    if tokens & {"docs", "doc", "adr", "adrs", "documents", "archive", "designs", "rfcs"}:
+        return "docs_governance"
+    return None
+
+
+def _rule_subsystem_arch_role(state: dict[str, object]) -> str:
+    """Deterministic subsystem architectural role classifier."""
+    pre = _pre_subsystem_arch_role(state)
+    if pre is not None:
+        return pre
+    raw_path = str(state.get("path") or "").strip().lower().strip("/")
+    path_tokens = {tok for tok in re.split(r"[/_\-.]+", raw_path) if tok}
+    symbols = " ".join(str(s).lower() for s in (state.get("key_symbols") or []))  # type: ignore[union-attr]
+    ext_deps = {str(d).lower() for d in (state.get("external_deps") or [])}  # type: ignore[union-attr]
+    surfaces = {str(k).lower() for k in (state.get("operational_surface_kinds") or [])}  # type: ignore[union-attr]
+    langs = {str(lang).lower() for lang in (state.get("languages") or [])}  # type: ignore[union-attr]
+
+    if not langs or langs <= {"markdown"}:
+        if raw_path in {".", ""} and not symbols:
+            return "docs_governance"
+    if ext_deps & {"anthropic", "openai", "httpx", "requests", "boto3", "psycopg", "redis", "sqlalchemy"} or (
+        path_tokens
+        & {
+            "adapter",
+            "adapters",
+            "provider",
+            "providers",
+            "client",
+            "clients",
+            "git",
+            "hook",
+            "hooks",
+            "storage",
+            "db",
+            "connector",
+            "connectors",
+        }
+    ):
+        if not (path_tokens & {"core", "domain"}):
+            return "adapter_integration"
+    if surfaces & {"cli_command", "http_route", "mcp_tool", "mcp_resource"} or (
+        path_tokens & {"cli", "cmd", "server", "routes", "web", "ui", "mcp", "frontend"}
+    ):
+        if not (path_tokens & {"core", "engine"}):
+            return "entrypoint_interface"
+    if path_tokens & {"util", "utils", "common", "shared", "helper", "helpers", "config", "types"}:
+        return "shared_utility"
+    if symbols or langs:
+        return "core_domain"
+    return "shared_utility"
+
+
 def _classify_subsystem_arch_role(
     sub_path: str,
     file_count: int,
@@ -1168,8 +1225,6 @@ def _classify_subsystem_arch_role(
     external_deps: list[str],
     surface_kinds: list[str],
 ) -> str:
-    from ctx.jev import _rule_subsystem_arch_role
-
     return _rule_subsystem_arch_role(
         {
             "path": sub_path,

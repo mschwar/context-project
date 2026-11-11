@@ -1,5 +1,5 @@
 - id: ctx-check
-  name: Check ctx manifests are fresh
+  name: Check deterministic .ctx/ structural maps are fresh
   entry: ctx check . --check-exit
   language: python
   pass_filenames: false
