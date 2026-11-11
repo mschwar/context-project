@@ -1,11 +1,11 @@
-"""Documentation and package metadata checks for the current roadmap state."""
+"""Documentation and package metadata checks for zero-LLM deterministic ctx."""
 
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
-
+import re
+import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -30,25 +30,21 @@ def test_agents_contract_sections_and_examples() -> None:
     assert re.search(r"^## schema_version\s+1\s*$", text, flags=re.MULTILINE)
 
     json_blocks = re.findall(r"```json\n(.*?)\n```", text, flags=re.DOTALL)
-    assert len(json_blocks) == 5
+    assert len(json_blocks) >= 5
     for block in json_blocks:
         json.loads(block)
     assert any('"mcpServers"' in block for block in json_blocks)
 
-    for code in [
-        "provider_not_configured",
-        "provider_unreachable",
-        "auth_failed",
-        "budget_exhausted",
-        "lock_held",
-        "partial_failure",
-        "no_manifests",
-        "stale_manifests",
-        "invalid_manifests",
-        "git_unavailable",
-        "unknown_error",
-    ]:
-        assert f"`{code}`" in text
+    for uri in (
+        "ctx://.ctx/CONTEXT.md",
+        "ctx://.ctx/CONTEXT-1.md",
+        "ctx://.ctx/CONTEXT-0.md",
+        "ctx://.ctx/metadata.json",
+    ):
+        assert f"`{uri}`" in text
+
+    for retired in ("TYPESAFE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ctx jev", "ctx_jev"):
+        assert retired not in text
 
 
 def test_readme_references_agents_and_quickstart() -> None:
@@ -56,164 +52,24 @@ def test_readme_references_agents_and_quickstart() -> None:
     assert len(text.splitlines()) <= 100
     assert "[AGENTS.md](./AGENTS.md)" in text
     assert "pip install ctx-tool" in text
-    assert "ctx refresh ." in text
+    assert "ctx init ." in text
+    assert "ctx impact" in text
+    for retired in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ctx jev"):
+        assert retired not in text
 
 
-def test_workflow_patterns_use_canonical_check_commands() -> None:
-    pre_commit = (REPO_ROOT / ".pre-commit-hooks.yaml").read_text(encoding="utf-8")
-    workflow = (REPO_ROOT / ".github" / "workflows" / "ctx-check.yml").read_text(encoding="utf-8")
-    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    runbook = (REPO_ROOT / "RUNBOOK.md").read_text(encoding="utf-8")
+def test_pyproject_and_repo_tree_are_zero_llm_and_hook_free() -> None:
+    data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    deps = data["project"]["dependencies"]
+    assert len(deps) == 3
+    for pkg in ("click", "pyyaml", "pathspec"):
+        assert any(d.startswith(pkg) for d in deps)
 
-    assert "ctx check . --check-exit" in pre_commit
-    assert "status . --check-exit-code" not in pre_commit
-
-    assert "run: python -m ctx check . --check-exit" in workflow
-    assert "CTX_OUTPUT: json" in workflow
-    assert "status . --check-exit-code" not in workflow
-
-    assert "### Session-End Manifest Refresh" in agents
-    assert "### First 3 Commands" in agents
-    assert "### Natural Language Triggers" in agents
-    assert "CTX_OUTPUT=json python -m ctx check . --check-exit" in agents
-    assert "`update ctx` / `update context` / `refresh manifests`" in agents
-    assert '"local_batch_fallbacks": 0' in agents
-    assert "validate frontmatter, body structure, freshness, and coverage" in agents
-
-    assert "pre-commit hook and `CTX Manifest Check` CI job both use `ctx check . --check-exit`" in runbook
-    assert "falls back cleanly to incremental refresh" in runbook
-    assert "duplicate bullets, nonexistent files, missing real files" in runbook
-
-
-def test_afo_closeout_artifact_and_phase24_scope_exist() -> None:
-    reflection = (REPO_ROOT / "archive" / "reflections" / "2026-03-18-afo-stage1-6-reflection.md")
-    state = (REPO_ROOT / "state.md").read_text(encoding="utf-8")
-    overhaul = (REPO_ROOT / "AGENT_FIRST_OVERHAUL.md").read_text(encoding="utf-8")
-
-    assert reflection.exists()
-    reflection_text = reflection.read_text(encoding="utf-8")
-    assert "Disposition Table" in reflection_text
-    assert "Carry into Phase 24" in reflection_text
-
-    assert "AFO Stage 1–6 Closeout ✓" in state
-    assert "## Phase 24 — Manifest Trust & External Validation" in state
-    assert "[x] **24.1 git-optional refresh**" in state
-    assert "[x] **24.3 Body-level verification**" in state
-    assert "local-provider fallback counts are surfaced" in state
-
-    assert "## AFO Stage 1–6 Closeout" in overhaul
-    assert "## Phase 24 — Manifest Trust & External Validation" in overhaul
-    assert "[x] **24.6 local-provider adaptive batching**" in overhaul
-
-
-def test_pyproject_agent_metadata_present() -> None:
-    text = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-
-    assert "generates CONTEXT.md manifests for codebase navigation" in text
-    for keyword in ['"ai"', '"agent"', '"context"', '"codebase"', '"mcp"', '"manifest"', '"llm"', '"documentation"']:
-        assert keyword in text
-    for classifier in [
-        '"Environment :: Console"',
-        '"Topic :: Software Development :: Documentation"',
-        '"Typing :: Typed"',
-    ]:
-        assert classifier in text
-
-
-def test_phase29_closeout_and_mcp_resources_documented() -> None:
-    reflection = REPO_ROOT / "archive" / "reflections" / "2026-10-29-phase29-reflection.md"
-    state = (REPO_ROOT / "state.md").read_text(encoding="utf-8")
-    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    todos = (REPO_ROOT / "TODOS.md").read_text(encoding="utf-8")
-
-    assert reflection.exists()
-    reflection_text = reflection.read_text(encoding="utf-8")
-    assert "## Disposition Table" in reflection_text
-    assert "Carry into Phase 30" in reflection_text
-
-    assert "### Phase 29 — Preflight Onboarding ✓" in state
-    assert "[x] **29.1 Provider connectivity validation**" in state
-    assert "[x] **29.2 Model response quality check**" in state
-    assert "[x] **29.3 Environment readiness**" in state
-    assert "[x] **29.4 Actionable failure messages**" in state
-    assert "[x] **Google Drive ignore rules**" in state
-    assert "[x] **MCP Resources for `.ctx/` exports**" in state
-    assert "30.1 Surface `.ctx/hook_log.json` telemetry in MCP resources or `ctx check`" in state
-
-    for uri in (
-        "ctx://.ctx/CONTEXT.md",
-        "ctx://.ctx/CONTEXT-1.md",
-        "ctx://.ctx/CONTEXT-0.md",
-        "ctx://.ctx/metadata.json",
-        "ctx://.ctx/hook_log.json",
-    ):
-        assert f"`{uri}`" in agents
-
-    assert "## MCP Resources for .ctx/ Exports ✓" in todos
-
-
-def test_phase30_closeout_and_architectural_pivot_documented() -> None:
-    reflection = REPO_ROOT / "archive" / "reflections" / "2026-10-29-phase30-reflection.md"
-    state = (REPO_ROOT / "state.md").read_text(encoding="utf-8")
-    todos = (REPO_ROOT / "TODOS.md").read_text(encoding="utf-8")
-    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
-
-    assert reflection.exists()
-    reflection_text = reflection.read_text(encoding="utf-8")
-    assert "## Disposition Table" in reflection_text
-    assert "Carry into Phase 31" in reflection_text
-
-    assert "### Phase 30 — High-Signal Architectural & Invariant Maps Pivot & Queue Drain ✓" in state
-    for item in ("30.1", "30.2", "30.3", "30.4", "30.5", "30.6", "30.7"):
-        assert f"[x] **{item}" in state
-
-    assert "## Run History Pruning ✓" in todos
-    assert "## ctx-sdk: Standalone Python Package for .ctx/ Consumers ✓" in todos
-    assert "## Architectural Pivot — High-Signal Architectural & Invariant Maps (Phase 30) ✓" in todos
-    assert "`--tier2`" in agents
-    assert "`--capsule`" in agents
-
-
-def test_phase30_8_dogfood_hardening_closeout_documented() -> None:
-    reflection = REPO_ROOT / "archive" / "reflections" / "2026-10-30-phase30-8-dogfood-hardening-reflection.md"
-    state = (REPO_ROOT / "state.md").read_text(encoding="utf-8")
-    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
-
-    assert reflection.exists()
-    reflection_text = reflection.read_text(encoding="utf-8")
-    assert "## Disposition Table" in reflection_text
-    assert "Carry into Phase 31" in reflection_text
-
-    assert "### Phase 30.8 — AI-Server Live Dogfood Hardening Gate ✓" in state
-    for item in [f"30.8.{i}" for i in range(1, 11)]:
-        assert f"[x] **{item}" in state
-    assert "31.2 Optional OpenAI structured-output" in state
-    assert "`--out-file <file>`" in agents
-    assert "`CTX_GLOBAL_STATS_PATH`" in agents
-
-
-def test_phase30_9_audit_remediation_closeout_documented() -> None:
-    reflection = REPO_ROOT / "archive" / "reflections" / "2026-10-31-phase30-9-audit-remediation-reflection.md"
-    state = (REPO_ROOT / "state.md").read_text(encoding="utf-8")
-    todos = (REPO_ROOT / "TODOS.md").read_text(encoding="utf-8")
-    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    architecture = (REPO_ROOT / "architecture.md").read_text(encoding="utf-8")
-
-    assert reflection.exists()
-    reflection_text = reflection.read_text(encoding="utf-8")
-    assert "## Disposition Table" in reflection_text
-    assert "Carry into Phase 31" in reflection_text
-    assert "Carry into Phase 32" in reflection_text
-    assert "Carry into Phase 33" in reflection_text
-
-    assert "### Phase 30.9 — Full Repository Audit Remediation Gate ✓" in state
-    for item in [f"30.9.{i}" for i in range(1, 14)]:
-        assert f"[x] **{item}" in state
-    assert "## Queued Strategic Feature Unlocks (Post-Audit Work Queue)" in todos
-    assert "# path/to/directory" in agents
-    assert "# relative/path" in architecture
-    assert not (REPO_ROOT / "=4.0").exists()
-
-
-
-
+    assert not (REPO_ROOT / "src" / "ctx" / "jev.py").exists()
+    assert not (REPO_ROOT / "src" / "ctx" / "llm.py").exists()
+    assert not (REPO_ROOT / "src" / "ctx" / "generator.py").exists()
+    assert not (REPO_ROOT / "heads").exists()
+    assert not (REPO_ROOT / ".machina").exists()
+    assert not (REPO_ROOT / ".husky").exists()
+    assert not (REPO_ROOT / "package.json").exists()
+    assert list(REPO_ROOT.rglob("CONTEXT.md")) == []

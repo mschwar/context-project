@@ -1,87 +1,62 @@
 # ctx
 
-Filesystem-native context layer for AI agents.
+Deterministic, zero-LLM static AST, import-graph, and blast-radius structural analyzer for AI agents.
 
-`ctx` generates `CONTEXT.md` manifests (or zero-LLM `.ctx/` Tier 2 architectural & invariant maps) so AI agents can orient and navigate codebases without reading every file. Manifests use portable repo-relative headings, deterministic filesystem listings, and SHA-256 staleness verification.
+`ctx` extracts multi-language symbol signatures, directed module dependencies, operational surfaces (CLI commands, HTTP routes, MCP tools/resources, env vars), and governance boundaries directly from source code — zero API keys, zero LLM tokens, zero per-directory `CONTEXT.md` sidecar litter, and zero background git hooks.
+
+## Why Zero-LLM Static Maps?
+
+Per the repository's [Phase 27.1 deterministic static-oracle benchmark](./docs/benchmarks/phase27-1-navigation-benchmark.md), per-directory LLM `CONTEXT.md` manifests were retired after losing to `raw_grep` by `-11.5 pp` mean recall (`-70.1 pp` on operational surfaces) while burning ~8.6k LLM tokens per implementation commit. Deterministic `.ctx/` structural maps + `ctx impact` deliver `+18.7 pp` higher recall than `raw_grep` (`100%` multi-hop blast-radius recall) at **$0.00 and 0 LLM tokens**.
 
 ## Quick Start
 
 ```bash
 pip install ctx-tool
-export ANTHROPIC_API_KEY="sk-..."
-ctx refresh .
+
+ctx init .                              # bootstrap gitignored .ctx/ structural maps (~50 ms)
+ctx refresh .                           # deterministically refresh .ctx/ when signatures change
+ctx export . --depth 0                  # 1-page architecture, entrypoints & authority map
+ctx export . --capsule                  # structured fleet capsule for project-ledger / gbrain
+ctx impact src/ctx/skeleton.py .        # reverse-dependency blast radius & coupled tests
 ```
 
-Or bootstrap self-maintaining `.ctx/` exports and background git hooks (with optional zero-LLM `--tier2` architectural synthesis):
+## For Agents & MCP Clients
 
-```bash
-ctx init . --tier2   # zero-LLM structural & boundary-doc map in .ctx/
-ctx init .           # full per-directory CONTEXT.md tree + .ctx/ + git hooks
-```
+Read [AGENTS.md](./AGENTS.md) for the command contract, JSON output envelopes, error codes, and Python SDK (`ctx.sdk.CtxProject`).
 
-## What It Costs
-
-ctx uses lightweight LLM calls (Haiku-class models by default, or zero-cost local Ollama / `--tier2`). Real-world benchmarks:
-
-| Tree | Dirs | Files | Cost | Time |
-|------|------|-------|------|------|
-| 31 dirs | 31 | 566 | $0.11 | 7 min |
-| 171 dirs | 171 | ~1,200 | ~$1.26 | ~15 min |
-
-Runs are incremental and disk-cached — unchanged directories and files cost zero tokens.
-
-## For Agents
-
-Tell your agent: install `ctx-tool`, run `ctx refresh .`, then read [AGENTS.md](./AGENTS.md) for the full command contract, JSON output schemas, error codes, and integration patterns.
-
-For MCP clients, copy [`mcp.json`](./mcp.json) into `.mcp.json` / `.cursor/mcp.json` or run `ctx serve --mcp` (exposes tools + read-only `ctx://.ctx/*` resources).
+For MCP clients, copy [`mcp.json`](./mcp.json) into `.mcp.json` or run `ctx serve --mcp` (exposes `ctx_refresh`, `ctx_check`, `ctx_export`, `ctx_reset`, `ctx_impact`, and read-only `ctx://.ctx/*` resources).
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
-| `ctx init [path]` | Bootstrap `.ctx/` tiered exports + git hooks (`--tier2` for zero-LLM map) |
-| `ctx uninit [path]` | Remove `.ctx/` exports and ctx git hook blocks |
-| `ctx refresh <path>` | Generate or update manifests (Tier 1 or Tier 2) |
-| `ctx check <path>` | Validate manifest health, `--verify` bodies, `--stats`, or `--diff` |
-| `ctx export <path>` | Concatenate manifests or emit `--capsule` structural payload |
-| `ctx stats [path]` | Show coverage or `--board` refresh/cost telemetry (`--global`, `--trend`) |
-| `ctx setup [path]` | Detect provider, write `.ctxconfig`, or run `--check` preflight gate |
-| `ctx impact <target>` | Analyze reverse-dependency blast radius, coupled tests, and governing docs |
-| `ctx jev <subcmd>` | List, execute (`decide`), or evaluate (`eval`) Type 1 Jev System-One heads |
-| `ctx benchmark [paths]` | Run Phase 27.1 static-oracle A/B/C navigation & blast-radius benchmark |
-| `ctx reset <path>` | Remove generated `CONTEXT.md` manifests |
-| `ctx serve --mcp` | Expose tools and `.ctx/` resources via MCP (stdio JSON-RPC) |
+| `ctx init [path]` | Create gitignored `.ctx/` tiered maps (`CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`) |
+| `ctx uninit [path]` | Remove `.ctx/` directory and strip any legacy ctx git hook blocks |
+| `ctx refresh [path]` | Deterministically update `.ctx/` maps when structural or boundary hashes change |
+| `ctx check [path]` | Validate `.ctx/` freshness, `--verify` frontmatter/exports, `--stats`, or `--diff` |
+| `ctx export [path]` | Export `.ctx/` maps (or render on-the-fly) or emit `--capsule` payload |
+| `ctx impact <target>` | Compute directed reverse-dependency blast radius, coupled tests, and governing docs |
+| `ctx benchmark [paths]` | Run reproducible Phase 27.1 static-oracle A/B/C navigation benchmark |
+| `ctx reset [path]` | Clean up legacy per-directory `CONTEXT.md` files (`--yes`, `--dry-run`) |
+| `ctx serve [path]` | Expose MCP tools & resources (`--mcp`) or optional FastAPI HTTP server |
 
-Key flags: `--until-complete` (auto-retry large trees), `--output json` (machine-readable), `--force` (regenerate all), `--watch` (live refresh), `--verify --check-exit` (strict verification gate).
+## Configuration (Optional)
 
-## Configuration
-
-Works out of the box with `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. For local models:
-
-```bash
-ctx refresh . --setup   # auto-detects Ollama or LM Studio
-ctx setup --check .     # 7-check preflight readiness gate
-```
-
-Fine-tune with `.ctxconfig`:
+`ctx` requires zero configuration. Optional `.ctxconfig` (YAML) or environment variables:
 
 ```yaml
-provider: anthropic
-model: claude-haiku-4-5-20251001
-max_usd_per_run: 1.00
+max_depth: 6
+extensions: [".py", ".ts", ".go", ".rs"]
 ```
-
-Full config reference in [AGENTS.md](./AGENTS.md#configure).
 
 ## Docs
 
 | Doc | Audience |
 |-----|----------|
-| [AGENTS.md](./AGENTS.md) | Agents — command contract, schemas, integration patterns |
-| [architecture.md](./architecture.md) | Developers — engine design and data flow |
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | Contributors — dev setup and workflow |
-| [state.md](./state.md) | Maintainers — roadmap and phase history |
+| [AGENTS.md](./AGENTS.md) | Agents — command contract, JSON schemas, MCP & SDK integration |
+| [architecture.md](./architecture.md) | Developers — static AST/import-graph engine and `.ctx/` layout |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Contributors — dev setup and test workflow |
+| [docs/benchmarks/phase27-1-navigation-benchmark.md](./docs/benchmarks/phase27-1-navigation-benchmark.md) | Empirical A/B/C navigation & blast-radius benchmark |
 
 ## License
 

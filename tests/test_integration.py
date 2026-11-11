@@ -1,92 +1,60 @@
-"""End-to-end CLI coverage on the sample fixture project."""
+"""End-to-end zero-LLM CLI coverage on the sample fixture project."""
 
 from __future__ import annotations
 
-import shutil
-from importlib import import_module
+import json
 from pathlib import Path
+import shutil
+import subprocess
 
 from click.testing import CliRunner
 
-from ctx.llm import FileSummary, LLMResult, SubdirSummary
-from ctx.manifest import read_manifest
-
-
-def _placeholder(label: str) -> str:
-    return f"{label}-value"
-
-
-class _EndToEndFakeClient:
-    model = "e2e-llm-model"
-
-    def summarize_files(self, dir_path: Path, files: list[dict]) -> list[LLMResult]:
-        return [
-            LLMResult(
-                text=f"Summary for {f['name']}",
-                input_tokens=3 if index == 0 else 0,
-                output_tokens=1 if index == 0 else 0,
-            )
-            for index, f in enumerate(files)
-        ]
-
-    def summarize_directory(
-        self,
-        dir_path: Path,
-        file_summaries: list[FileSummary],
-        subdir_summaries: list[SubdirSummary],
-    ) -> LLMResult:
-        body_lines = [
-            f"# {dir_path.as_posix()}",
-            "",
-            f"Summary for {dir_path.name or 'root'}.",
-            "",
-            "## Files",
-        ]
-        if file_summaries:
-            body_lines.extend(f"- **{summary.name}** — {summary.summary}" for summary in file_summaries)
-        else:
-            body_lines.append("- None")
-
-        body_lines.extend(["", "## Subdirectories"])
-        if subdir_summaries:
-            body_lines.extend(f"- **{summary.name}/** — {summary.summary}" for summary in subdir_summaries)
-        else:
-            body_lines.append("- None")
-
-        body_lines.extend(["", "## Notes", "- Generated during end-to-end test"])
-        return LLMResult(text="\n".join(body_lines) + "\n", input_tokens=5, output_tokens=2)
+from ctx.cli import cli
 
 
 def _copy_sample_project(tmp_path: Path) -> Path:
     source = Path(__file__).parent / "fixtures" / "sample_project"
     destination = tmp_path / "sample_project"
     shutil.copytree(source, destination)
+    subprocess.run(["git", "init", str(destination)], capture_output=True, check=True)
     return destination
 
 
-def test_ctx_refresh_end_to_end_creates_manifests(monkeypatch, tmp_path) -> None:
-    api_module = import_module("ctx.api")
-    cli_module = import_module("ctx.cli")
+def test_deterministic_end_to_end_init_check_export_impact_and_refresh(tmp_path: Path) -> None:
     runner = CliRunner()
     root = _copy_sample_project(tmp_path)
 
-    monkeypatch.setattr(api_module, "create_client", lambda config: _EndToEndFakeClient())
-    monkeypatch.setattr(api_module, "probe_provider_connectivity", lambda *a, **kw: (True, None))
+    res_init = runner.invoke(cli, ["init", str(root), "--output", "json"])
+    assert res_init.exit_code == 0, res_init.output
+    init_env = json.loads(res_init.output)
+    assert init_env["status"] == "success"
+    assert init_env["data"]["hooks_installed"] == []
+    assert not (root / "CONTEXT.md").exists()
+    assert (root / ".ctx" / "CONTEXT-0.md").is_file()
+    assert (root / ".ctx" / "CONTEXT-1.md").is_file()
+    assert (root / ".ctx" / "CONTEXT.md").is_file()
 
-    result = runner.invoke(
-        cli_module.cli,
-        ["refresh", str(root), "--force"],
-        env={"ANTHROPIC_API_KEY": _placeholder("anthropic")},
-    )
+    res_check = runner.invoke(cli, ["check", str(root), "--verify", "--check-exit", "--output", "json"])
+    assert res_check.exit_code == 0, res_check.output
+    assert json.loads(res_check.output)["data"]["summary"]["invalid"] == 0
 
-    assert result.exit_code == 0, result.output
-    assert "Directories refreshed:" in result.output
-    assert "Files processed:" in result.output
-    assert "Errors: 0" in result.output
+    res_cap = runner.invoke(cli, ["export", str(root), "--capsule", "--output", "json"])
+    assert res_cap.exit_code == 0, res_cap.output
+    cap_data = json.loads(res_cap.output)["data"]
+    assert cap_data["total_files"] >= 2
+    assert "Python" in cap_data["languages"]
 
-    for directory in (root, root / "docs", root / "src"):
-        manifest = read_manifest(directory)
-        assert manifest is not None
-        assert manifest.frontmatter.model == "e2e-llm-model"
-        rel = directory.relative_to(root).as_posix() if directory != root else "."
-        assert manifest.body.startswith(f"# {rel}\n")
+    # Add a new public symbol -> check marks .ctx/ stale -> refresh restores freshness with 0 LLM tokens
+    (root / "src" / "new_mod.py").write_text("def exported_fn() -> int:\n    return 42\n", encoding="utf-8")
+    res_stale = runner.invoke(cli, ["check", str(root), "--check-exit", "--output", "json"])
+    assert res_stale.exit_code == 1
+
+    res_refresh = runner.invoke(cli, ["refresh", str(root), "--output", "json"])
+    assert res_refresh.exit_code == 0, res_refresh.output
+    ref_env = json.loads(res_refresh.output)
+    assert ref_env["metadata"]["tokens_used"] == 0
+    assert ref_env["data"]["dirs_processed"] >= 1
+    assert "exported_fn" in (root / ".ctx" / "CONTEXT.md").read_text(encoding="utf-8")
+
+    res_fresh = runner.invoke(cli, ["check", str(root), "--verify", "--check-exit"])
+    assert res_fresh.exit_code == 0, res_fresh.output

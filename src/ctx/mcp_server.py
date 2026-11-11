@@ -1,17 +1,15 @@
-"""MCP stdio server for ctx."""
+"""Deterministic zero-LLM MCP stdio server for ctx."""
 
 from __future__ import annotations
 
+from dataclasses import asdict
 import json
 import logging
-import sys
-from dataclasses import asdict
 from pathlib import Path
+import sys
 from typing import Any
 
-from ctx import __version__
-from ctx import api
-
+from ctx import __version__, api
 
 # MCP uses date-stamped protocol revisions during initialize, not semver.
 PROTOCOL_VERSION = "2024-11-05"
@@ -20,8 +18,8 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
     {
         "name": "ctx_refresh",
         "description": (
-            "Generate or update CONTEXT.md manifests for a directory tree. "
-            "Analyzes source files using an LLM and produces structured summaries."
+            "Deterministically generate or update .ctx/ architectural and dependency maps "
+            "using static AST and multi-language parsers (zero LLM calls)."
         ),
         "inputSchema": {
             "type": "object",
@@ -33,12 +31,12 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
                 },
                 "force": {
                     "type": "boolean",
-                    "description": "Regenerate all manifests, even fresh ones.",
+                    "description": "Regenerate .ctx/ maps even when structural hashes match.",
                     "default": False,
                 },
                 "dry_run": {
                     "type": "boolean",
-                    "description": "Preview what would be regenerated without making changes.",
+                    "description": "Preview whether .ctx/ maps are stale without writing.",
                     "default": False,
                 },
             },
@@ -48,8 +46,7 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
     {
         "name": "ctx_check",
         "description": (
-            "Check manifest health, coverage, freshness, and validity across a directory tree. "
-            "Returns status of each directory."
+            "Check deterministic .ctx/ structural map freshness, coverage, and validity."
         ),
         "inputSchema": {
             "type": "object",
@@ -61,17 +58,17 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
                 },
                 "verify": {
                     "type": "boolean",
-                    "description": "Full validation including frontmatter field checks.",
+                    "description": "Full validation including .ctx/ frontmatter and export checks.",
                     "default": False,
                 },
                 "stats": {
                     "type": "boolean",
-                    "description": "Return coverage statistics.",
+                    "description": "Return coverage and estimated token statistics.",
                     "default": False,
                 },
                 "diff": {
                     "type": "boolean",
-                    "description": "Show CONTEXT.md files that changed since last generation.",
+                    "description": "Report whether .ctx/CONTEXT.md is stale.",
                     "default": False,
                 },
             },
@@ -81,8 +78,7 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
     {
         "name": "ctx_export",
         "description": (
-            "Export CONTEXT.md manifests as concatenated text. "
-            "Returns all manifests in a single string for context loading."
+            "Export deterministic .ctx/ structural context or a structured fleet capsule."
         ),
         "inputSchema": {
             "type": "object",
@@ -95,12 +91,17 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
                 "filter": {
                     "type": "string",
                     "enum": ["all", "stale", "missing"],
-                    "description": "Which manifests to export.",
+                    "description": "Which exports to return.",
                     "default": "all",
                 },
                 "depth": {
                     "type": "integer",
-                    "description": "Limit export to N nesting levels.",
+                    "description": "Export tier depth (0 = CONTEXT-0, 1 = CONTEXT-1, omit = full).",
+                },
+                "capsule": {
+                    "type": "boolean",
+                    "description": "Emit structured FleetCapsuleResult JSON instead of plain markdown.",
+                    "default": False,
                 },
             },
             "required": [],
@@ -108,7 +109,7 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
     },
     {
         "name": "ctx_reset",
-        "description": "Remove all CONTEXT.md files from a directory tree. Destructive operation.",
+        "description": "Remove legacy per-directory CONTEXT.md files from a directory tree.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -123,39 +124,6 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
                     "default": False,
                 },
             },
-            "required": [],
-        },
-    },
-    {
-        "name": "ctx_board",
-        "description": (
-            "Read the running board (refresh history and cost analytics) for a repository. "
-            "Returns aggregate stats, per-model breakdown, and recent runs."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Directory path, relative to the server root.",
-                    "default": ".",
-                },
-                "since": {
-                    "type": "string",
-                    "description": "Time filter: relative (7d, 4w) or absolute (2026-03-01).",
-                },
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "ctx_global_board",
-        "description": (
-            "Read the global running board with aggregated cost analytics across all repositories."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
             "required": [],
         },
     },
@@ -185,75 +153,31 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
             "required": ["target"],
         },
     },
-    {
-        "name": "ctx_jev",
-        "description": (
-            "Inspect, evaluate, or invoke governed Type 1 Jev (System-One) bounded architectural "
-            "decision heads (`heads`, `decide`, or `eval`) with deterministic code fallback."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["heads", "decide", "eval"],
-                    "description": "Jev action to run.",
-                    "default": "heads",
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Repository root path relative to the server root.",
-                    "default": ".",
-                },
-                "heads": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Head IDs to evaluate (required for `decide`, optional filter for `eval`).",
-                },
-                "state": {
-                    "type": "object",
-                    "description": "Structured JSON state payload for `decide`.",
-                },
-                "provider": {
-                    "type": "string",
-                    "enum": ["code", "jev"],
-                    "description": "Optional provider override (`code` deterministic rule or `jev` System-One).",
-                },
-            },
-            "required": [],
-        },
-    },
 ]
 
 RESOURCE_DEFINITIONS: list[dict[str, str]] = [
     {
         "uri": "ctx://.ctx/CONTEXT.md",
         "name": ".ctx/CONTEXT.md",
-        "description": "Full-depth export of all CONTEXT.md manifests in the repository.",
+        "description": "Full deterministic structural, dependency, and file-signature map.",
         "mimeType": "text/markdown",
     },
     {
         "uri": "ctx://.ctx/CONTEXT-1.md",
         "name": ".ctx/CONTEXT-1.md",
-        "description": "Depth-1 export of CONTEXT.md manifests (root and immediate children).",
+        "description": "Depth-1 subsystem dependency and architectural boundary map.",
         "mimeType": "text/markdown",
     },
     {
         "uri": "ctx://.ctx/CONTEXT-0.md",
         "name": ".ctx/CONTEXT-0.md",
-        "description": "Depth-0 export of the root CONTEXT.md manifest only.",
+        "description": "Depth-0 1-page repository architecture, entrypoints, and authority map.",
         "mimeType": "text/markdown",
     },
     {
         "uri": "ctx://.ctx/metadata.json",
         "name": ".ctx/metadata.json",
-        "description": "Repository initialization metadata, version, timestamps, and installed git hooks.",
-        "mimeType": "application/json",
-    },
-    {
-        "uri": "ctx://.ctx/hook_log.json",
-        "name": ".ctx/hook_log.json",
-        "description": "Git hook execution telemetry: trigger types, durations, and success/failure status.",
+        "description": "Repository initialization metadata, version, timestamps, and structural hashes.",
         "mimeType": "application/json",
     },
 ]
@@ -455,13 +379,6 @@ class CtxMCPServer:
         if not file_path.is_relative_to(ctx_dir.resolve()):
             raise PathTraversalDeniedError(uri)
         if not file_path.is_file():
-            if filename == "hook_log.json" and (ctx_dir / "metadata.json").is_file():
-                return {
-                    "uri": resource["uri"],
-                    "name": resource["name"],
-                    "mimeType": resource["mimeType"],
-                    "text": json.dumps({"runs": []}, indent=2) + "\n",
-                }
             raise ResourceNotFoundError(resource["name"])
 
         return {
@@ -487,10 +404,7 @@ class CtxMCPServer:
             "ctx_check": self._call_check,
             "ctx_export": self._call_export,
             "ctx_reset": self._call_reset,
-            "ctx_board": self._call_board,
-            "ctx_global_board": self._call_global_board,
             "ctx_impact": self._call_impact,
-            "ctx_jev": self._call_jev,
         }
         handler = handlers.get(tool_name)
         if handler is None:
@@ -538,8 +452,11 @@ class CtxMCPServer:
     def _call_export(self, arguments: dict[str, object]) -> dict[str, object]:
         path = self._resolve_path(arguments.get("path", "."))
         depth = arguments.get("depth")
-        if depth is not None and not isinstance(depth, int):
+        if depth is not None and (not isinstance(depth, int) or isinstance(depth, bool)):
             raise InvalidToolArgumentsError("depth must be an integer", error_code="invalid_depth")
+        if bool(arguments.get("capsule", False)):
+            cap = api.build_fleet_capsule(path, depth=1 if depth is None else depth)
+            return asdict(cap)
         result = api.export_context(
             path,
             filter_mode=str(arguments.get("filter", "all")),
@@ -556,23 +473,6 @@ class CtxMCPServer:
         )
         return asdict(result)
 
-    def _call_board(self, arguments: dict[str, object]) -> dict[str, object]:
-        from ctx.config import load_config, Config
-        from ctx.stats_board import read_board
-        path = self._resolve_path(arguments.get("path", "."))
-        since = arguments.get("since")
-        if since is not None and not isinstance(since, str):
-            since = None
-        try:
-            config = load_config(path, require_api_key=False)
-        except Exception:
-            config = Config()
-        return read_board(path, config, since=since)
-
-    def _call_global_board(self, arguments: dict[str, object]) -> dict[str, object]:
-        from ctx.stats_board import read_global_board
-        return read_global_board()
-
     def _call_impact(self, arguments: dict[str, object]) -> dict[str, object]:
         path = self._resolve_path(arguments.get("path", "."))
         target = arguments.get("target")
@@ -586,58 +486,6 @@ class CtxMCPServer:
         except ValueError as exc:
             raise InvalidToolArgumentsError(str(exc), error_code="target_not_found") from exc
         return asdict(result)
-
-    def _call_jev(self, arguments: dict[str, object]) -> dict[str, object]:
-        path = self._resolve_path(arguments.get("path", "."))
-        action = str(arguments.get("action") or "heads").strip().lower()
-        provider = arguments.get("provider")
-        if provider is not None and (not isinstance(provider, str) or provider not in ("code", "jev")):
-            raise InvalidToolArgumentsError("provider must be 'code' or 'jev'", error_code="invalid_provider")
-        raw_heads = arguments.get("heads")
-        head_ids: list[str] | None = None
-        if raw_heads is not None:
-            if not isinstance(raw_heads, list) or not all(isinstance(h, str) and h.strip() for h in raw_heads):
-                raise InvalidToolArgumentsError("heads must be a list of non-empty strings", error_code="invalid_heads")
-            head_ids = [h.strip() for h in raw_heads]
-
-        try:
-            if action == "heads":
-                return {"heads": api.jev_list_heads(path)}
-            if action == "eval":
-                return api.evaluate_jev_heads(
-                    path,
-                    provider=provider or "code",
-                    head_ids=head_ids,
-                    allow_vault=False,
-                )
-            if action == "decide":
-                if not head_ids:
-                    raise InvalidToolArgumentsError(
-                        "heads is required when action is 'decide'",
-                        error_code="missing_heads",
-                    )
-                state = arguments.get("state")
-                if not isinstance(state, dict):
-                    raise InvalidToolArgumentsError(
-                        "state must be a JSON object when action is 'decide'",
-                        error_code="invalid_state",
-                    )
-                return api.jev_decide(
-                    head_ids,
-                    state,
-                    root=path,
-                    provider=provider,
-                    allow_vault=False,
-                )
-        except MCPToolError:
-            raise
-        except ValueError as exc:
-            raise InvalidToolArgumentsError(str(exc), error_code="invalid_jev_arguments") from exc
-
-        raise InvalidToolArgumentsError(
-            f"Unsupported action {action!r}; expected 'heads', 'decide', or 'eval'",
-            error_code="invalid_action",
-        )
 
     def _resolve_path(self, relative: object) -> Path:
         if not isinstance(relative, str):

@@ -12,9 +12,7 @@ from typing import TextIO
 import click
 
 from ctx import __version__
-from ctx.api import BudgetExhaustedError, ConfirmationRequiredError
-from ctx.config import MissingApiKeyError
-from ctx.llm import TRANSIENT_ERROR_PREFIX
+from ctx.api import ConfirmationRequiredError
 from ctx.lock import LockHeldError, LockSupersededError
 
 
@@ -29,29 +27,10 @@ def _determine_status(data: dict, errors: list[dict[str, str | None]]) -> str:
 def _classify_exception(exc: BaseException) -> tuple[str, str, str | None]:
     if isinstance(exc, ConfirmationRequiredError):
         return ("confirmation_required", str(exc), "Re-run with --yes.")
-    if isinstance(exc, BudgetExhaustedError):
-        # refresh/check surfaces use this when a hard run budget stopped work
-        # and the next action is to shrink scope or raise the guardrail.
-        return ("budget_exhausted", str(exc), "Raise the budget guardrail or reduce scope.")
     if isinstance(exc, (LockHeldError, LockSupersededError)):
         return ("lock_held", str(exc), "Wait and retry, or check for stuck processes.")
-    if isinstance(exc, MissingApiKeyError):
-        return ("provider_not_configured", str(exc), "Run ctx refresh --setup")
-    if isinstance(exc, (ConnectionError, TimeoutError)):
-        return ("provider_unreachable", str(exc), "Check network or run ctx refresh . --setup --dry-run")
-    if isinstance(exc, RuntimeError) and TRANSIENT_ERROR_PREFIX in str(exc):
-        return ("provider_unreachable", str(exc), "Retry the command")
     if isinstance(exc, click.UsageError):
-        message = str(exc)
-        if "No LLM provider" in message:
-            return ("provider_not_configured", message, "Run ctx refresh --setup")
-        if "Missing required environment variable" in message:
-            return (
-                "provider_not_configured",
-                message,
-                "Set ANTHROPIC_API_KEY or OPENAI_API_KEY",
-            )
-        return ("unknown_error", message, None)
+        return ("invalid_usage", str(exc), None)
     if isinstance(exc, Exception):
         return ("unknown_error", str(exc), None)
     return ("unknown_error", repr(exc), None)

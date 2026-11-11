@@ -30,5 +30,10 @@ jobs:
       - name: Run test suite
         run: python -m pytest tests
 
-      - name: Verify manifest health
-        run: CTX_OUTPUT=json python -m ctx check . --verify --check-exit
+      - name: Verify deterministic .ctx/ init, check, capsule, and impact
+        run: |
+          CTX_OUTPUT=json python -m ctx init .
+          CTX_OUTPUT=json python -m ctx check . --verify --check-exit
+          CTX_OUTPUT=json python -m ctx export . --capsule --out-file .tmp/capsule.json
+          CTX_OUTPUT=json python -m ctx impact src/ctx/skeleton.py .
+          CTX_OUTPUT=json python -m ctx uninit .

@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ctx-tool"
 dynamic = ["version"]
-description = "Filesystem-native context layer for AI agents — generates CONTEXT.md manifests for codebase navigation"
+description = "Deterministic zero-LLM static AST, import-graph, and blast-radius structural analyzer for AI agents"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-keywords = ["ai", "agent", "context", "codebase", "mcp", "manifest", "llm", "documentation"]
+keywords = ["ai", "agent", "context", "codebase", "mcp", "ast", "dependency-graph", "static-analysis"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
@@ -24,17 +24,10 @@ classifiers = [
     "Typing :: Typed",
     "Topic :: Utilities",
 ]
-# Core dependencies retain anthropic/openai/watchdog/tiktoken in the 1.1.x release line
-# so existing `pip install ctx-tool` installs never regress; heavy SDKs are lazy-loaded
-# at runtime so deterministic Tier 2 / impact / check / SDK / Jev paths import in <25ms.
 dependencies = [
     "click>=8.1",
-    "anthropic>=0.40",
-    "openai>=1.50",
     "pyyaml>=6.0",
     "pathspec>=0.12",
-    "watchdog>=4.0",
-    "tiktoken>=0.7",
 ]
 
 [project.urls]
@@ -42,28 +35,11 @@ Homepage = "https://github.com/mschwar/context-project"
 Repository = "https://github.com/mschwar/context-project"
 
 [project.optional-dependencies]
-anthropic = [
-    "anthropic>=0.40",
-]
-openai = [
-    "openai>=1.50",
-]
-cloud = [
-    "anthropic>=0.40",
-    "openai>=1.50",
-]
-watch = [
-    "watchdog>=4.0",
-]
 serve = [
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
 ]
 all = [
-    "anthropic>=0.40",
-    "openai>=1.50",
-    "watchdog>=4.0",
-    "tiktoken>=0.7",
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
 ]

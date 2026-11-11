@@ -1,188 +1,33 @@
-"""Configuration loading from env vars and .ctxconfig files.
+"""Deterministic configuration loading from env vars and .ctxconfig files.
 
 Resolution order (highest priority first):
-1. CLI flags (passed through from Click)
-2. Environment variables: CTX_* plus provider API keys
+1. Explicit function arguments (passed through from CLI/API)
+2. Environment variables: CTX_MAX_DEPTH, CTX_EXTENSIONS
 3. .ctxconfig YAML file in target directory or parents
 4. Built-in defaults
-
-Built-in defaults:
-    provider: "anthropic"
-    model: provider-specific default
-        - anthropic: "claude-haiku-4-5-20251001"
-        - openai: "gpt-4o-mini"
-        - ollama: "llama3.2"
-        - lmstudio: "loaded-model"
-    max_file_tokens: 8000  (truncate files larger than this before sending to LLM)
-    max_depth: None  (unlimited)
-    token_budget: None  (generator-level budget)
-    max_tokens_per_run: None  (hard token guardrail)
-    max_usd_per_run: None  (hard USD guardrail)
-    files_per_call: None  (send all files in a single LLM call — smaller values increase API call count)
-    max_concurrent_dirs: None  (auto: 1 for cloud and local single-GPU safety)
-    extensions: None  (all text files)
-    base_url: None  (provider default — override for custom endpoints)
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import click
 import yaml
 
 
-class MissingApiKeyError(click.UsageError):
-    """Raised when a required LLM provider API key is not set."""
-
-
-DEFAULT_PROVIDER = "anthropic"
-DEFAULT_MODELS = {
-    "anthropic": "claude-haiku-4-5-20251001",
-    "openai": "gpt-4o-mini",
-    "ollama": "llama3.2",
-    "lmstudio": "loaded-model",
-    "bitnet": "",  # model path is required; no default
-}
-DEFAULT_BASE_URLS = {
-    "ollama": "http://localhost:11434/v1",
-    "lmstudio": "http://localhost:1234/v1",
-}
-LOCAL_PROVIDERS = frozenset({"ollama", "lmstudio", "bitnet"})
-
-# Probe endpoints for connectivity checks
-ANTHROPIC_PROBE_URL = "https://api.anthropic.com/v1/models"
-ANTHROPIC_API_VERSION = "2023-06-01"
-OPENAI_DEFAULT_PROBE_BASE_URL = "https://api.openai.com"
-
-# Proxy environment variables checked when connectivity fails
-PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
-
-# Human-readable detection source shown by `ctx setup`
-PROVIDER_DETECTED_VIA: dict[str, str] = {
-    "anthropic": "ANTHROPIC_API_KEY env var",
-    "openai": "OPENAI_API_KEY env var",
-    "ollama": "Ollama running on localhost:11434",
-    "lmstudio": "LM Studio running on localhost:1234",
-}
-
-# Pricing per 1M input tokens in USD (ordered most-specific substring first).
-PRICING_DATA: dict[str, dict] = {
-    "anthropic": {
-        "models": [
-            ("claude-opus-4", 15.0),
-            ("claude-sonnet-4", 3.0),
-            ("claude-haiku-4-5", 1.00),
-            ("claude-3-5-sonnet", 3.0),
-            ("claude-3-5-haiku", 0.80),
-            ("claude-3-opus", 15.0),
-            ("claude-3-sonnet", 3.0),
-            ("claude-3-haiku", 0.25),
-        ],
-        "default": 1.00,
-    },
-    "openai": {
-        "models": [
-            ("gpt-4.1-nano", 0.10),
-            ("gpt-4.1-mini", 0.40),
-            ("gpt-4.1", 2.0),
-            ("gpt-4o-mini", 0.15),
-            ("gpt-4o", 2.50),
-            ("gpt-4-o", 2.50),
-            ("o4-mini", 1.10),
-            ("o3-mini", 1.10),
-            ("gpt-4-turbo", 10.0),
-            ("gpt-4", 30.0),
-            ("gpt-3.5-turbo", 0.5),
-            ("gpt-3.5", 0.5),
-        ],
-        "default": 0.15,
-    },
-    "ollama": {"default": 0.0},
-    "lmstudio": {"default": 0.0},
-}
-
-# Pricing per 1M output tokens in USD (ordered most-specific substring first).
-OUTPUT_PRICING_DATA: dict[str, dict] = {
-    "anthropic": {
-        "models": [
-            ("claude-opus-4", 75.0),
-            ("claude-sonnet-4", 15.0),
-            ("claude-haiku-4-5", 5.0),
-            ("claude-3-5-sonnet", 15.0),
-            ("claude-3-5-haiku", 4.0),
-            ("claude-3-opus", 75.0),
-            ("claude-3-sonnet", 15.0),
-            ("claude-3-haiku", 1.25),
-        ],
-        "default": 5.0,
-    },
-    "openai": {
-        "models": [
-            ("gpt-4.1-nano", 0.40),
-            ("gpt-4.1-mini", 1.60),
-            ("gpt-4.1", 8.0),
-            ("gpt-4o-mini", 0.60),
-            ("gpt-4o", 10.0),
-            ("gpt-4-o", 10.0),
-            ("o4-mini", 4.40),
-            ("o3-mini", 4.40),
-            ("gpt-4-turbo", 30.0),
-            ("gpt-4", 60.0),
-            ("gpt-3.5-turbo", 1.5),
-            ("gpt-3.5", 1.5),
-        ],
-        "default": 0.60,
-    },
-    "ollama": {"default": 0.0},
-    "lmstudio": {"default": 0.0},
-}
-DEFAULT_UNKNOWN_PROVIDER_PRICE = 3.0
-DEFAULT_UNKNOWN_PROVIDER_OUTPUT_PRICE = 12.0
-
-
 @dataclass
 class Config:
-    """Resolved configuration for a ctx run."""
+    """Resolved deterministic configuration for a ctx run."""
 
-    provider: str = DEFAULT_PROVIDER
-    model: str = ""
-    api_key: str = field(default="", repr=False)
-    base_url: Optional[str] = None
-    max_file_tokens: int = 8000
     max_depth: Optional[int] = None
-    token_budget: Optional[int] = None  # None = unlimited
-    max_tokens_per_run: Optional[int] = None  # None = unlimited hard token guardrail
-    max_usd_per_run: Optional[float] = None  # None = unlimited hard USD guardrail
-    files_per_call: Optional[int] = None  # None = send all files in one call
-    max_concurrent_dirs: Optional[int] = None  # None = auto (1 for cloud and local single-GPU safety)
-    extensions: Optional[list[str]] = None  # None = all text files
-    cache_path: Optional[str] = None  # None = default .ctx-cache/llm_cache.json; "" = disable
-    max_cache_entries: int = 10_000  # trim disk cache when it exceeds this many entries
-    watch_debounce_seconds: float = 0.5  # per-file debounce window for ctx watch
-    resume_cooldown_seconds: float = 60.0  # delay between auto-resume cycles
-    tier2_synthesize: bool = False  # synthesize cross-module invariants when should_invoke_llm() triggers
-    structured_outputs: str = "auto"  # "auto" | "on" | "off" for OpenAI-compatible json_schema
-    jev_mode: str = "auto"  # "auto" | "off" | "shadow" | "advisory" | "routing" | "actuating"
-    prompts: dict[str, str] = field(default_factory=dict)
-
-
-    # Runtime stats (populated during run, not from config)
-    tokens_used: int = field(default=0, repr=False)
-
-    def resolved_model(self) -> str:
-        """Return the provider-specific default when no explicit model is set."""
-
-        provider = (self.provider or DEFAULT_PROVIDER).strip().lower() or DEFAULT_PROVIDER
-        return self.model.strip() or DEFAULT_MODELS.get(provider, DEFAULT_MODELS[DEFAULT_PROVIDER])
+    extensions: Optional[list[str]] = None
 
 
 def _env_text(name: str) -> str | None:
     """Return a trimmed env var value when set and non-empty."""
-
     value = os.getenv(name)
     if value is None:
         return None
@@ -192,126 +37,7 @@ def _env_text(name: str) -> str | None:
 
 def _parse_optional_int(value: str) -> int | None:
     """Parse an int env/config value, allowing the string 'none'."""
-
     return None if value.lower() == "none" else int(value)
-
-
-def _parse_optional_float(value: str) -> float | None:
-    """Parse a float env/config value, allowing the string 'none'."""
-
-    return None if value.lower() == "none" else float(value)
-
-
-def normalize_models_probe_url(base_url: str) -> str:
-    """Return the /v1/models endpoint URL without duplicating a trailing /v1."""
-    trimmed = base_url.rstrip("/")
-    if trimmed.endswith("/v1"):
-        return f"{trimmed}/models"
-    return f"{trimmed}/v1/models"
-
-
-def detect_provider(
-    _probe_callback: "Callable[[str], None] | None" = None,
-) -> tuple[str, str | None] | None:
-    """Detect an available LLM provider from env vars and local port probes.
-
-    Returns (provider, model_or_None) or None if nothing is found.
-    """
-    import json
-    import urllib.error
-    import urllib.request
-
-    if os.getenv("ANTHROPIC_API_KEY", "").strip():
-        return ("anthropic", None)
-    if os.getenv("OPENAI_API_KEY", "").strip():
-        return ("openai", None)
-
-    for provider, base_url in (
-        ("ollama", "http://localhost:11434"),
-        ("lmstudio", "http://localhost:1234"),
-    ):
-        if _probe_callback:
-            _probe_callback(provider)
-        try:
-            with urllib.request.urlopen(normalize_models_probe_url(base_url), timeout=2) as resp:
-                data = json.loads(resp.read())
-            model: str | None = None
-            if isinstance(data.get("data"), list) and data["data"]:
-                model_ids = [
-                    item["id"].strip()
-                    for item in data["data"]
-                    if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"].strip()
-                ]
-                non_embed = [mid for mid in model_ids if "embed" not in mid.lower()]
-                model = non_embed[0] if non_embed else (model_ids[0] if model_ids else None)
-            return (provider, model)
-        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError):
-            pass
-
-    return None
-
-
-def probe_provider_connectivity(
-    provider: str, api_key: str, base_url: str | None = None
-) -> tuple[bool, str | None]:
-    """Make a lightweight call to verify a cloud provider is reachable.
-
-    Returns (True, None) on success or (False, error_message) on failure.
-    Local providers (ollama, lmstudio, bitnet) always return success — they are
-    validated via port probe during detect_provider.
-    """
-    import urllib.error
-    import urllib.request
-
-    if provider in LOCAL_PROVIDERS:
-        return True, None
-
-    if provider == "anthropic":
-        url = ANTHROPIC_PROBE_URL
-        req = urllib.request.Request(url)
-        req.add_header("x-api-key", api_key)
-        req.add_header("anthropic-version", ANTHROPIC_API_VERSION)
-    elif provider == "openai":
-        url = normalize_models_probe_url(base_url or OPENAI_DEFAULT_PROBE_BASE_URL)
-        req = urllib.request.Request(url)
-        req.add_header("Authorization", f"Bearer {api_key}")
-    else:
-        return True, None
-
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            resp.read()
-        return True, None
-    except urllib.error.HTTPError as exc:
-        if exc.code in (401, 403):
-            return False, f"Authentication failed (HTTP {exc.code}) — check your API key"
-        return False, f"HTTP error {exc.code}: {exc.reason}"
-    except urllib.error.URLError as exc:
-        return False, f"Connection error: {exc.reason}"
-    except (TimeoutError, OSError) as exc:
-        return False, f"Connection error: {exc}"
-
-
-def write_default_config(path: Path, provider: str, model: str | None = None, base_url: str | None = None) -> None:
-    """Write a minimal .ctxconfig into *path* directory."""
-    from ctx.stats_board import write_text_atomic
-
-    lines = [f"provider: {provider}"]
-    if model:
-        lines.append(f"model: {model}")
-    if base_url:
-        lines.append(f"base_url: {base_url}")
-    write_text_atomic(path / ".ctxconfig", "\n".join(lines) + "\n")
-
-
-def infer_provider_from_base_url(base_url: str) -> str:
-    """Infer an OpenAI-compatible or local provider name from an endpoint URL."""
-    lowered = base_url.lower()
-    if ":11434" in lowered or "ollama" in lowered:
-        return "ollama"
-    if ":1234" in lowered or "lmstudio" in lowered:
-        return "lmstudio"
-    return "openai"
 
 
 def _iter_config_dirs(start_dir: Path) -> list[Path]:
@@ -319,51 +45,8 @@ def _iter_config_dirs(start_dir: Path) -> list[Path]:
     return [start_dir, *start_dir.parents]
 
 
-def resolve_tier2_synthesize_preference(
-    start_dir: Path,
-    *,
-    explicit_flag: bool = False,
-    persisted_meta: dict[str, object] | None = None,
-) -> bool:
-    """Resolve Tier 2 invariant synthesis setting with explicit disable support.
-
-    Precedence:
-    1. Explicit CLI/API `synthesize=True` flag (`explicit_flag`)
-    2. Explicit `CTX_TIER2_SYNTHESIZE` environment variable (`0`/`false` disables!)
-    3. Explicit `tier2_synthesize` key in `.ctxconfig` (`false` disables!)
-    4. Persisted `.ctx/metadata.json` `synthesize_invariants` boolean
-    """
-    if explicit_flag:
-        return True
-    env_val = _env_text("CTX_TIER2_SYNTHESIZE")
-    if env_val is not None:
-        return env_val.lower() in {"1", "true", "yes", "on"}
-    resolved_start = start_dir.resolve() if start_dir.exists() else start_dir
-    if resolved_start.is_file():
-        resolved_start = resolved_start.parent
-    for directory in _iter_config_dirs(resolved_start):
-        config_path = directory / ".ctxconfig"
-        if not config_path.is_file():
-            continue
-        try:
-            data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        except Exception:
-            break
-        if isinstance(data, dict) and "tier2_synthesize" in data and data["tier2_synthesize"] is not None:
-            raw = data["tier2_synthesize"]
-            if isinstance(raw, bool):
-                return raw
-            return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-        break
-    return bool((persisted_meta or {}).get("synthesize_invariants", False))
-
-
 def resolve_project_anchor(target_path: Path) -> Path:
-    """Resolve the canonical project root anchor for *target_path*.
-
-    Ensures subtree invocations (e.g. `ctx refresh src` or `ctx check src --verify`)
-    produce and verify the same repo-relative manifest headings as root invocations.
-    """
+    """Resolve the canonical project root anchor for *target_path*."""
     resolved = target_path.resolve()
     start_dir = resolved if resolved.is_dir() else resolved.parent
     candidates = _iter_config_dirs(start_dir)
@@ -380,17 +63,11 @@ def resolve_project_anchor(target_path: Path) -> Path:
         if directory != home_dir and (directory / ".ctxconfig").is_file():
             return directory
 
-    anchor = start_dir
-    for directory in candidates[1:]:
-        if (directory / "CONTEXT.md").is_file():
-            anchor = directory
-        else:
-            break
-    return anchor
+    return start_dir
 
 
 def resolve_configured_extensions(target_path: Path) -> Optional[list[str]]:
-    """Resolve file-extension allowlist from CTX_EXTENSIONS or .ctxconfig without requiring API keys."""
+    """Resolve file-extension allowlist from CTX_EXTENSIONS or .ctxconfig."""
     env_extensions = os.getenv("CTX_EXTENSIONS")
     if env_extensions is not None:
         parsed = [item.strip() for item in env_extensions.split(",") if item.strip()]
@@ -421,37 +98,11 @@ def resolve_configured_extensions(target_path: Path) -> Optional[list[str]]:
 def load_config(
     target_path: Path,
     *,
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
     max_depth: Optional[int] = None,
-    token_budget: Optional[int] = None,
-    base_url: Optional[str] = None,
-    cache_path: Optional[str] = None,
-    require_api_key: bool = True,
+    extensions: Optional[list[str]] = None,
 ) -> Config:
-    """Load config by merging .ctxconfig, env vars, and CLI overrides.
-
-    Args:
-        target_path: The directory being processed (search here and parents for .ctxconfig).
-        provider: CLI override for provider.
-        model: CLI override for model.
-        max_depth: CLI override for max recursion depth.
-
-    Returns:
-        Fully resolved Config instance ready for use.
-
-    Implementation:
-        1. Start with Config() defaults.
-        2. Walk target_path up to root looking for .ctxconfig — if found, yaml.safe_load it
-           and overlay matching fields onto the Config.
-        3. Check env vars CTX_PROVIDER, CTX_MODEL and overlay if set.
-        4. Apply CLI overrides (provider, model, max_depth) if not None.
-        5. Resolve api_key: if provider is "anthropic" read ANTHROPIC_API_KEY,
-           if "openai" read OPENAI_API_KEY. Raise click.UsageError if missing.
-        6. Return the Config.
-    """
+    """Load deterministic config by merging .ctxconfig, env vars, and explicit overrides."""
     config = Config()
-    provider_explicit = False
 
     start_dir = target_path if target_path.is_dir() else target_path.parent
     for directory in _iter_config_dirs(start_dir):
@@ -463,206 +114,38 @@ def load_config(
         if not isinstance(data, dict):
             raise click.UsageError(f"Invalid .ctxconfig in {config_path}: expected a YAML mapping.")
 
-        if "provider" in data and data["provider"] is not None:
-            config.provider = str(data["provider"]).strip()
-            provider_explicit = True
-        if "model" in data and data["model"] is not None:
-            config.model = str(data["model"]).strip()
-        if "max_file_tokens" in data and data["max_file_tokens"] is not None:
-            config.max_file_tokens = int(data["max_file_tokens"])
         if "max_depth" in data:
             config.max_depth = None if data["max_depth"] is None else int(data["max_depth"])
-        if "token_budget" in data:
-            config.token_budget = None if data["token_budget"] is None else int(data["token_budget"])
-        if "max_tokens_per_run" in data:
-            config.max_tokens_per_run = (
-                None if data["max_tokens_per_run"] is None else int(data["max_tokens_per_run"])
-            )
-        if "max_usd_per_run" in data:
-            config.max_usd_per_run = (
-                None if data["max_usd_per_run"] is None else float(data["max_usd_per_run"])
-            )
-        if "files_per_call" in data:
-            config.files_per_call = None if data["files_per_call"] is None else int(data["files_per_call"])
-        elif "batch_size" in data:
-            config.files_per_call = None if data["batch_size"] is None else int(data["batch_size"])
-        if "max_concurrent_dirs" in data:
-            config.max_concurrent_dirs = None if data["max_concurrent_dirs"] is None else int(data["max_concurrent_dirs"])
-        if "resume_cooldown_seconds" in data and data["resume_cooldown_seconds"] is not None:
-            config.resume_cooldown_seconds = float(data["resume_cooldown_seconds"])
-        if "max_cache_entries" in data and data["max_cache_entries"] is not None:
-            config.max_cache_entries = int(data["max_cache_entries"])
-        if "watch_debounce_seconds" in data and data["watch_debounce_seconds"] is not None:
-            config.watch_debounce_seconds = float(data["watch_debounce_seconds"])
-        if "cache_path" in data:
-            config.cache_path = None if data["cache_path"] is None else str(data["cache_path"])
-        if "base_url" in data and data["base_url"] is not None:
-            config.base_url = str(data["base_url"]).strip()
         if "extensions" in data:
-            extensions = data["extensions"]
-            if extensions is None:
+            raw_ext = data["extensions"]
+            if raw_ext is None:
                 config.extensions = None
-            elif isinstance(extensions, str):
-                config.extensions = [extensions]
-            elif isinstance(extensions, list) and all(isinstance(item, str) for item in extensions):
-                config.extensions = extensions
+            elif isinstance(raw_ext, str):
+                config.extensions = [raw_ext.strip()] if raw_ext.strip() else None
+            elif isinstance(raw_ext, list) and all(isinstance(item, str) for item in raw_ext):
+                cleaned = [item.strip() for item in raw_ext if item.strip()]
+                config.extensions = cleaned or None
             else:
                 raise click.UsageError(
                     f"Invalid extensions in {config_path}: expected a string list or null."
                 )
-        
-        if "prompts" in data and isinstance(data["prompts"], dict):
-            config.prompts.update(data["prompts"])
-        if "tier2_synthesize" in data and data["tier2_synthesize"] is not None:
-            config.tier2_synthesize = bool(data["tier2_synthesize"])
-        if "structured_outputs" in data and data["structured_outputs"] is not None:
-            raw_so = data["structured_outputs"]
-            if isinstance(raw_so, bool):
-                config.structured_outputs = "on" if raw_so else "off"
-            else:
-                config.structured_outputs = str(raw_so).strip().lower() or "auto"
-        if "jev_mode" in data and data["jev_mode"] is not None:
-            raw_jm = data["jev_mode"]
-            if isinstance(raw_jm, bool):
-                config.jev_mode = "auto" if raw_jm else "off"
-            else:
-                config.jev_mode = str(raw_jm).strip().lower() or "auto"
-
         break
 
-    env_tier2_synth = _env_text("CTX_TIER2_SYNTHESIZE")
-    if env_tier2_synth is not None:
-        config.tier2_synthesize = env_tier2_synth.lower() in {"1", "true", "yes", "on"}
-    env_structured = _env_text("CTX_STRUCTURED_OUTPUTS")
-    if env_structured is not None:
-        config.structured_outputs = env_structured.lower()
-    env_jev = _env_text("CTX_JEV")
-    if env_jev is not None:
-        config.jev_mode = env_jev.lower()
-
-    env_provider = _env_text("CTX_PROVIDER")
-    env_model = _env_text("CTX_MODEL")
-    if env_provider:
-        config.provider = env_provider.strip()
-        provider_explicit = True
-    if env_model:
-        config.model = env_model.strip()
-    env_base_url = _env_text("CTX_BASE_URL")
-    if env_base_url:
-        config.base_url = env_base_url
-    env_max_file_tokens = _env_text("CTX_MAX_FILE_TOKENS")
-    if env_max_file_tokens is not None:
-        config.max_file_tokens = int(env_max_file_tokens)
     env_max_depth = _env_text("CTX_MAX_DEPTH")
     if env_max_depth is not None:
         config.max_depth = _parse_optional_int(env_max_depth)
-    env_token_budget = _env_text("CTX_TOKEN_BUDGET")
-    if env_token_budget is not None:
-        config.token_budget = _parse_optional_int(env_token_budget)
-    env_max_tokens_per_run = _env_text("CTX_MAX_TOKENS_PER_RUN")
-    if env_max_tokens_per_run is not None:
-        config.max_tokens_per_run = _parse_optional_int(env_max_tokens_per_run)
-    env_max_usd_per_run = _env_text("CTX_MAX_USD_PER_RUN")
-    if env_max_usd_per_run is not None:
-        config.max_usd_per_run = _parse_optional_float(env_max_usd_per_run)
-    env_files_per_call = _env_text("CTX_FILES_PER_CALL") or _env_text("CTX_BATCH_SIZE")
-    if env_files_per_call is not None:
-        config.files_per_call = _parse_optional_int(env_files_per_call)
-    env_max_concurrent_dirs = _env_text("CTX_MAX_CONCURRENT_DIRS")
-    if env_max_concurrent_dirs is not None:
-        config.max_concurrent_dirs = _parse_optional_int(env_max_concurrent_dirs)
-    env_cache_path = os.getenv("CTX_CACHE_PATH")
-    if env_cache_path is not None:
-        config.cache_path = env_cache_path
-    env_max_cache_entries = _env_text("CTX_MAX_CACHE_ENTRIES")
-    if env_max_cache_entries is not None:
-        config.max_cache_entries = int(env_max_cache_entries)
-    env_watch_debounce = _env_text("CTX_WATCH_DEBOUNCE")
-    if env_watch_debounce is not None:
-        config.watch_debounce_seconds = float(env_watch_debounce)
+
     env_extensions = os.getenv("CTX_EXTENSIONS")
     if env_extensions is not None:
         parsed_extensions = [item.strip() for item in env_extensions.split(",") if item.strip()]
         config.extensions = parsed_extensions or None
 
-    if provider is not None:
-        config.provider = provider
-        provider_explicit = True
-    if model is not None:
-        config.model = model
     if max_depth is not None:
         config.max_depth = max_depth
-    if token_budget is not None:
-        config.token_budget = token_budget
-    if base_url is not None:
-        config.base_url = base_url
-    if cache_path is not None:
-        config.cache_path = cache_path
+    if extensions is not None:
+        config.extensions = extensions
 
-    if not provider_explicit:
-        # Infer provider from configured base_url before falling back to ambient API keys.
-        if config.base_url:
-            config.provider = infer_provider_from_base_url(config.base_url)
-        elif os.getenv("ANTHROPIC_API_KEY", "").strip():
-            config.provider = "anthropic"
-        elif os.getenv("OPENAI_API_KEY", "").strip():
-            config.provider = "openai"
-
-    config.provider = config.provider.strip().lower()
-    if config.provider not in DEFAULT_MODELS:
-        raise click.UsageError(f"Unsupported provider: {config.provider}")
-    config.model = config.resolved_model()
-
-    # Local providers don't require an API key
-    if config.provider in LOCAL_PROVIDERS:
-        if not config.base_url and config.provider in DEFAULT_BASE_URLS:
-            config.base_url = DEFAULT_BASE_URLS[config.provider]
-        config.api_key = os.getenv("OPENAI_API_KEY", "not-needed").strip() or "not-needed"
-        if config.provider == "bitnet" and not config.model:
-            raise click.UsageError(
-                "--provider bitnet requires --model with the path to a .gguf file."
-            )
-    elif require_api_key:
-        api_key_env = "ANTHROPIC_API_KEY" if config.provider == "anthropic" else "OPENAI_API_KEY"
-        api_key = os.getenv(api_key_env, "").strip()
-        if not api_key:
-            raise MissingApiKeyError(f"Missing required environment variable: {api_key_env}")
-        config.api_key = api_key
+    if config.max_depth is not None and config.max_depth < 0:
+        raise click.UsageError(f"Invalid max_depth ({config.max_depth}): expected a non-negative integer.")
 
     return config
-
-
-def _lookup_rate(table: dict[str, dict], provider_lower: str, model_lower: str, unknown_default: float) -> float:
-    provider_pricing = table.get(provider_lower)
-    if not provider_pricing:
-        return unknown_default
-    if "models" not in provider_pricing:
-        return float(provider_pricing["default"])
-    for model_key, price_per_million in provider_pricing["models"]:
-        if model_key in model_lower:
-            return float(price_per_million)
-    return float(provider_pricing["default"])
-
-
-def estimate_cost(
-    tokens: int,
-    provider: str,
-    model: str,
-    *,
-    input_tokens: int | None = None,
-    output_tokens: int | None = None,
-) -> float:
-    """Estimate cost in USD based on tokens used and provider pricing."""
-    provider_lower = provider.lower()
-    model_lower = model.lower()
-
-    input_rate = _lookup_rate(PRICING_DATA, provider_lower, model_lower, DEFAULT_UNKNOWN_PROVIDER_PRICE)
-    if input_tokens is not None or output_tokens is not None:
-        in_tok = max(0, input_tokens or 0)
-        out_tok = max(0, output_tokens or 0)
-        output_rate = _lookup_rate(
-            OUTPUT_PRICING_DATA, provider_lower, model_lower, DEFAULT_UNKNOWN_PROVIDER_OUTPUT_PRICE
-        )
-        return ((in_tok * input_rate) + (out_tok * output_rate)) / 1_000_000
-
-    return tokens * input_rate / 1_000_000

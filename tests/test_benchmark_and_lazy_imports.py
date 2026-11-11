@@ -1,16 +1,18 @@
-"""Tests for Phase 33: Phase 27.1 A/B/C navigation benchmark, lazy heavy-SDK imports, and CLI polish."""
+"""Tests for Phase 27.1 A/B/C navigation benchmark, zero-LLM imports, and CLI reset/clean."""
 
 from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
+import re as _re
 import subprocess
 import sys
 import tomllib
-from pathlib import Path
 
 from click.testing import CliRunner
 
+import ctx.benchmark as bench_mod
 from ctx.benchmark import render_benchmark_markdown, run_navigation_benchmark
 from ctx.cli import cli
 
@@ -74,12 +76,10 @@ def test_navigation_benchmark_and_cli_report_generation(tmp_path: Path) -> None:
     assert aggs["tier2_plus_impact"]["mean_recall"] > aggs["raw_grep"]["mean_recall"]
     assert aggs["tier2_plus_impact"]["mean_tool_turns"] < aggs["raw_grep"]["mean_tool_turns"]
     assert aggs["tier2_plus_impact"]["maint_llm_tokens_impl_commit"] == 0.0
-    # Independent static oracle checks:
-    # 1) CONTRIBUTING.md is in independent oracle boundary docs but not in skeleton._AUTHORITY_DOC_NAMES -> < 1.0 (proves non-hardcoded recall!)
+    assert aggs["tier2_plus_impact"]["maint_jev_tokens_minor_struct_commit"] == 0.0
     repo_cond_c = report["repositories"][0]["conditions"]["tier2_plus_impact"]
     repo_cond_a = report["repositories"][0]["conditions"]["raw_grep"]
     assert 0.5 <= repo_cond_c["recall_arch_orientation"] < 1.0
-    # 2) Multi-hop cli.py -> middle.py -> core.py: raw regex grep for \bcore\b finds middle.py (0.5) while ctx impact finds both (1.0)
     assert repo_cond_a["recall_blast_radius"] == 0.5
     assert repo_cond_c["recall_blast_radius"] == 1.0
 
@@ -87,7 +87,6 @@ def test_navigation_benchmark_and_cli_report_generation(tmp_path: Path) -> None:
     assert "# Phase 27.1 — Deterministic Static-Oracle Navigation & Blast-Radius Benchmark" in md
     assert "| `tier2_plus_impact` |" in md
 
-    # CLI `ctx benchmark` writing both Markdown and JSON reports
     runner = CliRunner()
     md_out = tmp_path / "out" / "report.md"
     res_md = runner.invoke(cli, ["benchmark", str(repo), "--out-file", str(md_out)])
@@ -104,7 +103,7 @@ def test_navigation_benchmark_and_cli_report_generation(tmp_path: Path) -> None:
     assert json.loads(json_out.read_text(encoding="utf-8"))["repos_evaluated"] == 1
 
 
-def test_lazy_imports_keep_deterministic_paths_free_of_heavy_sdks(tmp_path: Path) -> None:
+def test_deterministic_paths_remain_free_of_heavy_sdks(tmp_path: Path) -> None:
     repo = _build_benchmark_fixture(tmp_path / "lazy_repo")
     src_root = str(Path(__file__).resolve().parents[1] / "src")
     env = dict(os.environ)
@@ -113,13 +112,12 @@ def test_lazy_imports_keep_deterministic_paths_free_of_heavy_sdks(tmp_path: Path
     probe_code = (
         "import json, sys\n"
         "from pathlib import Path\n"
-        "import ctx.sdk, ctx.skeleton, ctx.impact, ctx.jev, ctx.benchmark\n"
+        "import ctx.sdk, ctx.skeleton, ctx.impact, ctx.benchmark\n"
         "from ctx import api\n"
         f"root = Path({str(repo)!r})\n"
         "api.check(root)\n"
         "api.build_fleet_capsule(root, depth=1)\n"
         "api.analyze_impact(root, 'src/bench/core.py')\n"
-        "api.jev_list_heads(root)\n"
         "heavy = [m for m in ('anthropic', 'openai', 'tiktoken', 'watchdog', 'fastapi', 'uvicorn') if m in sys.modules]\n"
         "print(json.dumps({'heavy_loaded': heavy}))\n"
     )
@@ -134,14 +132,16 @@ def test_lazy_imports_keep_deterministic_paths_free_of_heavy_sdks(tmp_path: Path
     assert parsed["heavy_loaded"] == []
 
 
-def test_pyproject_optional_extras_and_deduplicated_reset_clean(tmp_path: Path) -> None:
+def test_pyproject_zero_llm_dependencies_and_deduplicated_reset_clean(tmp_path: Path) -> None:
     pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
     data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    deps_joined = " ".join(data["project"]["dependencies"]).lower()
+    for removed_pkg in ("anthropic", "openai", "tiktoken", "watchdog"):
+        assert removed_pkg not in deps_joined
     extras = data["project"]["optional-dependencies"]
-    for group in ("anthropic", "openai", "cloud", "watch", "serve", "all"):
+    for group in ("serve", "all", "dev"):
         assert group in extras, f"Missing optional dependency extra [{group}]"
 
-    # Verify both `ctx reset` and legacy `ctx clean` work identically through shared helper
     repo = tmp_path / "reset_repo"
     repo.mkdir()
     (repo / "CONTEXT.md").write_text("---\ngenerator: ctx/1.1.0\n---\n# root\n", encoding="utf-8")
@@ -160,8 +160,6 @@ def test_pyproject_optional_extras_and_deduplicated_reset_clean(tmp_path: Path) 
     assert env["data"]["manifests_removed"] == 2
     assert not (repo / "CONTEXT.md").exists()
 
-    # Round-2 QA Finding 8: legacy `ctx clean` on a 0-manifest tree without `--yes` in `--output json`
-    # succeeds with exit 0 and does not acquire lock or create `.ctx-cache/`.
     empty_repo = tmp_path / "empty_clean_repo"
     empty_repo.mkdir()
     clean_empty = runner.invoke(cli, ["clean", str(empty_repo), "--output", "json"])
@@ -171,16 +169,12 @@ def test_pyproject_optional_extras_and_deduplicated_reset_clean(tmp_path: Path) 
     assert clean_env["data"] == {"manifests_removed": 0, "paths": []}
     assert not (empty_repo / ".ctx-cache").exists()
 
-    # Round-2 QA Finding 9: negative recall/F1 deltas never render `+-` in benchmark Markdown
     sample_report = run_navigation_benchmark([_build_benchmark_fixture(tmp_path / "neg_delta_repo")])
     sample_report["summary"]["recall_gain_vs_raw_grep_pct"] = -3.4
     sample_report["summary"]["blast_f1_gain_vs_raw_grep_pct"] = -1.2
     neg_md = render_benchmark_markdown(sample_report)
     assert "+-" not in neg_md
     assert "-3.4 percentage points" in neg_md
-
-    # Round-3 QA Findings 6 & 7: Python 3.10 `tomllib=None` fallback + grep cap scoring alignment
-    import ctx.benchmark as bench_mod
 
     sample_toml = '[project]\nname = "demo"\n\n[project.scripts]\nctx = "ctx.cli:cli"\nctx-mcp = "ctx.mcp_server:main"\n\n[tool.pytest]\naddopts = "-q"\n'
     orig_tomllib = bench_mod.tomllib
@@ -194,8 +188,6 @@ def test_pyproject_optional_extras_and_deduplicated_reset_clean(tmp_path: Path) 
         "a_first.py": "\n".join(f"hit_token_{i}" for i in range(5)),
         "z_beyond_cap.py": "hit_token_late",
     }
-    import re as _re
-
     emitted_text, scored_files = bench_mod._execute_regex_grep(
         files_for_cap,
         _re.compile(r"hit_token"),

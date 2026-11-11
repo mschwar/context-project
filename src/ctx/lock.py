@@ -8,8 +8,10 @@ import time
 import uuid
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
+import json
 from pathlib import Path
-from typing import Callable, Iterator
+import tempfile
+from typing import Any, Callable, Iterator
 
 
 STALE_TIMEOUT_SECONDS = 900
@@ -614,3 +616,50 @@ class CtxLock:
 
     def __exit__(self, *exc_info: object) -> None:
         self.release()
+
+
+def load_json_safe(path: Path, default: dict[str, Any]) -> dict[str, Any]:
+    """Read a JSON object from *path*, returning *default* on missing or malformed input."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+    return default
+
+
+def save_json_atomic(path: Path, data: dict[str, Any]) -> None:
+    """Write a JSON dictionary atomically via a same-directory temp file and kernel fence."""
+    assert_lock_ownership_for_path(path)
+    fenced_mkdir(path.parent, parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2)
+        fenced_replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def write_text_atomic(path: Path, content: str, *, mode: int | None = None) -> None:
+    """Write UTF-8 text atomically via a same-directory temp file and kernel-fenced os.replace."""
+    assert_lock_ownership_for_path(path)
+    fenced_mkdir(path.parent, parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.tmp-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        if mode is not None and os.name != "nt":
+            os.chmod(tmp, mode)
+        fenced_replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise

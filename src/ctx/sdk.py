@@ -1,7 +1,7 @@
 """Lightweight zero-dependency SDK for .ctx/ consumers.
 
-Provides typed read-only access to pre-compiled .ctx/ exports, metadata.json,
-and hook_log.json without importing LLM clients or Click.
+Provides typed read-only access to pre-compiled .ctx/ structural maps and metadata.json
+without importing Click or FastAPI.
 """
 
 from __future__ import annotations
@@ -27,20 +27,9 @@ class CtxMetadata:
     last_refresh: str = ""
     python_executable: str = ""
     hooks_installed: list[str] = field(default_factory=list)
-    mode: str = "standard"
+    mode: str = "tier2"
     structural_hash: str | None = None
     boundary_doc_hash: str | None = None
-
-
-@dataclass(frozen=True)
-class HookRun:
-    """Typed representation of an entry in .ctx/hook_log.json."""
-
-    timestamp: str
-    trigger: str
-    duration_ms: int
-    success: bool
-    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,7 +77,7 @@ class CtxProject:
             last_refresh=str(raw.get("last_refresh", "")),
             python_executable=str(raw.get("python_executable", "")),
             hooks_installed=[str(h) for h in hooks] if isinstance(hooks, list) else [],
-            mode=str(raw.get("mode", "standard")),
+            mode=str(raw.get("mode", "tier2")),
             structural_hash=raw.get("structural_hash"),
             boundary_doc_hash=raw.get("boundary_doc_hash"),
         )
@@ -112,13 +101,9 @@ class CtxProject:
         return self.get_export(depth)
 
     def is_stale(self) -> bool:
-        """Return True if Tier 1 manifests/exports or Tier 2 structural/boundary maps are stale or missing."""
-        tier_specs: tuple[tuple[str, int | None], ...] = (
-            ("CONTEXT.md", None),
-            ("CONTEXT-1.md", 1),
-            ("CONTEXT-0.md", 0),
-        )
-        for tier_name, _ in tier_specs:
+        """Return True if .ctx/ structural or boundary-doc maps are stale or missing."""
+        tier_names = ("CONTEXT.md", "CONTEXT-1.md", "CONTEXT-0.md")
+        for tier_name in tier_names:
             tier_path = self.ctx_dir / tier_name
             try:
                 if not tier_path.is_file() or tier_path.stat().st_size == 0:
@@ -127,51 +112,28 @@ class CtxProject:
                 return True
 
         meta = self.metadata
-        if meta.mode == "tier2":
-            if not meta.structural_hash or not meta.boundary_doc_hash:
-                return True
-            for tier_name, _ in tier_specs:
-                try:
-                    content = (self.ctx_dir / tier_name).read_text(encoding="utf-8")
-                except OSError:
-                    return True
-                if meta.structural_hash not in content or meta.boundary_doc_hash not in content:
-                    return True
+        if not meta.structural_hash or not meta.boundary_doc_hash:
+            return True
+        for tier_name in tier_names:
             try:
-                from ctx.skeleton import extract_skeleton, should_invoke_llm
-            except ImportError:
-                return False
-
-            skeleton = extract_skeleton(self.root)
-            return should_invoke_llm(
-                {
-                    "structural_hash": meta.structural_hash,
-                    "boundary_doc_hash": meta.boundary_doc_hash,
-                },
-                skeleton,
-            )
-
+                content = (self.ctx_dir / tier_name).read_text(encoding="utf-8")
+            except OSError:
+                return True
+            if meta.structural_hash not in content or meta.boundary_doc_hash not in content:
+                return True
         try:
-            from ctx.api import export_context
-            from ctx.generator import inspect_directory_health
-            from ctx.ignore import load_ignore_patterns
+            from ctx.skeleton import extract_skeleton, should_invoke_llm
         except ImportError:
             return False
 
-        spec = load_ignore_patterns(self.root)
-        health = inspect_directory_health(self.root, spec, self.root)
-        if not health or any(entry.status != "fresh" or entry.error is not None for entry in health):
-            return True
-
-        for tier_name, tier_depth in tier_specs:
-            try:
-                actual_export = (self.ctx_dir / tier_name).read_text(encoding="utf-8")
-            except OSError:
-                return True
-            expected_export = export_context(self.root, depth=tier_depth).content
-            if actual_export != expected_export:
-                return True
-        return False
+        skeleton = extract_skeleton(self.root)
+        return should_invoke_llm(
+            {
+                "structural_hash": meta.structural_hash,
+                "boundary_doc_hash": meta.boundary_doc_hash,
+            },
+            skeleton,
+        )
 
     @property
     def context_full(self) -> str:
@@ -185,41 +147,8 @@ class CtxProject:
     def context_depth_0(self) -> str:
         return self.get_export(0)
 
-    @property
-    def hook_runs(self) -> list[HookRun]:
-        log_path = self.ctx_dir / "hook_log.json"
-        if not log_path.is_file():
-            return []
-        try:
-            raw = json.loads(log_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return []
-        runs = raw.get("runs", []) if isinstance(raw, dict) else []
-        if not isinstance(runs, list):
-            return []
-
-        result: list[HookRun] = []
-        for entry in runs:
-            if not isinstance(entry, dict):
-                continue
-            result.append(
-                HookRun(
-                    timestamp=str(entry.get("timestamp", "")),
-                    trigger=str(entry.get("trigger", "")),
-                    duration_ms=int(entry.get("duration_ms", 0) or 0),
-                    success=bool(entry.get("success", False)),
-                    error=entry.get("error"),
-                )
-            )
-        return result
-
-    @property
-    def hook_telemetry(self) -> list[HookRun]:
-        """Alias for hook_runs matching the SDK specification."""
-        return self.hook_runs
-
     def to_dict(self) -> dict[str, object]:
-        """Return a JSON-serializable snapshot of metadata, available tiers, and hook telemetry."""
+        """Return a JSON-serializable snapshot of metadata and available tiers."""
         available_tiers: dict[str, bool] = {
             "CONTEXT.md": (self.ctx_dir / "CONTEXT.md").is_file(),
             "CONTEXT-1.md": (self.ctx_dir / "CONTEXT-1.md").is_file(),
@@ -230,5 +159,4 @@ class CtxProject:
             "ctx_dir": str(self.ctx_dir),
             "metadata": asdict(self.metadata),
             "available_tiers": available_tiers,
-            "hook_runs": [asdict(run) for run in self.hook_runs],
         }
