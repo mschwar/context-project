@@ -1,183 +1,136 @@
 # Runbook
 
-How to operate, validate, and develop `ctx`.
+Operational guide for running, validating, serving, and releasing `ctx`. Give `ctx` a repository path; it parses source files locally with zero API keys or language model calls and writes tiered maps under `.ctx/`.
 
 ## Prerequisites
 
-- Python 3.10+
-- Git
-- API Keys for LLM providers (Anthropic, OpenAI) set as environment variables.
+- Python 3.10 or newer
+- Git (required by `ctx init` when checking repository boundaries)
 
-Install dependencies:
+Install the package and test tools in editable mode:
+
 ```bash
 pip install -e ".[dev]"
 ```
 
-## Running Validation
+## Validation Commands
 
-### Full Test Suite
-Run the full pytest suite before every commit.
+Run the unit test suite, documentation hygiene gate, and structural self-check before opening or merging a pull request:
+
 ```bash
 python -m pytest
+python3 -m unittest tests/test_doc_hygiene.py -v
+CTX_OUTPUT=json python -m ctx init .
+CTX_OUTPUT=json python -m ctx check . --verify --check-exit
+CTX_OUTPUT=json python -m ctx uninit .
 ```
 
-### Type Checking (Future)
-When type checking is fully implemented, run:
-```bash
-mypy src/ctx
-```
+## CLI Operations
 
-## Using the CLI
+### Initialize and Refresh `.ctx/` Maps
+Create gitignored `.ctx/` tiered maps (`CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`, and `metadata.json`) and update them when signatures or governance docs change:
 
-### Initialize a project
-Bootstrap `.ctx/` exports and git hooks, or synthesize a Tier 2 architectural & invariant map without writing per-directory `CONTEXT.md` files:
 ```bash
-ctx init /path/to/project --tier2
 ctx init /path/to/project
-ctx refresh /path/to/project --force
-```
-
-### Export a fleet capsule
-Generate a deterministic structural & invariant capsule for `project-ledger` and `gbrain` ingestion:
-```bash
-ctx export /path/to/project --depth 1 --capsule --output json
-```
-
-### Update a project
-Update stale manifests based on content changes.
-```bash
 ctx refresh /path/to/project
+ctx refresh /path/to/project --force
+ctx refresh /path/to/project --dry-run
 ```
 
-If the target tree is a normal git checkout, `ctx refresh` can use git-aware selection. On extracted or non-git trees it now falls back cleanly to incremental refresh instead of failing before generation.
+Remove `.ctx/` and strip any legacy `ctx` git hook markers when finished:
 
-> **Before pushing:** always run `ctx refresh .` and commit the resulting `CONTEXT.md` changes alongside your code. The pre-commit hook and `CTX Manifest Check` CI job both use `ctx check . --check-exit`, which is the canonical freshness gate.
+```bash
+ctx uninit /path/to/project
+```
 
-### Check status
-See how many manifests are stale or missing.
+### Check Freshness, Verification, and Token Stats
+Inspect whether `.ctx/` maps match current source hashes, validate frontmatter and tier files, or report estimated token counts:
+
 ```bash
 ctx check /path/to/project
-ctx check /path/to/project --check-exit
-```
-
-### Show diff
-Show which CONTEXT.md files changed since last commit.
-```bash
-ctx check /path/to/project --diff
-ctx check /path/to/project --diff --stat       # summary count only
-ctx check /path/to/project --diff --since main # compare against a specific ref
-```
-
-### Verify manifests
-Check CONTEXT.md frontmatter, body structure, freshness, and coverage. Verify now catches missing sections, duplicate bullets, nonexistent files, missing real files, illegal `None` rows, and frontmatter/body count mismatches in addition to required fields (`generated`, `generator`, `model`, `content_hash`, `files`, `dirs`, `tokens_total`).
-```bash
-ctx check /path/to/project --verify
-```
-Exit code 0 if all valid, exit code 1 if any invalid.
-
-### Show stats
-Show coverage summary across all directories.
-```bash
-ctx check /path/to/project --stats
+ctx check /path/to/project --verify --check-exit
+ctx check /path/to/project --diff --stat
 ctx check /path/to/project --stats --verbose
 ctx check /path/to/project --stats --output json
 ```
 
-### Serve manifests
-Serve manifests over HTTP or expose the stdio MCP server.
+Exit code `0` indicates fresh, valid maps; exit code `1` indicates stale, missing, or malformed `.ctx/` files under `--verify` or `--check-exit`.
+
+### Export Maps and Fleet Capsules
+Render `.ctx/` maps to standard output on demand (even without running `ctx init` first) or emit a JSON fleet capsule for `project-ledger` and `gbrain`:
+
 ```bash
-ctx serve [PATH]          # HTTP mode
-ctx serve --mcp [PATH]    # stdio MCP mode
+ctx export /path/to/project --depth 0
+ctx export /path/to/project --depth 1
+ctx export /path/to/project --capsule --out-file capsule.json
 ```
 
-HTTP mode serves manifests from the specified PATH (default: current directory). All manifest paths are resolved relative to this root.
-If FastAPI is not installed, add HTTP support with:
+### Trace Reverse-Dependency Blast Radius
+Compute direct and transitive reverse dependents, coupled test files, affected operational surfaces, and governing docs for a file, directory, or symbol:
+
 ```bash
-pip install ctx-tool[serve]
+ctx impact src/ctx/skeleton.py /path/to/project
+ctx impact src/ctx/skeleton.py /path/to/project --depth 2 --output json
 ```
 
-### Watch for changes
-Watch for file changes and auto-regenerate manifests.
+### Clean Up Legacy Sidecars
+Delete retired per-directory `CONTEXT.md` files from older `ctx` releases without touching `.ctx/`:
+
 ```bash
-ctx refresh /path/to/project --watch
+ctx reset /path/to/project --dry-run
+ctx reset /path/to/project --yes
 ```
 
-After each regeneration, prints a coverage summary line showing covered/stale directory counts and total tokens.
+### Run the Model Context Protocol (MCP) or HTTP Server
+Expose `ctx` tools and read-only `ctx://.ctx/*` resources over standard input/output for MCP clients, or serve `.ctx/` exports over HTTP:
+
+```bash
+ctx serve --mcp /path/to/project
+ctx serve /path/to/project
+```
+
+Both servers resolve paths relative to the served root directory and reject `..` traversal. Install FastAPI and Uvicorn extras if HTTP mode is needed:
+
+```bash
+pip install "ctx-tool[serve]"
+```
+
+### Reproduce the Navigation Benchmark
+Run the deterministic Phase 27.1 A/B/C static-oracle benchmark across one or more repositories:
+
+```bash
+ctx benchmark /path/to/project --out-file docs/benchmarks/phase27-1-navigation-benchmark.md
+```
 
 ## Publishing a Release
 
-The publish workflow (`.github/workflows/publish.yml`) triggers on any `v*` tag and publishes to PyPI via OIDC trusted publishing.
+The release workflow (`.github/workflows/publish.yml`) runs on `v*` tags and publishes to the Python Package Index (PyPI) via OpenID Connect (OIDC) trusted publishing.
 
-**One-time setup (required before the first release):**
-1. On PyPI: create a project named `ctx-tool`, go to Publishing → add a trusted publisher for `mschwar/context-project`, environment `pypi`, workflow `publish.yml`.
-2. On GitHub: create an environment named `pypi` in repo Settings → Environments.
+1. On PyPI, configure project `ctx-tool` with a trusted publisher for `mschwar/context-project`, environment `pypi`, and workflow `publish.yml`.
+2. On GitHub, ensure the `pypi` environment exists under repository Settings -> Environments.
+3. Tag and push the release:
 
-Once configured, publishing is as simple as:
 ```bash
-git tag v1.0.0
+git tag v1.1.0
 git push --tags
 ```
 
-> **Package name note:** `pip install ctx-tool` installs the `ctx` CLI command. The PyPI distribution name (`ctx-tool`) and the installed command name (`ctx`) are intentionally different — `ctx` was involved in a 2022 supply-chain incident on PyPI.
+> **Package name note:** `pip install ctx-tool` installs the `ctx` CLI command. The PyPI distribution name (`ctx-tool`) differs from the command name (`ctx`) because the bare `ctx` package on PyPI had a 2022 supply-chain incident.
 
-## Roadmap Gate Closeout
+## Roadmap Closeouts and Archives
 
-Every roadmap phase (gate) requires a formal closeout pass.
-Follow the steps in [GATE_CLOSEOUT.md](./GATE_CLOSEOUT.md) before marking a phase as complete.
+Follow [GATE_CLOSEOUT.md](./GATE_CLOSEOUT.md) when closing a roadmap phase. Earlier phase handoffs and reflections are preserved under [`archive/`](./archive/) and [`archive/reflections/`](./archive/reflections/).
 
-## Historical Handoffs
+## Troubleshooting
 
-Earlier narrow-model phase handoffs and phase reflections are archived under [`archive/`](./archive/) (including [`archive/reflections/`](./archive/reflections/)).
-- Use one gate per branch and one gate per PR.
-- Keep the gate's file list, validation commands, and acceptance criteria in the working prompt.
+### Workspace Cache Permission Errors
+**Symptom:** Traversal hits `PermissionError` on a local tool cache directory.
+**Fix:** Built-in ignore defaults skip `.pytest_cache/`, `.worktrees/`, and `.tmp/`. Add custom cache directories to `.ctxignore`.
 
-## LLM Disk Cache
+### Write Lock Contention (`lock_held`)
+**Symptom:** `ctx init`, `ctx refresh`, or `ctx reset` exits with error code `lock_held`.
+**Fix:** Wait for the active `ctx` process to finish; `CtxLock` automatically reclaims stale locks left by crashed processes.
 
-`ctx` caches LLM summaries in `.ctx-cache/llm_cache.json` (relative to the project root). The cache key includes the model name, so switching models always produces a cache miss rather than serving stale summaries.
-
-**Resetting the cache:** delete `.ctx-cache/llm_cache.json` (or the whole `.ctx-cache/` directory). The next `ctx refresh` will regenerate all summaries at normal token cost.
-
-**After upgrading ctx** (or changing the `model` config key): all prior cache entries will be misses on the first run. This is intentional — the one-time regeneration cost is preferable to serving summaries from the wrong model.
-
-**Disabling the cache:** set `cache_path: ""` in `.ctxconfig`.
-
-## Common Failure Modes
-
-### `ctx check .` or `ctx refresh . --dry-run` fails on workspace cache directories
-**Symptom**: A local workspace cache such as `.pytest_cache/` causes `PermissionError` during traversal.
-**Fix**: Current default ignores skip `.pytest_cache/`, `.worktrees/`, and `.tmp/`. If a custom cache directory is still surfacing, add it to `.ctxignore`.
-
-### `ctx refresh .` reports provider connection errors even though `ctx setup --check` detects a provider
-**Symptom**: `ctx setup --check` detects Anthropic or OpenAI, but `ctx init` / `ctx refresh` still fails with connection errors.
-**Fix**: Check shell proxy env vars first. A broken `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` can break real provider calls while setup detection still looks healthy. In PowerShell, retry with:
-```powershell
-$env:HTTP_PROXY=''
-$env:HTTPS_PROXY=''
-$env:ALL_PROXY=''
-$env:NO_PROXY='*'
-python -m ctx refresh .
-```
-
-### Local Provider Still Hits Context Limits
-**Symptom**: A local OpenAI-compatible provider still returns HTTP 400 on a large directory.
-**Fix**: `ctx` already retries local providers with smaller fallbacks, auto-disables batching after the first malformed batch response, and reports `Local batch fallbacks: N` in refresh output. If it still fails, lower `files_per_call` or `max_file_tokens` in `.ctxconfig`.
-
-### `pytest` Command Not Found
-**Symptom**: `pytest` is missing from the shell.
-**Fix**: Install the dev extras with `pip install -e ".[dev]"` and run tests with `python -m pytest`.
-
-### Inconsistent Summary Styles
-**Symptom**: Manifests have mixed summary lengths or tones.
-**Fix**: Refine system prompts in `llm.py` to be more prescriptive about the output format.
-
-## Development Tasks
-
-### Adding an LLM Provider
-1. Define a new client class in `llm.py` implementing the `LLMClient` protocol.
-2. Update `config.py` to recognize the new provider.
-3. Add tests in `tests/test_llm.py`.
-
-### Modifying Manifest Format
-1. Update the `Manifest` dataclass and parsing logic in `manifest.py`.
-2. Update the `summarize_directory` prompt in `llm.py` to match the new format.
-3. Update `architecture.md` to reflect the change.
+### `pytest` Not Found
+**Symptom:** `pytest` is missing in the active shell.
+**Fix:** Activate the project virtual environment where `.[dev]` is installed and run `python -m pytest`.

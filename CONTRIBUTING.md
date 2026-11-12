@@ -1,43 +1,49 @@
 # Contributing to `ctx`
 
-We embrace an **Agentic SDLC**. This means the codebase is designed to be co-authored and maintained by both humans and AI agents.
+`ctx` is maintained by humans and coding agents working from deterministic static contracts. Every contribution takes source, parser, or documentation changes as input and must leave tests, `.ctx/` verification, and documentation hygiene checks green.
 
-## The Agentic Workflow
+## Development Setup
 
-### 1. Context Maintenance
-Every PR that adds or modifies a directory MUST update the corresponding `CONTEXT.md` files.
-- Use `ctx refresh .` before committing your changes.
-- Ensure the `content_hash` in the frontmatter and portable repo-relative `# <path>` heading reflect the new state.
-- **Verification:** Run full body and freshness verification locally before opening or merging a PR:
-  ```bash
-  CTX_OUTPUT=json python -m ctx check . --verify --check-exit
-  ```
-- **Merge policy (`ops/merge-policy.json`):** Hosted cloud-VM PR triggers are retired (`workflow_dispatch` only). Run `python -m pytest` and `CTX_OUTPUT=json python -m ctx check . --verify --check-exit` locally on the host, and keep `"GitGuardian Security Checks"` green on the exact PR head SHA.
-
-### 2. Implementation Blocks
-New functions and classes should include an `Implementation:` block in their docstrings. This provides clear, step-by-step instructions for subsequent agents to follow when filling in stubs or refactoring.
-
-### 3. Test-Driven Autonomy
-When adding a feature:
-1. Write the test cases first (in `tests/`).
-2. Run the tests to confirm they fail.
-3. Implement the logic.
-4. Run the tests to confirm they pass.
-This loop is essential for agents to verify their own work.
-
-### 4. Manifest Review
-During code review, pay special attention to the `CONTEXT.md` changes. They are the "map" that other agents use to understand your "territory". If a manifest's purpose statement is vague, the agent's navigation will suffer.
-
-## Development Environment
+Install the package with development extras in an existing virtual environment and run the test suite:
 
 ```bash
 pip install -e ".[dev]"
 python -m pytest tests/
-CTX_OUTPUT=json python -m ctx check . --verify --check-exit
+python3 -m unittest tests/test_doc_hygiene.py -v
 ```
 
-## Agentic Rules of Engagement
-- **Respect `.gitignore` and `.ctxignore`:** `ctx` merges `.ctxignore.default`, ancestor/root/nested `.gitignore` rules, and `.ctxignore` overrides so standard gitignored workspace state is excluded from manifests (with explicit `!pattern` opt-ins supported in `.ctxignore`).
-- **Atomic Commits:** Prefer small, focused commits following Conventional Commits (enforced via `.husky/commit-msg` commitlint).
-- **Deterministic Hashing & Portable Headings:** Hashes and `# <relative-path>` headings must remain identical across Linux, macOS, Windows, and isolated git worktrees.
-- **One Gate Per PR:** For roadmap work, keep each branch scoped to one named gate unless `AGENTS.md` or an explicit audit remediation gate specifies otherwise.
+## Local Verification Workflow
+
+### 1. Structural Map Check
+`ctx` compiles tiered maps into a gitignored `.ctx/` directory rather than committing per-directory `CONTEXT.md` files. Verify deterministic generation and clean up `.ctx/` locally before opening a pull request:
+
+```bash
+CTX_OUTPUT=json python -m ctx init .
+CTX_OUTPUT=json python -m ctx check . --verify --check-exit
+CTX_OUTPUT=json python -m ctx uninit .
+```
+
+### 2. Merge Policy (`ops/merge-policy.json`)
+Hosted cloud virtual machine pull-request triggers are retired; GitHub Actions workflows use `workflow_dispatch` only. Run `python -m pytest` and `ctx check . --verify --check-exit` locally on the host, and keep `"GitGuardian Security Checks"` passing on the exact pull-request head SHA.
+
+### 3. Test-First Changes
+When adding a language parser rule, CLI flag, or impact-graph behavior:
+1. Add or update unit tests under `tests/`.
+2. Run `python -m pytest` to confirm the new test fails before your fix.
+3. Implement the change under `src/ctx/`.
+4. Re-run `python -m pytest` and confirm zero regressions.
+
+## Documentation Hygiene
+
+Human-facing Markdown guides (`README.md`, `CONTRIBUTING.md`, `RUNBOOK.md`, `architecture.md`, `rules.md`, and `docs/benchmarks/*.md`) are gated by `tests/test_doc_hygiene.py`:
+
+- **Lead with inputs and outputs (`DOC-001:TLDR`):** Keep a plain-English `## TL;DR` section (`1..60` words, no UTF-8 byte-order mark) at the top of `README.md` explaining what goes in, what `ctx` computes, and what comes out.
+- **Bound sentence length (`DOC-002:RUNON`):** Keep every prose sentence at or under 45 words.
+- **Cut filler and expand acronyms (`LAN-009:JARGON`, `LAN-003:ACRONYM`):** Avoid banned AI/corporate filler or ambiguous modals, and expand unfamiliar domain acronyms such as Abstract Syntax Tree (AST) or Model Context Protocol (MCP) at first use.
+- **Verify links (`DOC-003:LINK`):** Use repository-relative Markdown links with valid `#heading` anchors, and never commit machine-local `file://` links.
+
+## Engineering Rules
+
+- **Respect `.gitignore` and `.ctxignore`:** `ctx` merges `.ctxignore.default`, ancestor/root/nested `.gitignore` files, and `.ctxignore` overrides (including `!pattern` opt-ins) so workspace caches stay out of maps.
+- **Cross-Platform Determinism:** SHA-256 hashes and portable `# <relative-path>` headings must match across Linux, macOS, Windows, and git worktrees.
+- **Focused Pull Requests:** Keep commits small following Conventional Commits, and scope roadmap branches to one named gate unless [AGENTS.md](./AGENTS.md) specifies otherwise.

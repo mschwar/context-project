@@ -27,6 +27,9 @@ jobs:
       - name: Verify module entry point
         run: python -m ctx --version
 
+      - name: Verify documentation hygiene
+        run: python -m unittest tests/test_doc_hygiene.py -v
+
       - name: Run test suite
         run: python -m pytest tests
 

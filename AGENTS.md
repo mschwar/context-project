@@ -295,6 +295,10 @@ ctx export . --depth 0                  # zero-setup 1-page architectural orient
 ctx impact src/pkg/module.py .          # inspect reverse dependents + coupled tests before editing
 ```
 
+### Documentation Hygiene Gate
+
+When editing human-facing guides (`README.md`, `CONTRIBUTING.md`, `RUNBOOK.md`, `architecture.md`, `rules.md`, `docs/benchmarks/*.md`), lead with concrete inputs and outputs, keep `README.md` open with a `1..60` word `## TL;DR` (and `<= 100` lines total), expand domain acronyms at first use, keep prose sentences `<= 45` words, avoid banned AI/corporate filler, and run `python3 -m unittest tests/test_doc_hygiene.py -v` (see [CONTRIBUTING.md](./CONTRIBUTING.md#documentation-hygiene)).
+
 ## Manifest Format
 Generated `.ctx/CONTEXT-*.md` files begin with deterministic YAML frontmatter followed by structured Markdown sections:
 

@@ -1140,7 +1140,7 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
         "",
         "This benchmark deterministically evaluates retrieval context-token efficiency, recall, precision, and F1 across "
         "three scripted retrieval workflows (`raw_grep`, `tier1_manifests`, and `tier2_plus_impact`) against a "
-        "separate static AST/filesystem reference oracle built directly from raw files on disk:",
+        "separate static Abstract Syntax Tree (AST) and filesystem reference oracle built directly from raw files on disk:",
         "",
         "- **Condition A (`raw_grep`):** Lists the file tree, reads root docs (`README.md`, `AGENTS.md`, `CLAUDE.md`) plus "
         "up to 2 architecture/governance docs discovered in the file tree, reads candidate entrypoints and the focal module, "
@@ -1149,9 +1149,9 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
         "primary entrypoint, and runs symbol-augmented regex grep (`\\b(?:<stem>|<exported_symbols>)\\b`).",
         "- **Condition C (`tier2_plus_impact`):** Reads `.ctx/CONTEXT-0.md` and `ctx impact <focal_target> --output json`.",
         "",
-        "**Scope Disclosures:** Both the reference oracle and `ctx.impact` evaluate static import graphs (measuring "
-        "static-graph retrieval recall/precision vs lexical grep rather than dynamic runtime dispatch), and per-commit "
-        "maintenance token figures in the rightmost column are **modeled analytical estimates** rather than live billing logs.",
+        "**Scope Disclosures:** Both the reference oracle and `ctx.impact` evaluate static import graphs rather than "
+        "dynamic runtime dispatch. Per-commit maintenance token figures in the rightmost column are **modeled analytical "
+        "estimates** rather than live billing logs.",
         "",
         "## Executive Summary",
         "",

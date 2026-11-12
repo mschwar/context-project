@@ -1,88 +1,67 @@
 # Architecture: `ctx`
 
-`ctx` is a filesystem-native context layer designed to help AI agents navigate large codebases. It provides a coarse-to-fine view of a project by generating and maintaining `CONTEXT.md` files in every directory.
-
-The manifests are the navigation primitive. The durable product value is the generator that keeps them fresh with one command and without external infrastructure.
+`ctx` is a deterministic, zero-LLM static analyzer that turns a source tree into compact architecture maps and reverse-dependency graphs for coding agents. Given a repository root, it extracts symbols, imports, operational surfaces, and governance docs, then writes tiered Markdown and JSON artifacts under `.ctx/`.
 
 ## Core Design Principles
 
-### 1. Bottom-Up Generation
-The generator traverses the directory tree from leaves to root. This ensures that a directory's children are summarized *before* the directory itself. This allows parent summaries to include high-level information from their children's `CONTEXT.md` files, creating a recursive summary structure.
+### 1. Tiered Resolution (`.ctx/`)
+Instead of scattering `CONTEXT.md` sidecars across every source folder, `ctx` writes three resolution tiers into one gitignored `.ctx/` directory at the repository root:
+- **`CONTEXT-0.md`:** One-page repository overview covering languages, entrypoints, operational surfaces, authority docs, and top-level subsystems.
+- **`CONTEXT-1.md`:** Cross-subsystem dependency edges, exported symbols, and boundary contracts.
+- **`CONTEXT.md`:** Full file-by-file structural map with public symbol signatures.
 
-### 2. Content-Based Staleness Detection
-Every `CONTEXT.md` contains a `content_hash` in its frontmatter.
-- **File Hash:** SHA-256 of the file's binary content.
-- **Directory Hash:** SHA-256 of a sorted list of its children's names and hashes.
-This recursive hashing ensures that any change in a leaf file propagates up the tree, marking all parent manifests as "stale" for incremental updates.
+### 2. Hash-Gated Determinism
+`skeleton.py` computes two SHA-256 digests across sorted repository paths:
+- **`structural_hash`:** Captures extracted symbol signatures, imports, entrypoints, and operational surfaces.
+- **`boundary_doc_hash`:** Captures governing authority and architecture documents (`AGENTS.md`, `README.md`, `architecture.md`, `rules.md`, `CONTRIBUTING.md`).
 
-### 3. Decoupled LLM Strategy
-The `LLMClient` protocol abstracts the summarization logic. Supported providers include:
-- **Cloud:** Anthropic (Claude), OpenAI.
-- **Local:** Ollama and LM Studio (via the OpenAI-compatible client).
+`ctx refresh` rewrites `.ctx/` maps only when either digest changes (or when `--force` is passed), keeping repeated runs idempotent and fast.
 
-BitNet is deprecated in this repo. Attempting to use it raises an informative error directing users to Ollama or LM Studio.
+### 3. Static Import Graph and Blast Radius
+`impact.py` builds a directed cross-file dependency graph across 11 languages, detects strongly connected cycles with Tarjan's algorithm, and condenses components into topological layers. Given a file, directory, or symbol, `ctx impact` traces transitive reverse dependents, coupled tests, affected surfaces, and governing docs.
 
 ## Component Breakdown
 
-| Component | Responsibility |
-|-----------|----------------|
-| `api.py` | Unified programmatic API — `refresh`, `check`, `export_context`, `reset`. Zero Click dependency. |
-| `cli.py` | Entry point using `Click`. Thin wrapper over `api.py` with human/JSON output modes. |
-| `generator.py` | The "Brain". Orchestrates tree walking, hashing, and LLM calls with depth-level parallelism. |
-| `llm.py` | Provider implementations. Handles structured prompting, retries, and token tracking. |
-| `config.py` | Hierarchical configuration resolution (Defaults -> `.ctxconfig` -> Env -> CLI). Budget guardrails and cost estimation. |
-| `hasher.py` | Robust SHA-256 hashing logic with symlink loop detection. |
-| `manifest.py` | Parsing and serializing `CONTEXT.md` (YAML + Markdown). Atomic writes via temp file + `os.replace`. |
-| `output.py` | `OutputBroker` context manager for JSON envelope output mode. |
-| `init.py` | Project bootstrap engine. `init_project()` creates `.ctx/` exports (classic or `--tier2` structural synthesis), installs git hooks, writes metadata. `uninit_project()` reverses. `run_hook()` is the background entrypoint for post-commit/checkout/merge hooks. |
-| `skeleton.py` | Deterministic structural skeleton, operational surface (CLI/HTTP/MCP/env), and boundary-doc extractor (`extract_skeleton`, `should_invoke_llm`, `render_context_0`, `render_context_1`, `render_context_full`) with cross-file reference-ranked `key_symbols` and `structural_hash` / `boundary_doc_hash` gating. |
-| `impact.py` | Multi-language directed dependency & blast-radius graph (`build_dependency_graph`, `analyze_impact`) with Tarjan cycle detection, condensed DAG topological layers, reverse dependents, coupled tests, affected surfaces, and governing docs. |
-| `jev.py` | Pure-stdlib Type 1 Jev (`jev-1.13.0` via `POST https://api.typesafe.ai/v1/systemone`) System-One client, head validator, governor (`ADVISORY` ceiling on authority heads), deterministic `pre_rule` + `code` fallback, `.ctx-cache/jev_decisions.jsonl` trace, and 18-case gold evaluator. |
-| `invariants.py` | Hybrid Tier 2 semantic cross-module invariant synthesis following the Determinism Gradient (`code -> Type 1 Jev judge -> Type-II LLM deliberate`), cached in `.ctx/invariants.json`. |
-| `benchmark.py` | Reproducible Phase 27.1 A/B/C agent navigation & blast-radius benchmark (`raw_grep` vs `tier1_manifests` vs `tier2_plus_impact`). |
-| `sdk.py` | Zero-dependency Python consumer SDK (`CtxProject.load`) for reading `.ctx/` exports, `metadata.json`, and `hook_log.json`. |
-| `preflight.py` | Preflight onboarding gate (`ctx setup --check`). Validates provider detection, config resolution, live connectivity, sample model summary quality, and target directory readiness. |
-| `stats_board.py` | Persistent run-stats ledger. Records every `ctx refresh` invocation with retention pruning (`prune_runs`); exposes per-repo and global aggregates for `ctx stats --board`. Also exposes `load_json_safe` and `save_json_atomic` helpers used by `init.py`. |
-| `mcp_server.py` | Stdio JSON-RPC 2.0 MCP server exposing `api.py` functions as tools and `.ctx/` exports/metadata/hook telemetry as read-only MCP resources. |
-| `lock.py` | Cross-process `.ctx-cache/lock` exclusive write mutex backed by persistent OS kernel guard locks (`fcntl.flock` / `msvcrt.locking`), atomic metadata heartbeat renewal, and serialized frozen-owner reclamation. |
-| `ignore.py` | `.gitignore`-style filtering using `pathspec`, merging built-in `.ctxignore.default`, ancestor/root/nested `.gitignore` files, and `.ctxignore` overrides. |
-| `git.py` | Git-aware changed-file detection (staged, unstaged, and untracked files) for selective refresh. |
-| `watcher.py` | File watching and debounced incremental refresh. |
-| `server.py` | HTTP server for reading generated manifests remotely (optional `[serve]` extra). |
+| Module | Responsibility |
+|--------|----------------|
+| `api.py` | Programmatic Python interface (`init_project`, `uninit_project`, `refresh`, `check`, `export_context`, `build_fleet_capsule`, `analyze_impact`, `reset`) with zero Click coupling. |
+| `cli.py` | Click command-line entrypoint wrapping `api.py` in human or JSON output modes. |
+| `skeleton.py` | Static Abstract Syntax Tree (AST) and lexical parser dispatcher, operational surface detector — CLI, HTTP, Model Context Protocol (MCP), and env vars — reference-ranked `key_symbols` scorer, and `.ctx/CONTEXT-*.md` renderer. |
+| `impact.py` | Directed dependency graph builder, Tarjan cycle detector, reverse-dependency breadth-first search, coupled test matcher, and surface/doc impact analyzer. |
+| `lang_parsers/` | Per-language symbol and import extractors for Python, JavaScript/TypeScript, Go, Rust, Java, Kotlin, C#, Ruby, `PHP`, Swift, and Elixir. |
+| `language_detector.py` | File extension to language classifier feeding `skeleton.py` and `impact.py`. |
+| `init.py` | Bootstrap and teardown logic for `.ctx/` files, `metadata.json`, `.gitignore` entries, and legacy git hook block removal. |
+| `benchmark.py` | Reproducible Phase 27.1 static-oracle benchmark comparing `raw_grep`, `tier1_manifests`, and `tier2_plus_impact`. |
+| `mcp_server.py` | Standard input/output JSON-RPC 2.0 MCP server exposing `ctx_*` tools and read-only `ctx://.ctx/*` resources. |
+| `sdk.py` | Zero-dependency consumer reader (`CtxProject.load`) for loading `.ctx/` tiers and checking freshness. |
+| `server.py` | Optional FastAPI HTTP server for read-only `.ctx/` inspection (`ctx-tool[serve]`). |
+| `lock.py` | Cross-process `.ctx-cache/lock` mutex using kernel file locks (`fcntl.flock` / `msvcrt.locking`) and stale-owner recovery. |
+| `ignore.py` | `pathspec` filter combining `.ctxignore.default`, ancestor/root/nested `.gitignore` files, and `.ctxignore` overrides. |
+| `hasher.py` | Deterministic SHA-256 file and tree hashing with symlink loop protection. |
+| `config.py` | Configuration loader merging defaults, `.ctxconfig` YAML, environment variables, and CLI flags. |
+| `output.py` | `OutputBroker` context manager guaranteeing single-object JSON envelopes on standard output when `CTX_OUTPUT=json`. |
 
 ## Data Flow
 
-1. **Scan:** Walk tree (filtered by `.ctxignore.default` + `.gitignore` + `.ctxignore`, `extensions`, and `max_depth`).
-2. **Sort:** Order directories by depth descending (bottom-up).
-3. **Hash:** Compute current `content_hash` for the directory.
-4. **Compare:** If `update` mode, skip if the hash matches the existing manifest.
-5. **Summarize Files:** Batch text files (truncated by real token count), send to LLM for one-line summaries (disk-cached by model + file payload hash). Detect empty and binary files deterministically.
-6. **Summarize Directory:** Send file summaries + existing child summaries to LLM (disk-cached by model + content hash + child summaries) to generate the directory's purpose and optional notes, while rendering `# <relative-path>`, `## Files`, and `## Subdirectories` deterministically.
-7. **Write:** Atomically save `CONTEXT.md` with updated frontmatter and body.
+1. **Filter:** `ignore.py` walks the repository up to `max_depth`, pruning gitignored paths, `.ctx/`, `.ctx-cache/`, and binary files.
+2. **Parse:** `skeleton.py` dispatches each source file to `lang_parsers/` to collect classes, functions, types, imports, CLI commands, HTTP routes, MCP registrations, and environment variables.
+3. **Rank & Hash:** `skeleton.py` scores symbols by cross-file reference frequency and computes `structural_hash` and `boundary_doc_hash`.
+4. **Render & Write:** Under `CtxLock`, `init.py` / `api.py` writes `CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`, and `metadata.json` atomically via temporary files and `os.replace`.
+5. **Query Impact:** When `ctx impact <target>` runs, `impact.py` resolves internal module edges and returns direct dependents, transitive dependents, coupled tests, and governing docs.
 
-## Manifest Format (`CONTEXT.md`)
+## `.ctx/` Frontmatter Format
 
-```markdown
+Every generated `.ctx/CONTEXT-*.md` file begins with deterministic YAML frontmatter:
+
+```yaml
 ---
-generated: ISO-8601-Timestamp
-generator: ctx/version
-model: model-id
-content_hash: sha256:hex-digest
-files: count
-dirs: count
-tokens_total: aggregate-count
+generated: "2026-11-10T00:00:00Z"
+generator: ctx/1.1.0
+mode: tier2
+tier: CONTEXT-0
+structural_hash: "sha256:..."
+boundary_doc_hash: "sha256:..."
+files: 24
+subsystems: 3
 ---
-# relative/path
-
-One-line purpose of this directory.
-
-## Files
-- **filename.py** — One-line summary.
-- **data.bin** — [binary: ext, size]
-
-## Subdirectories
-- **subdir/** — One-line purpose (from its own CONTEXT.md).
-
-## Notes
-- Optional AI-generated or manual hints.
 ```
