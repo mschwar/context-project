@@ -6,20 +6,20 @@
 
 ## Why Static Maps Beat Sidecars
 
-In the [Phase 27.1 navigation benchmark](./docs/benchmarks/phase27-1-navigation-benchmark.md), per-directory LLM `CONTEXT.md` files lost to `raw_grep` by `-11.5` percentage points in mean recall (`-70.1` points on operational surfaces) while burning roughly `8.6k` tokens per commit.
+In the [Phase 27.1 navigation benchmark](./docs/benchmarks/phase27-1-navigation-benchmark.md), per-directory LLM `CONTEXT.md` files lost to `raw_grep` by `-15.0` percentage points in mean recall (`-77.4` points on operational surfaces) while burning roughly `6.3k` tokens per commit.
 
-`ctx` replaces per-directory sidecars and git hooks with deterministic Abstract Syntax Tree (AST) and import-graph extraction. Combining `.ctx/` maps with `ctx impact` beat `raw_grep` by `+12.4` percentage points in mean recall (`100%` blast-radius recall, `88.2%` fewer context tokens) at **$0.00 and 0 tokens**.
+`ctx` replaces per-directory sidecars and git hooks with deterministic Abstract Syntax Tree (AST) and import-graph extraction. Combining `.ctx/` maps with `ctx impact` beat `raw_grep` by `+17.0` percentage points in mean recall (`100%` blast-radius recall, `87.9%` fewer context tokens) at **$0.00 and 0 tokens**.
 
 ## Quick Start
 
 ```bash
 pip install ctx-tool
 
-ctx init .                              # create gitignored .ctx/ structural maps (~50 ms)
+ctx init .                              # create gitignored .ctx/ maps + capsule.json (~50 ms)
 ctx refresh .                           # refresh .ctx/ maps when code signatures change
 ctx export . --depth 0                  # print 1-page architecture and entrypoint map
-ctx export . --capsule                  # emit JSON fleet capsule for project-ledger / gbrain
 ctx impact src/ctx/skeleton.py .        # trace reverse dependents and coupled test files
+ctx impact --git-diff origin/main .     # compile proportional verification checks for a git diff
 ```
 
 ## Agents and Model Context Protocol (MCP) Clients
@@ -32,12 +32,12 @@ For MCP clients, copy [`mcp.json`](./mcp.json) into `.mcp.json` or run `ctx serv
 
 | Command | Purpose |
 |---------|---------|
-| `ctx init [path]` | Create gitignored `.ctx/` tiered maps (`CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`) |
+| `ctx init [path]` | Create gitignored `.ctx/` tiered maps (`CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`, `capsule.json`) |
 | `ctx uninit [path]` | Remove `.ctx/` and strip legacy `ctx` git hook blocks |
-| `ctx refresh [path]` | Update `.ctx/` maps when structural or boundary hashes change |
+| `ctx refresh [path]` | Update `.ctx/` maps and `capsule.json` when structural or boundary hashes change |
 | `ctx check [path]` | Check `.ctx/` freshness, `--verify` frontmatter, `--stats`, or `--diff` |
 | `ctx export [path]` | Print `.ctx/` maps on demand or emit a `--capsule` JSON payload |
-| `ctx impact <target>` | Trace reverse-dependency blast radius, coupled tests, and governing docs |
+| `ctx impact <target>` | Trace reverse-dependency or `--git-diff` / `--staged` blast radius and coupled tests |
 | `ctx benchmark [paths]` | Run the Phase 27.1 static-oracle A/B/C navigation benchmark |
 | `ctx reset [path]` | Delete legacy per-directory `CONTEXT.md` files (`--yes`, `--dry-run`) |
 | `ctx serve [path]` | Run the stdio MCP server (`--mcp`) or optional FastAPI HTTP server |

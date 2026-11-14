@@ -1,86 +1,46 @@
 # Gate Closeout Protocol
 
-This document defines the required closeout sequence for every roadmap phase (or "gate") in the project.
+Required verification and closeout sequence before landing any roadmap wave or release in `ctx`.
 
-## Rule
+## Completion Criteria
 
-A phase/gate is not complete until its closeout steps have been executed.
+A wave or release gate is complete when:
 
-Completion requires:
-
-1. deliverables created and validated,
-2. reflection written,
-3. feasible in-scope reflection suggestions implemented or explicitly deferred,
-4. carry-forward complete (all unactioned suggestions written into next phase scope),
-5. any resulting doc or decision updates applied,
-6. roadmap status updated,
-7. end-of-gate report delivered to the founder.
+1. Code and documentation changes are verified locally in an isolated git branch or worktree.
+2. Full `pytest` and stdlib documentation hygiene checks pass with zero untracked `.ctx/` or `.ctx-cache/` residue.
+3. Control-plane state (`state.md` and `TODOS.md`) and user/agent docs (`AGENTS.md`, `README.md`, `architecture.md`, `RUNBOOK.md`) match the shipped behavior.
+4. Any dated phase reflection or superseded design document is filed under `archive/` (or `archive/reflections/`).
 
 ## Required Closeout Steps
 
-### 1. Validate the output
+### 1. Run Proportional and Structural Verification
 
-Confirm that the phase's stated exit criteria in the project's roadmap are met. Ensure tests pass and the application still builds (`npm run dev` and `npm run build` succeed).
+Execute from the candidate checkout:
 
-### 2. Pause and reflect
+```bash
+python -m pytest -q
+python3 -m unittest tests/test_doc_hygiene.py -v
+CTX_OUTPUT=json python -m ctx init .
+CTX_OUTPUT=json python -m ctx check . --verify --check-exit
+CTX_OUTPUT=json python -m ctx impact --git-diff origin/main .
+CTX_OUTPUT=json python -m ctx uninit .
+git status --short
+```
 
-Do not immediately move to the next phase. Explicitly review:
-- what succeeded
-- what friction was encountered
-- what changed because of technical or product realities
-- what should be corrected before the next phase
+Confirm `git status --short` shows only intentional tracked changes and zero `.ctx/` or `.ctx-cache/` leftovers.
 
-### 3. File a reflection artifact
+### 2. Reconcile Documentation and Trackers
 
-Create a dated artifact under `archive/reflections/` using this pattern:
-`YYYY-MM-DD-phaseN-reflection.md`
+1. Keep `state.md` concise (`<= 150` lines) and accurate to the current release.
+2. Record completed waves and carry forward deferred items in `TODOS.md` (do not place backlog items in `AGENTS.md`, which is a strict schema-validated command contract).
+3. Update `AGENTS.md`, `README.md`, `architecture.md`, and `RUNBOOK.md` whenever CLI flags, MCP schemas, `.ctx/` artifacts, or supported languages change.
 
-Each reflection should include:
-- successes
-- friction points
-- observations
-- suggestions
-- implications for the next phase
+### 3. Archive Historical Artifacts
 
-### 4. Implement suggestions by default
+Move superseded design specs or phase reflections into `archive/` (`archive/reflections/YYYY-MM-DD-<wave>-reflection.md`) so root governance docs stay high-signal and retired files do not pollute `.ctx/CONTEXT-0.md`.
 
-Implement any reflection suggestion that is in scope, low-risk, and hardens the current deliverables. If a suggestion is not implemented, record why (out of scope, blocked, too risky, deferred).
+### 4. Land via Pull Request Merge Gate
 
-### 5. Carry unactioned suggestions into the next gate (mandatory)
-
-At the end of every reflection, produce a **Disposition table** — one row per suggestion, each marked either "Implemented this gate" or "Carry into Phase N". Then:
-
-1. Open `AGENTS.md` and `state.md`.
-2. For every suggestion marked "Carry into Phase N", add it as a numbered deliverable under that phase's section.
-3. If Phase N does not yet exist, create a stub section for it.
-
-This step is **not optional**. To ensure no suggestions are lost, every item must be given a disposition in the table. The carry-forward mechanism automates tracking unactioned items between phases.
-
-**Checklist before closing any gate:**
-- [ ] Reflection disposition table is complete (no row left blank).
-- [ ] Every "carry" item appears verbatim in the target phase's scope in `AGENTS.md` and `state.md`.
-- [ ] No suggestion is silently dropped.
-
-### 6. Update durable docs
-
-Update architecture, schema, instruction files, or runbooks if the reflection changes standing guidance.
-
-### 7. Update the roadmap
-
-Mark the phase as completed in the project's progress tracker and roadmap.
-
-### 8. Deliver the report and await disposition
-
-Provide an end-of-gate report. The default founder dispositions are:
-- make changes
-- roll back specific changes
-- commit and proceed
-
-**Do not commit or push automatically at gate closeout.** 
-
-Only after receiving a "commit and proceed" disposition should you:
-1. run relevant validation and hashing,
-2. `git add` the intended changes,
-3. `git commit` with a scoped message,
-4. `git push`,
-5. report the resulting commit hash before continuing.
+1. Commit and push the verified branch to `origin`.
+2. Open a pull request against `main` and confirm `"GitGuardian Security Checks"` passes on the exact 40-character `HEAD` SHA (`ops/merge-policy.json`).
+3. Merge cleanly, fast-forward the primary `main` checkout, and remove temporary worktrees.

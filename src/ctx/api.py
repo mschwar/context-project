@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-import hashlib
 import json
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from ctx.config import resolve_project_anchor
-from ctx.init import _build_metadata, _restore_dir_snapshot, _snapshot_dir
+from ctx.init import (
+    _build_metadata,
+    _restore_dir_snapshot,
+    _snapshot_dir,
+    compute_repo_id,
+    init_project,
+    uninit_project,
+)
 from ctx.lock import (
     CtxLock,
     LockSupersededError,
@@ -20,6 +26,9 @@ from ctx.lock import (
     save_json_atomic,
     write_text_atomic,
 )
+
+if TYPE_CHECKING:
+    from ctx.skeleton import RepoSkeleton
 
 
 class ConfirmationRequiredError(Exception):
@@ -140,10 +149,10 @@ def refresh(
     """Deterministically refresh .ctx/ architectural & boundary maps with zero LLM calls."""
     from ctx.skeleton import (
         extract_skeleton,
+        is_skeleton_stale,
         render_context_0,
         render_context_1,
         render_context_full,
-        should_invoke_llm,
     )
 
     target_root = _resolve_ctx_root(root) or root.resolve()
@@ -165,7 +174,7 @@ def refresh(
         force
         or not meta_path.is_file()
         or exports_missing
-        or should_invoke_llm(meta, skeleton)
+        or is_skeleton_stale(meta, skeleton)
     )
 
     if dry_run:
@@ -194,13 +203,16 @@ def refresh(
 
         prior_snapshot = _snapshot_dir(ctx_dir)
         try:
+            capsule = build_fleet_capsule(target_root, depth=1, skeleton=skeleton)
             fenced_mkdir(ctx_dir, parents=True, exist_ok=True)
             if not (ctx_dir / ".gitignore").is_file():
                 write_text_atomic(ctx_dir / ".gitignore", "*\n")
             write_text_atomic(ctx_dir / "CONTEXT-0.md", render_context_0(skeleton))
             write_text_atomic(ctx_dir / "CONTEXT-1.md", render_context_1(skeleton))
             write_text_atomic(ctx_dir / "CONTEXT.md", render_context_full(skeleton))
+            save_json_atomic(ctx_dir / "capsule.json", asdict(capsule))
             locked_meta["mode"] = "tier2"
+            locked_meta["repo_id"] = compute_repo_id(target_root)
             locked_meta["structural_hash"] = skeleton.structural_hash
             locked_meta["boundary_doc_hash"] = skeleton.boundary_doc_hash
             locked_meta["last_refresh"] = datetime.now(timezone.utc).isoformat()
@@ -490,9 +502,10 @@ def build_fleet_capsule(
     *,
     depth: int | None = 1,
     output_file: str | None = None,
+    skeleton: "RepoSkeleton | None" = None,
 ) -> FleetCapsuleResult:
     """Generate a compact deterministic capsule for project-ledger and gbrain ingestion."""
-    from dataclasses import asdict, replace
+    from dataclasses import replace
 
     from ctx.impact import build_dependency_graph
     from ctx.skeleton import (
@@ -503,12 +516,12 @@ def build_fleet_capsule(
     )
 
     resolved_root = root.resolve()
-    skeleton = extract_skeleton(resolved_root)
+    skeleton = skeleton if skeleton is not None else extract_skeleton(resolved_root)
     try:
         dep_graph = build_dependency_graph(resolved_root, skeleton=skeleton)
     except Exception:
         dep_graph = None
-    repo_id = f"sha256:{hashlib.sha256(str(resolved_root).encode('utf-8')).hexdigest()}"
+    repo_id = compute_repo_id(resolved_root)
 
     kept_boundary_docs = [
         doc for doc in skeleton.boundary_docs if _file_within_capsule_depth(doc.relative_path, depth)
@@ -637,6 +650,19 @@ def analyze_impact(
     from ctx.impact import analyze_impact as _analyze_impact
 
     return _analyze_impact(root, target, max_depth=max_depth)
+
+
+def analyze_diff_impact(
+    root: Path,
+    *,
+    git_diff: str | None = None,
+    staged: bool = False,
+    max_depth: int | None = None,
+):
+    """Compile a git diff into blast radius, coupled tests, and proportional verification checks."""
+    from ctx.impact import analyze_diff_impact as _analyze_diff_impact
+
+    return _analyze_diff_impact(root, git_diff=git_diff, staged=staged, max_depth=max_depth)
 
 
 def run_benchmark(

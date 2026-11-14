@@ -21,10 +21,11 @@ from pathlib import Path
 from typing import Any
 
 from ctx import __version__
-from ctx.config import resolve_configured_extensions
+from ctx.config import load_config
 from ctx.hasher import file_matches_extensions, normalize_extensions
 from ctx.ignore import load_ignore_patterns, should_ignore
 from ctx.language_detector import detect_language
+from ctx.lang_parsers.c_cpp_parser import parse_c_cpp_file
 from ctx.lang_parsers.python_parser import parse_python_file
 from ctx.lang_parsers.js_ts_parser import parse_js_ts_file
 from ctx.lang_parsers.rust_parser import parse_rust_file
@@ -64,7 +65,6 @@ _AUTHORITY_DOC_NAMES = {
     "readme.md": "overview",
     "readme.rst": "overview",
     "state.md": "architecture",
-    "todos.md": "architecture",
     "runbook.md": "architecture",
 }
 
@@ -119,6 +119,33 @@ _ELIXIR_IMPORT_RE = re.compile(
     r"^\s*(?:alias|import|use|require)\s+([A-Z][A-Za-z0-9_.]*)",
     re.MULTILINE,
 )
+_C_CPP_INCLUDE_RE = re.compile(
+    r'^\s*#\s*include\s*([<"])([^>"]+)[>"]',
+    re.MULTILINE,
+)
+_C_CPP_STDLIB = frozenset({
+    "assert.h", "complex.h", "ctype.h", "errno.h", "fenv.h", "float.h", "inttypes.h",
+    "iso646.h", "limits.h", "locale.h", "math.h", "setjmp.h", "signal.h", "stdalign.h",
+    "stdarg.h", "stdatomic.h", "stdbool.h", "stddef.h", "stdint.h", "stdio.h", "stdlib.h",
+    "stdnoreturn.h", "string.h", "tgmath.h", "threads.h", "time.h", "uchar.h", "wchar.h",
+    "wctype.h", "unistd.h", "fcntl.h", "pthread.h", "dlfcn.h", "dirent.h", "netdb.h",
+    "poll.h", "sched.h", "semaphore.h", "strings.h", "syslog.h", "termios.h", "sys",
+    "arpa", "netinet", "windows.h", "winsock2.h",
+    "algorithm", "any", "array", "atomic", "barrier", "bit", "bitset", "cassert", "cctype",
+    "cerrno", "cfenv", "cfloat", "charconv", "chrono", "cinttypes", "climits", "clocale",
+    "cmath", "codecvt", "compare", "complex", "concepts", "condition_variable", "coroutine",
+    "csetjmp", "csignal", "cstdarg", "cstddef", "cstdint", "cstdio", "cstdlib", "cstring",
+    "ctime", "cuchar", "cwchar", "cwctype", "deque", "exception", "execution", "expected",
+    "filesystem", "format", "forward_list", "fstream", "functional", "future",
+    "initializer_list", "iomanip", "ios", "iosfwd", "iostream", "istream", "iterator",
+    "latch", "limits", "list", "locale", "map", "memory", "memory_resource", "mutex", "new",
+    "numbers", "numeric", "optional", "ostream", "print", "queue", "random", "ranges",
+    "ratio", "regex", "scoped_allocator", "semaphore", "set", "shared_mutex", "source_location",
+    "span", "spanstream", "sstream", "stack", "stacktrace", "stdexcept", "stdfloat",
+    "stop_token", "streambuf", "string", "string_view", "strstream", "syncstream",
+    "system_error", "thread", "tuple", "type_traits", "typeindex", "typeinfo",
+    "unordered_map", "unordered_set", "utility", "valarray", "variant", "vector", "version",
+})
 _PYPROJECT_SCRIPT_SECTION_RE = re.compile(r"^\[project\.scripts\]\s*$", re.MULTILINE)
 _GO_MOD_MODULE_RE = re.compile(r"^module\s+(\S+)", re.MULTILINE)
 _CARGO_NAME_RE = re.compile(r'^name\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
@@ -256,6 +283,8 @@ def _extract_symbols_for_file(path: Path, language: str | None) -> list[str]:
         metadata = parse_swift_file(path)
     elif language == "Elixir":
         metadata = parse_elixir_file(path)
+    elif language in ("C", "C++", "C/C++ Header", "C++ Header"):
+        metadata = parse_c_cpp_file(path)
 
     symbols: list[str] = []
     prefix_map = [
@@ -363,6 +392,15 @@ def _extract_imports_for_file(path: Path, language: str | None) -> list[str]:
     elif language == "Elixir":
         for match in _ELIXIR_IMPORT_RE.finditer(content):
             imports.add(match.group(1))
+    elif language in ("C", "C++", "C/C++ Header", "C++ Header"):
+        for match in _C_CPP_INCLUDE_RE.finditer(content):
+            delim, header = match.group(1), match.group(2).strip()
+            if not header:
+                continue
+            if delim == '"':
+                imports.add(header if header.startswith(".") else f"./{header}")
+            else:
+                imports.add(header)
 
     return sorted(imports)
 
@@ -421,8 +459,11 @@ def _extract_markdown_headings_and_summary(path: Path) -> tuple[list[str], str, 
 
 def _classify_boundary_doc(rel_posix: str) -> str | None:
     lower = rel_posix.lower()
+    parts = Path(lower).parts
     name = Path(lower).name
     if name == "context.md" or lower.startswith(".ctx/"):
+        return None
+    if any(seg in {"archive", "tests", "test", "fixtures", "fixture", "benchmarks"} for seg in parts[:-1]):
         return None
     if lower in _AUTHORITY_DOC_NAMES:
         return _AUTHORITY_DOC_NAMES[lower]
@@ -708,6 +749,16 @@ def _classify_dependency(
         if top_mod in _RUST_STDLIB:
             return None, ""
         return ("external", top_mod) if top_mod else (None, "")
+
+    if language in ("C", "C++", "C/C++ Header", "C++ Header"):
+        norm_hdr = imp.replace("\\", "/").strip("/")
+        top_hdr = norm_hdr.split("/")[0]
+        if norm_hdr in _C_CPP_STDLIB or top_hdr in _C_CPP_STDLIB:
+            return None, ""
+        if top_hdr in internal_module_roots:
+            return "internal", imp
+        pkg = top_hdr.removesuffix(".h").removesuffix(".hpp")
+        return ("external", pkg) if pkg else (None, "")
 
     if any(imp.startswith(p) for p in _OTHER_STDLIB_PREFIXES):
         return None, ""
@@ -1083,11 +1134,76 @@ def _symbol_ident(symbol_entry: str) -> str:
     return parts[1].strip() if len(parts) == 2 else symbol_entry.strip()
 
 
+def _extract_python_code_idents(raw_text: str) -> set[str] | None:
+    """Extract referenced Python identifiers via AST, excluding keyword-argument labels like check=False."""
+    try:
+        tree = ast.parse(raw_text)
+    except SyntaxError:
+        return None
+    idents: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            idents.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            idents.add(node.attr)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name and alias.name != "*":
+                    idents.add(alias.name.split(".")[-1])
+    return idents
+
+
+def _compute_module_inbound_scores(file_skeletons: list[FileSkeleton]) -> dict[str, int]:
+    """Count non-test inbound module import references for each source file."""
+    stem_to_files: dict[str, list[str]] = defaultdict(list)
+    dotted_to_file: dict[str, str] = {}
+    for f in file_skeletons:
+        if _is_test_or_non_operational_file(f.relative_path):
+            continue
+        p = Path(f.relative_path)
+        stem = p.parent.name if p.stem in ("__init__", "index", "mod") else p.stem
+        if stem:
+            stem_to_files[stem].append(f.relative_path)
+        no_ext_parts = list(p.with_suffix("").parts)
+        if no_ext_parts and no_ext_parts[-1] in ("__init__", "index", "mod"):
+            no_ext_parts = no_ext_parts[:-1]
+        if no_ext_parts:
+            dotted_to_file[".".join(no_ext_parts)] = f.relative_path
+            if "src" in no_ext_parts:
+                src_idx = no_ext_parts.index("src")
+                if src_idx + 1 < len(no_ext_parts):
+                    dotted_to_file[".".join(no_ext_parts[src_idx + 1 :])] = f.relative_path
+
+    inbound: Counter[str] = Counter()
+    for caller in file_skeletons:
+        weight = 1 if _is_test_or_non_operational_file(caller.relative_path) else 3
+        matched_targets: set[str] = set()
+        for imp in caller.imports:
+            norm = imp.lstrip("./").replace("/", ".").replace("::", ".").replace("\\", ".")
+            if norm in dotted_to_file and dotted_to_file[norm] != caller.relative_path:
+                matched_targets.add(dotted_to_file[norm])
+                continue
+            segs = [s for s in norm.split(".") if s]
+            for cut in range(len(segs), 0, -1):
+                cand = ".".join(segs[:cut])
+                if cand in dotted_to_file and dotted_to_file[cand] != caller.relative_path:
+                    matched_targets.add(dotted_to_file[cand])
+                    break
+            else:
+                tail = segs[-1] if segs else ""
+                for cand_rel in stem_to_files.get(tail, ()):
+                    if cand_rel != caller.relative_path:
+                        matched_targets.add(cand_rel)
+        for tgt in matched_targets:
+            inbound[tgt] += weight
+    return dict(inbound)
+
+
 def _compute_cross_file_symbol_refs(
     file_skeletons: list[FileSkeleton],
     file_ident_sets: dict[str, set[str]],
 ) -> dict[tuple[str, str], int]:
-    """Count how many OTHER files in the repository mention each file's exported symbol identifier."""
+    """Score cross-file symbol centrality, weighting production callers higher than tests."""
     candidate_idents: set[str] = set()
     for f in file_skeletons:
         for sym in f.symbols:
@@ -1097,20 +1213,24 @@ def _compute_cross_file_symbol_refs(
     if not candidate_idents:
         return {}
 
-    global_doc_freq: Counter[str] = Counter()
-    for idents in file_ident_sets.values():
+    global_doc_score: Counter[str] = Counter()
+    own_weight_by_file: dict[str, int] = {}
+    for rel_path, idents in file_ident_sets.items():
+        weight = 1 if _is_test_or_non_operational_file(rel_path) else 3
+        own_weight_by_file[rel_path] = weight
         for tok in idents & candidate_idents:
-            global_doc_freq[tok] += 1
+            global_doc_score[tok] += weight
 
     ref_counts: dict[tuple[str, str], int] = {}
     for f in file_skeletons:
         own_idents = file_ident_sets.get(f.relative_path, set())
+        own_w = own_weight_by_file.get(f.relative_path, 3)
         for sym in f.symbols:
             ident = _symbol_ident(sym)
             if len(ident) < 3:
                 ref_counts[(f.relative_path, sym)] = 0
                 continue
-            other_refs = global_doc_freq.get(ident, 0) - (1 if ident in own_idents else 0)
+            other_refs = global_doc_score.get(ident, 0) - (own_w if ident in own_idents else 0)
             ref_counts[(f.relative_path, sym)] = max(0, other_refs)
     return ref_counts
 
@@ -1120,15 +1240,33 @@ def _select_diversified_key_symbols(
     limit: int = 25,
     *,
     ref_counts: dict[tuple[str, str], int] | None = None,
+    module_inbound_scores: dict[str, int] | None = None,
 ) -> list[str]:
-    """Select key symbols round-robin across subsystem files, weighting cross-file reference centrality."""
+    """Select key symbols round-robin across subsystem files, balancing primary entrypoint and core hubs."""
     rc = ref_counts or {}
+    mod_in = module_inbound_scores or {}
 
-    def _file_priority(f: FileSkeleton) -> tuple[int, int, str]:
-        fname = Path(f.relative_path).name
-        is_entry = 0 if fname in _ENTRYPOINT_FILENAMES else 1
+    entry_candidates = [
+        f
+        for f in sfiles
+        if f.symbols and Path(f.relative_path).name in _ENTRYPOINT_FILENAMES
+    ]
+    primary_entry_path: str | None = None
+    if entry_candidates:
+        primary_entry_path = min(
+            entry_candidates,
+            key=lambda f: (
+                -mod_in.get(f.relative_path, 0),
+                -sum(rc.get((f.relative_path, s), 0) for s in f.symbols),
+                f.relative_path,
+            ),
+        ).relative_path
+
+    def _file_priority(f: FileSkeleton) -> tuple[int, int, int, str]:
+        entry_tier = 0 if f.relative_path == primary_entry_path else 1
+        in_score = mod_in.get(f.relative_path, 0)
         total_refs = sum(rc.get((f.relative_path, s), 0) for s in f.symbols)
-        return (is_entry, -total_refs, f.relative_path)
+        return (entry_tier, -in_score, -total_refs, f.relative_path)
 
     ranked_file_symbols: list[tuple[str, list[str]]] = []
     for f in sorted(sfiles, key=_file_priority):
@@ -1204,11 +1342,16 @@ def _rule_subsystem_arch_role(state: dict[str, object]) -> str:
     ):
         if not (path_tokens & {"core", "domain"}):
             return "adapter_integration"
-    if surfaces & {"cli_command", "http_route", "mcp_tool", "mcp_resource"} or (
-        path_tokens & {"cli", "cmd", "server", "routes", "web", "ui", "mcp", "frontend"}
+    file_count_val = int(state.get("file_count") or 0)  # type: ignore[arg-type]
+    explicit_iface_path = bool(path_tokens & {"cli", "cmd", "server", "routes", "web", "ui", "mcp", "frontend"})
+    if explicit_iface_path and not (path_tokens & {"core", "engine"}):
+        return "entrypoint_interface"
+    if (
+        surfaces & {"cli_command", "http_route", "mcp_tool", "mcp_resource"}
+        and not (path_tokens & {"core", "engine"})
+        and file_count_val < 6
     ):
-        if not (path_tokens & {"core", "engine"}):
-            return "entrypoint_interface"
+        return "entrypoint_interface"
     if path_tokens & {"util", "utils", "common", "shared", "helper", "helpers", "config", "types"}:
         return "shared_utility"
     if symbols or langs:
@@ -1255,10 +1398,10 @@ def extract_skeleton(
 ) -> RepoSkeleton:
     """Deterministically scan a repository tree and build a RepoSkeleton with zero LLM calls."""
     root = root.resolve()
+    cfg = load_config(root, max_depth=max_depth, extensions=extensions)
+    effective_max_depth = cfg.max_depth
     spec = load_ignore_patterns(root)
-    effective_exts = normalize_extensions(
-        extensions if extensions is not None else resolve_configured_extensions(root)
-    )
+    effective_exts = normalize_extensions(cfg.extensions)
 
     file_skeletons: list[FileSkeleton] = []
     boundary_docs: list[BoundaryDoc] = []
@@ -1266,7 +1409,7 @@ def extract_skeleton(
     file_ident_sets: dict[str, set[str]] = {}
     lang_counts: Counter[str] = Counter()
     entrypoints: list[str] = _detect_config_entrypoints(
-        root, effective_exts, spec=spec, max_depth=max_depth
+        root, effective_exts, spec=spec, max_depth=effective_max_depth
     )
 
     # Track internal module names for dependency classification
@@ -1287,7 +1430,7 @@ def extract_skeleton(
                 continue
 
             if entry.is_dir():
-                if max_depth is None or depth < max_depth:
+                if effective_max_depth is None or depth < effective_max_depth:
                     _walk(entry, depth + 1)
                 continue
 
@@ -1324,13 +1467,20 @@ def extract_skeleton(
             if language:
                 lang_counts[language] += 1
                 if language == "Python":
-                    if len(rel_parts) >= 2 and rel_parts[0] == "src":
-                        internal_module_roots.add(rel_parts[1].removesuffix(".py"))
+                    if "src" in rel_parts[:-1]:
+                        src_idx = rel_parts[:-1].index("src")
+                        if src_idx + 1 < len(rel_parts):
+                            internal_module_roots.add(rel_parts[src_idx + 1].removesuffix(".py"))
+                    elif entry.name == "__init__.py" and len(rel_parts) >= 2:
+                        internal_module_roots.add(entry.parent.name)
                     elif rel_parts[0].lower() not in _NON_OPERATIONAL_DIRS:
                         internal_module_roots.add(rel_parts[0].removesuffix(".py"))
                 try:
                     raw_text = entry.read_text(encoding="utf-8")
-                    file_ident_sets[rel_posix] = set(_IDENT_TOKEN_RE.findall(raw_text))
+                    py_idents = _extract_python_code_idents(raw_text) if language == "Python" else None
+                    file_ident_sets[rel_posix] = (
+                        py_idents if py_idents is not None else set(_IDENT_TOKEN_RE.findall(raw_text))
+                    )
                 except (OSError, UnicodeDecodeError):
                     pass
 
@@ -1363,6 +1513,7 @@ def extract_skeleton(
     )
 
     ref_counts = _compute_cross_file_symbol_refs(file_skeletons, file_ident_sets)
+    module_inbound_scores = _compute_module_inbound_scores(file_skeletons)
 
     # Group files and operational surfaces into logical subsystems
     subsystem_files: dict[str, list[FileSkeleton]] = defaultdict(list)
@@ -1377,7 +1528,12 @@ def extract_skeleton(
         sfiles = subsystem_files[sub_path]
         sub_langs = Counter(f.language for f in sfiles if f.language)
         ordered_langs = [lang for lang, _ in sub_langs.most_common()]
-        symbols_flat = _select_diversified_key_symbols(sfiles, limit=25, ref_counts=ref_counts)
+        symbols_flat = _select_diversified_key_symbols(
+            sfiles,
+            limit=25,
+            ref_counts=ref_counts,
+            module_inbound_scores=module_inbound_scores,
+        )
         internal_deps: set[str] = set()
         external_deps: set[str] = set()
 
@@ -1455,8 +1611,8 @@ def extract_skeleton(
     )
 
 
-def should_invoke_llm(prev_metadata: dict[str, Any] | None, skeleton: RepoSkeleton) -> bool:
-    """Return True only when structural signatures or authority/boundary docs changed."""
+def is_skeleton_stale(prev_metadata: dict[str, Any] | None, skeleton: RepoSkeleton) -> bool:
+    """Return True when structural signatures or authority/boundary docs changed."""
     if not prev_metadata or not isinstance(prev_metadata, dict):
         return True
     prev_struct = prev_metadata.get("structural_hash")
@@ -1467,6 +1623,9 @@ def should_invoke_llm(prev_metadata: dict[str, Any] | None, skeleton: RepoSkelet
         prev_struct != skeleton.structural_hash
         or prev_bdoc != skeleton.boundary_doc_hash
     )
+
+
+should_invoke_llm = is_skeleton_stale
 
 
 def _render_frontmatter(skeleton: RepoSkeleton, tier: str, *, generated: str | None = None) -> str:

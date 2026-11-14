@@ -5,7 +5,7 @@
 
 ## What ctx Is
 `ctx` is a deterministic, zero-LLM static AST, import-graph, and blast-radius structural analyzer for AI agents.
-It compiles gitignored `.ctx/` tiered maps (`CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`), structured fleet capsules (`ctx export --capsule`), and directed reverse-dependency impact graphs (`ctx impact <target>`) across 11 programming languages — with zero LLM calls, zero API keys, zero background git hooks, and zero per-directory `CONTEXT.md` clutter.
+It compiles gitignored `.ctx/` tiered maps (`CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`), persisted fleet capsules (`.ctx/capsule.json` and `ctx export --capsule`), and directed reverse-dependency + git-diff impact plans (`ctx impact <target>` and `ctx impact --git-diff`) across 13 programming languages — with zero LLM calls, zero API keys, zero background git hooks, and zero per-directory `CONTEXT.md` clutter.
 
 ## Install
 ```bash
@@ -44,7 +44,7 @@ Bootstrap deterministic `.ctx/` structural maps in a git repository without inst
 
 What it does:
 1. Extracts static AST/parser symbols, imports, entrypoints, operational surfaces, and governance docs (`ctx.skeleton.extract_skeleton`)
-2. Creates `.ctx/` with `CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`, `metadata.json`, and `.ctx/.gitignore`
+2. Creates `.ctx/` with `CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`, `capsule.json`, `metadata.json`, and `.ctx/.gitignore`
 3. Adds `.ctx/` to root `.gitignore`
 4. Cleans up any legacy `# >>> ctx-hook-start` git hook blocks if present
 
@@ -63,12 +63,13 @@ Remove `.ctx/` infrastructure, strip `.ctx/` from root `.gitignore`, and remove 
 | `CONTEXT-0.md` | 1-page repository architecture, authority boundaries, entrypoints, and subsystem overview |
 | `CONTEXT-1.md` | Cross-directory dependency flows, exported symbols, and boundary contracts |
 | `CONTEXT.md` | Full structural map including file-level public signatures |
-| `metadata.json` | Deterministic metadata (`repo_id`, `structural_hash`, `boundary_doc_hash`, timestamps) |
+| `capsule.json` | Persisted `FleetCapsuleResult` payload for `project-ledger` and `gbrain` ingestion |
+| `metadata.json` | Deterministic metadata (cross-host `repo_id`, `structural_hash`, `boundary_doc_hash`, timestamps) |
 | `.gitignore` | Ignores all `.ctx/` contents from git |
 
 ### `ctx refresh [path]`
 
-Deterministically refresh `.ctx/` maps when `structural_hash` or `boundary_doc_hash` has drifted (skipping writes when unchanged).
+Deterministically refresh `.ctx/` maps and `capsule.json` when `structural_hash` or `boundary_doc_hash` has drifted (skipping writes when unchanged).
 
 Common flags:
 - `--force` — rewrite `.ctx/` maps even if hashes match
@@ -81,7 +82,7 @@ Common flags:
   "status": "success",
   "command": "refresh",
   "metadata": {
-    "version": "1.1.0",
+    "version": "2.0.0",
     "elapsed_ms": 38,
     "tokens_used": 0,
     "est_cost_usd": 0.0
@@ -119,7 +120,7 @@ Common flags:
   "status": "success",
   "command": "check",
   "metadata": {
-    "version": "1.1.0",
+    "version": "2.0.0",
     "elapsed_ms": 19,
     "tokens_used": 0,
     "est_cost_usd": 0.0
@@ -162,7 +163,7 @@ Common flags:
   "status": "success",
   "command": "export",
   "metadata": {
-    "version": "1.1.0",
+    "version": "2.0.0",
     "elapsed_ms": 24,
     "tokens_used": 0,
     "est_cost_usd": 0.0
@@ -180,9 +181,11 @@ Common flags:
 
 ### `ctx impact <target> [path]`
 
-Analyze directed reverse-dependency blast radius, coupled test suites, affected entrypoints/surfaces, cycles, and governing authority documents for a file path, subsystem directory, or symbol name.
+Analyze directed reverse-dependency blast radius, coupled test suites, affected entrypoints/surfaces, cycles, and governing authority documents for a file path, subsystem directory, symbol name, or git diff.
 
 Common flags:
+- `--git-diff <rev>` — analyze all changed files in a git diff (`WORKTREE` or revision/range such as `origin/main` or `HEAD~1..HEAD`) and emit `verification_scope` + `recommended_checks`
+- `--staged` — analyze staged git index changes (`git diff --cached`) and emit `verification_scope` + `recommended_checks`
 - `--depth <n>` — cap reverse-dependency BFS hops (`>= 1`)
 - `--output json` — emit JSON envelope
 
@@ -200,7 +203,7 @@ Common flags:
   "status": "success",
   "command": "reset",
   "metadata": {
-    "version": "1.1.0",
+    "version": "2.0.0",
     "elapsed_ms": 6,
     "tokens_used": 0,
     "est_cost_usd": 0.0
@@ -293,6 +296,7 @@ stale = proj.is_stale()
 ```bash
 ctx export . --depth 0                  # zero-setup 1-page architectural orientation
 ctx impact src/pkg/module.py .          # inspect reverse dependents + coupled tests before editing
+ctx impact --git-diff origin/main .     # compile proportional verification plan for current branch diff
 ```
 
 ### Documentation Hygiene Gate
@@ -305,7 +309,7 @@ Generated `.ctx/CONTEXT-*.md` files begin with deterministic YAML frontmatter fo
 ```yaml
 ---
 generated: "2026-11-10T00:00:00Z"
-generator: ctx/1.1.0
+generator: ctx/2.0.0
 mode: tier2
 tier: CONTEXT-0
 structural_hash: "sha256:..."

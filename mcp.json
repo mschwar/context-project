@@ -3,7 +3,7 @@
     "ctx": {
       "command": "ctx",
       "args": ["serve", "--mcp"],
-      "description": "Filesystem-native context layer that generates and manages CONTEXT.md manifests for agent navigation."
+      "description": "Deterministic zero-LLM static AST, import-graph, and blast-radius structural analyzer (.ctx/ maps, capsules, and impact analysis)."
     }
   }
 }
