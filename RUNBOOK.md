@@ -28,7 +28,7 @@ CTX_OUTPUT=json python -m ctx uninit .
 ## CLI Operations
 
 ### Initialize and Refresh `.ctx/` Maps
-Create gitignored `.ctx/` tiered maps (`CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`, and `metadata.json`) and update them when signatures or governance docs change:
+Create gitignored `.ctx/` tiered maps (`CONTEXT-0.md`, `CONTEXT-1.md`, `CONTEXT.md`, `capsule.json`, and `metadata.json`) and update them when signatures or governance docs change:
 
 ```bash
 ctx init /path/to/project
@@ -65,12 +65,14 @@ ctx export /path/to/project --depth 1
 ctx export /path/to/project --capsule --out-file capsule.json
 ```
 
-### Trace Reverse-Dependency Blast Radius
-Compute direct and transitive reverse dependents, coupled test files, affected operational surfaces, and governing docs for a file, directory, or symbol:
+### Trace Reverse-Dependency and Git-Diff Blast Radius
+Compute direct and transitive reverse dependents, coupled test files, affected operational surfaces, governing docs, and proportional verification checks for a file, directory, symbol, or git diff:
 
 ```bash
 ctx impact src/ctx/skeleton.py /path/to/project
 ctx impact src/ctx/skeleton.py /path/to/project --depth 2 --output json
+ctx impact --git-diff origin/main /path/to/project
+ctx impact --staged /path/to/project --output json
 ```
 
 ### Clean Up Legacy Sidecars
@@ -104,16 +106,24 @@ ctx benchmark /path/to/project --out-file docs/benchmarks/phase27-1-navigation-b
 
 ## Publishing a Release
 
-The release workflow (`.github/workflows/publish.yml`) runs on `v*` tags and publishes to the Python Package Index (PyPI) via OpenID Connect (OIDC) trusted publishing.
+Hosted cloud virtual machine triggers on push and pull request events are retired across fleet repositories; `.github/workflows/publish.yml` uses `workflow_dispatch` for intentional releases to the Python Package Index (PyPI) via OpenID Connect (OIDC) trusted publishing.
 
-1. On PyPI, configure project `ctx-tool` with a trusted publisher for `mschwar/context-project`, environment `pypi`, and workflow `publish.yml`.
-2. On GitHub, ensure the `pypi` environment exists under repository Settings -> Environments.
-3. Tag and push the release:
+1. Verify tests, documentation hygiene, and local wheel/sdist build integrity on the host:
 
 ```bash
-git tag v1.1.0
+python -m pytest -q
+python3 -m unittest tests/test_doc_hygiene.py -v
+python -m build
+```
+
+2. Tag and push the release commit:
+
+```bash
+git tag v2.0.0
 git push --tags
 ```
+
+3. Trigger `publish.yml` (`workflow_dispatch`) or upload validated `dist/*` artifacts through `twine` when publishing to PyPI.
 
 > **Package name note:** `pip install ctx-tool` installs the `ctx` CLI command. The PyPI distribution name (`ctx-tool`) differs from the command name (`ctx`) because the bare `ctx` package on PyPI had a 2022 supply-chain incident.
 

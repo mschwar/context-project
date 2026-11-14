@@ -1,3 +1,3 @@
-"""ctx — Filesystem-native context layer for AI agents."""
+"""ctx — Deterministic static AST, import-graph, and blast-radius structural compiler for AI agents."""
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"

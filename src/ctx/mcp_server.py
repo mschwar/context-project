@@ -131,7 +131,8 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
         "name": "ctx_impact",
         "description": (
             "Analyze directed dependency blast radius, reverse dependents, coupled test suites, "
-            "affected entrypoints/surfaces, and governing authority docs for a file, subsystem, or symbol."
+            "affected entrypoints/surfaces, and governing authority docs for a file, subsystem, "
+            "symbol, or git diff."
         ),
         "inputSchema": {
             "type": "object",
@@ -139,6 +140,15 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
                 "target": {
                     "type": "string",
                     "description": "Repo-relative file path, subsystem/directory path, or symbol name.",
+                },
+                "git_diff": {
+                    "type": "string",
+                    "description": "Optional git diff revision or range (e.g. HEAD, origin/main...HEAD, WORKTREE).",
+                },
+                "staged": {
+                    "type": "boolean",
+                    "description": "Analyze staged git changes when true.",
+                    "default": False,
                 },
                 "path": {
                     "type": "string",
@@ -150,7 +160,7 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
                     "description": "Optional maximum reverse-dependency hop distance (>= 1).",
                 },
             },
-            "required": ["target"],
+            "required": [],
         },
     },
 ]
@@ -475,12 +485,29 @@ class CtxMCPServer:
 
     def _call_impact(self, arguments: dict[str, object]) -> dict[str, object]:
         path = self._resolve_path(arguments.get("path", "."))
-        target = arguments.get("target")
-        if not isinstance(target, str) or not target.strip():
-            raise InvalidToolArgumentsError("target must be a non-empty string", error_code="invalid_target")
         depth = arguments.get("depth")
         if depth is not None and (not isinstance(depth, int) or isinstance(depth, bool) or depth < 1):
             raise InvalidToolArgumentsError("depth must be a positive integer", error_code="invalid_depth")
+
+        git_diff = arguments.get("git_diff")
+        staged = bool(arguments.get("staged", False))
+        if git_diff is not None and not isinstance(git_diff, str):
+            raise InvalidToolArgumentsError("git_diff must be a string", error_code="invalid_git_diff")
+        if git_diff is not None or staged:
+            try:
+                diff_result = api.analyze_diff_impact(
+                    path,
+                    git_diff=git_diff.strip() if isinstance(git_diff, str) else None,
+                    staged=staged,
+                    max_depth=depth,
+                )
+            except ValueError as exc:
+                raise InvalidToolArgumentsError(str(exc), error_code="target_not_found") from exc
+            return asdict(diff_result)
+
+        target = arguments.get("target")
+        if not isinstance(target, str) or not target.strip():
+            raise InvalidToolArgumentsError("target must be a non-empty string", error_code="invalid_target")
         try:
             result = api.analyze_impact(path, target.strip(), max_depth=depth)
         except ValueError as exc:

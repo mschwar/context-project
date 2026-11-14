@@ -12,11 +12,12 @@ Resolves multi-language internal imports into a directed dependency graph with:
 from __future__ import annotations
 
 import ast
-import json
-import re
 from collections import deque
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
+import re
+import subprocess
 from typing import Any
 
 from ctx.skeleton import (
@@ -85,6 +86,29 @@ class ImpactResult:
     repo_cycles_count: int = field(default=0)
 
 
+@dataclass(frozen=True)
+class DiffImpactResult:
+    """Proportional-verification blast-radius report across a git diff or working tree."""
+
+    diff_spec: str
+    changed_files: list[str]
+    matched_code_files: list[str]
+    changed_test_files: list[str]
+    changed_boundary_docs: list[str]
+    changed_configs: list[str]
+    direct_outbound_deps: list[str]
+    direct_inbound_dependents: list[str]
+    transitive_inbound_dependents: list[dict[str, Any]]
+    coupled_tests: list[dict[str, Any]]
+    affected_subsystems: list[str]
+    affected_entrypoints: list[str]
+    governing_docs: list[str]
+    cycles_involving_changes: list[list[str]]
+    verification_scope: str
+    recommended_checks: list[str]
+    escalation_reasons: list[str] = field(default_factory=list)
+
+
 def is_test_file_path(rel_posix: str) -> bool:
     """Return True if *rel_posix* belongs to a test suite or test file naming convention."""
     p = Path(rel_posix)
@@ -138,26 +162,73 @@ def _load_go_module_name(root: Path) -> str:
 
 
 def _build_python_module_map(all_files: set[str]) -> dict[str, str]:
-    """Map dotted Python module names to repo-relative file paths."""
+    """Map dotted Python module names to repo-relative file paths (including src/ and monorepo workspaces)."""
     mod_map: dict[str, str] = {}
+    pkg_init_dirs: set[tuple[str, ...]] = set()
+    for rel in sorted(all_files):
+        if rel.endswith("/__init__.py"):
+            pkg_init_dirs.add(tuple(rel.split("/")[:-1]))
+
     for rel in sorted(all_files):
         if not rel.endswith(".py"):
             continue
         no_ext = rel[:-3]
         parts = no_ext.split("/")
-        if parts[-1] == "__init__":
-            pkg_parts = parts[:-1]
-            if pkg_parts:
-                full_dotted = ".".join(pkg_parts)
-                mod_map.setdefault(full_dotted, rel)
-                if pkg_parts[0] == "src" and len(pkg_parts) >= 2:
-                    mod_map.setdefault(".".join(pkg_parts[1:]), rel)
-        else:
-            full_dotted = ".".join(parts)
-            mod_map.setdefault(full_dotted, rel)
-            if parts[0] == "src" and len(parts) >= 2:
-                mod_map.setdefault(".".join(parts[1:]), rel)
+        is_init = parts[-1] == "__init__"
+        target_parts = parts[:-1] if is_init else parts
+        if not target_parts:
+            continue
+        mod_map.setdefault(".".join(target_parts), rel)
+        if "src" in target_parts:
+            src_idx = target_parts.index("src")
+            if src_idx + 1 < len(target_parts):
+                mod_map.setdefault(".".join(target_parts[src_idx + 1 :]), rel)
+        # Support flat monorepo packages like packages/core/core_pkg/__init__.py -> core_pkg
+        for idx in range(1, len(target_parts) if not is_init else len(target_parts)):
+            if tuple(target_parts[: idx + 1]) in pkg_init_dirs and tuple(target_parts[:idx]) not in pkg_init_dirs:
+                mod_map.setdefault(".".join(target_parts[idx:]), rel)
     return mod_map
+
+
+def _load_js_workspace_packages(root: Path, all_files: set[str]) -> dict[str, str]:
+    """Map monorepo JS/TS workspace package names (e.g. '@acme/core') to their package directory."""
+    pkg_dirs: dict[str, str] = {}
+    for rel in sorted(all_files):
+        if Path(rel).name != "package.json" or "/" not in rel:
+            continue
+        pkg_path = root / rel
+        try:
+            parsed = json.loads(pkg_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(parsed, dict):
+            name = str(parsed.get("name") or "").strip()
+            if name:
+                pkg_dirs.setdefault(name, Path(rel).parent.as_posix())
+    return pkg_dirs
+
+
+def _load_cargo_crate_roots(root: Path, all_files: set[str]) -> dict[str, str]:
+    """Map Rust crate names (normalized '-' -> '_') across root and workspace Cargo.toml files to src dirs."""
+    crates: dict[str, str] = {}
+    candidates = {"Cargo.toml"} | {rel for rel in all_files if Path(rel).name == "Cargo.toml"}
+    for rel in sorted(candidates):
+        cargo_path = root / rel
+        if not cargo_path.is_file():
+            continue
+        try:
+            m = re.search(r'^name\s*=\s*["\']([^"\']+)["\']', cargo_path.read_text(encoding="utf-8"), re.MULTILINE)
+        except (OSError, UnicodeDecodeError):
+            continue
+        if not m:
+            continue
+        crate_name = m.group(1).strip().replace("-", "_")
+        if not crate_name:
+            continue
+        parent = Path(rel).parent.as_posix()
+        src_dir = "src" if parent == "." else f"{parent}/src"
+        crates.setdefault(crate_name, src_dir)
+    return crates
 
 
 def _resolve_python_file_edges(
@@ -265,10 +336,12 @@ def _resolve_js_ts_edges(
     all_files: set[str],
     ts_base_url: str,
     ts_aliases: list[tuple[str, list[str]]],
+    js_workspaces: dict[str, str] | None = None,
 ) -> set[str]:
     targets: set[str] = set()
     cur_dir = (root / rel_posix).parent
     resolved_root = root.resolve()
+    ws_map = js_workspaces or {}
 
     for imp in imports:
         if not imp:
@@ -317,6 +390,22 @@ def _resolve_js_ts_edges(
                 if hit and hit != rel_posix:
                     targets.add(hit)
                     break
+            continue
+
+        for pkg_name, pkg_dir in ws_map.items():
+            if imp == pkg_name:
+                for entry_cand in (f"{pkg_dir}/src/index", f"{pkg_dir}/index"):
+                    hit = _probe_js_ts_candidate(entry_cand, all_files)
+                    if hit and hit != rel_posix:
+                        targets.add(hit)
+                        break
+            elif imp.startswith(f"{pkg_name}/"):
+                sub = imp[len(pkg_name) + 1 :]
+                for cand_prefix in (f"{pkg_dir}/src/{sub}", f"{pkg_dir}/{sub}"):
+                    hit = _probe_js_ts_candidate(cand_prefix, all_files)
+                    if hit and hit != rel_posix:
+                        targets.add(hit)
+                        break
 
     return targets
 
@@ -349,8 +438,10 @@ def _resolve_rust_edges(
     imports: list[str],
     all_files: set[str],
     crate_name: str,
+    cargo_crates: dict[str, str] | None = None,
 ) -> set[str]:
     targets: set[str] = set()
+    crate_map = cargo_crates or {}
     p = Path(rel_posix)
     cur_dir = p.parent.as_posix()
     if cur_dir == ".":
@@ -380,6 +471,14 @@ def _resolve_rust_edges(
         if head in ("crate", crate_name) and len(segs) >= 2:
             if not _probe_rs(segs[1:], crate_src_dir) and crate_src_dir != "src":
                 _probe_rs(segs[1:], "src")
+        elif head in crate_map:
+            ws_src = crate_map[head]
+            if len(segs) >= 2 and _probe_rs(segs[1:], ws_src):
+                pass
+            else:
+                lib_cand = f"{ws_src}/lib.rs"
+                if lib_cand in all_files and lib_cand != rel_posix:
+                    targets.add(lib_cand)
         elif head == "self" and len(segs) >= 2:
             base = cur_dir if p.name in ("lib.rs", "main.rs", "mod.rs") else f"{cur_dir}/{p.stem}".strip("/")
             _probe_rs(segs[1:], base)
@@ -457,6 +556,29 @@ def _resolve_other_lang_edges(
             for lower_rel, orig_rel in lower_file_lookup.items():
                 if orig_rel != rel_posix and lower_rel.endswith(f"{snake}.ex"):
                     targets.add(orig_rel)
+        elif language in ("C", "C++", "C/C++ Header", "C++ Header"):
+            clean_hdr = imp.replace("\\", "/")
+            if clean_hdr.startswith("."):
+                try:
+                    cand = (cur_dir / clean_hdr).resolve()
+                    if cand.is_relative_to(resolved_root):
+                        rel_cand = cand.relative_to(resolved_root).as_posix()
+                        if rel_cand in all_files and rel_cand != rel_posix:
+                            targets.add(rel_cand)
+                            continue
+                except OSError:
+                    pass
+                clean_hdr = clean_hdr.lstrip("./")
+            for prefix in ("", "include/", "src/"):
+                probed = f"{prefix}{clean_hdr}"
+                if probed in all_files and probed != rel_posix:
+                    targets.add(probed)
+                    break
+            else:
+                suffix = f"/{clean_hdr}"
+                matches = [f for f in all_files if f != rel_posix and f.endswith(suffix)]
+                if len(matches) == 1:
+                    targets.add(matches[0])
 
     return targets
 
@@ -598,7 +720,9 @@ def build_dependency_graph(root: Path, skeleton: RepoSkeleton | None = None) -> 
     lower_lookup = {rel.lower(): rel for rel in all_files}
     py_mod_map = _build_python_module_map(all_files)
     ts_base_url, ts_aliases = _load_tsconfig_aliases(resolved_root)
+    js_workspaces = _load_js_workspace_packages(resolved_root, all_files)
     go_module = _load_go_module_name(resolved_root)
+    cargo_crates = _load_cargo_crate_roots(resolved_root, all_files)
 
     go_pkg_files: dict[str, list[str]] = {}
     for f in sk.files:
@@ -628,12 +752,14 @@ def build_dependency_graph(root: Path, skeleton: RepoSkeleton | None = None) -> 
             resolved = _resolve_python_file_edges(resolved_root, f.relative_path, f.imports, py_mod_map)
         elif lang in ("JavaScript", "TypeScript", "JavaScript (React)", "TypeScript (React)"):
             resolved = _resolve_js_ts_edges(
-                resolved_root, f.relative_path, f.imports, all_files, ts_base_url, ts_aliases
+                resolved_root, f.relative_path, f.imports, all_files, ts_base_url, ts_aliases, js_workspaces
             )
         elif lang == "Go":
             resolved = _resolve_go_edges(f.relative_path, f.imports, go_module, go_pkg_files)
         elif lang == "Rust":
-            resolved = _resolve_rust_edges(resolved_root, f.relative_path, f.imports, all_files, crate_name)
+            resolved = _resolve_rust_edges(
+                resolved_root, f.relative_path, f.imports, all_files, crate_name, cargo_crates
+            )
         else:
             resolved = _resolve_other_lang_edges(
                 resolved_root, f.relative_path, lang, f.imports, all_files, lower_lookup
@@ -989,4 +1115,372 @@ def analyze_impact(
         total_layers=len(dep_graph.topological_layers),
         internal_edge_count=dep_graph.internal_edge_count,
         repo_cycles_count=len(dep_graph.cycles),
+    )
+
+
+_SHARED_CONFIG_NAMES = frozenset({
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "package.json",
+    "tsconfig.json",
+    "jsconfig.json",
+    "cargo.toml",
+    "go.mod",
+    "conftest.py",
+    ".ctxconfig",
+    ".ctxignore",
+})
+
+
+def _is_shared_config_path(rel_posix: str) -> bool:
+    lower = rel_posix.lower()
+    name = Path(lower).name
+    if name in _SHARED_CONFIG_NAMES:
+        return True
+    if lower.startswith((".github/workflows/", "ops/")):
+        return True
+    return False
+
+
+def _collect_git_diff_files(
+    resolved_root: Path,
+    *,
+    git_diff: str | None = None,
+    staged: bool = False,
+) -> tuple[str, list[str]]:
+    """Collect changed repo-relative paths from git diff / staged index / working tree."""
+    check_git = subprocess.run(
+        ["git", "-C", str(resolved_root), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    if check_git.returncode != 0:
+        raise ValueError(f"Not a git repository: {resolved_root}")
+    git_top = Path(check_git.stdout.strip()).resolve()
+
+    raw_paths: set[str] = set()
+    if staged:
+        spec_label = "--staged"
+        proc = subprocess.run(
+            ["git", "-C", str(git_top), "diff", "--cached", "--name-only", "--diff-filter=ACMRD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if proc.returncode != 0:
+            raise ValueError(f"Git staged diff failed: {proc.stderr.strip()}")
+        raw_paths.update(line.strip() for line in proc.stdout.splitlines() if line.strip())
+    else:
+        rev_spec = (git_diff or "WORKTREE").strip()
+        if rev_spec.startswith("-"):
+            raise ValueError(f"Invalid git diff revision spec: {rev_spec}")
+        spec_label = rev_spec
+        if rev_spec.upper() == "WORKTREE":
+            head_diff = subprocess.run(
+                ["git", "-C", str(git_top), "diff", "--name-only", "--diff-filter=ACMRD", "HEAD", "--"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if head_diff.returncode == 0:
+                raw_paths.update(line.strip() for line in head_diff.stdout.splitlines() if line.strip())
+            else:
+                for extra_args in (["diff", "--name-only"], ["diff", "--cached", "--name-only"]):
+                    p = subprocess.run(
+                        ["git", "-C", str(git_top), *extra_args],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=False,
+                    )
+                    if p.returncode == 0:
+                        raw_paths.update(line.strip() for line in p.stdout.splitlines() if line.strip())
+            untracked = subprocess.run(
+                ["git", "-C", str(git_top), "ls-files", "--others", "--exclude-standard"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if untracked.returncode == 0:
+                raw_paths.update(line.strip() for line in untracked.stdout.splitlines() if line.strip())
+        else:
+            proc = subprocess.run(
+                ["git", "-C", str(git_top), "diff", "--name-only", "--diff-filter=ACMRD", rev_spec, "--"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if proc.returncode != 0:
+                raise ValueError(f"Git diff failed for '{rev_spec}': {proc.stderr.strip()}")
+            raw_paths.update(line.strip() for line in proc.stdout.splitlines() if line.strip())
+
+    scoped: list[str] = []
+    for rel_from_top in sorted(raw_paths):
+        abs_cand = (git_top / rel_from_top).resolve()
+        if abs_cand.is_relative_to(resolved_root):
+            rel = abs_cand.relative_to(resolved_root).as_posix()
+            if rel and not rel.startswith((".ctx/", ".ctx-cache/")):
+                scoped.append(rel)
+    return spec_label, sorted(dict.fromkeys(scoped))
+
+
+def analyze_diff_impact(
+    root: Path,
+    *,
+    git_diff: str | None = None,
+    staged: bool = False,
+    max_depth: int | None = None,
+    skeleton: RepoSkeleton | None = None,
+    graph: DependencyGraph | None = None,
+) -> DiffImpactResult:
+    """Compile a git diff into unioned blast radius, coupled tests, and proportional verification checks."""
+    if max_depth is not None and max_depth < 1:
+        raise ValueError("max_depth must be >= 1 when specified")
+
+    resolved_root = root.resolve()
+    spec_label, changed_files = _collect_git_diff_files(
+        resolved_root,
+        git_diff=git_diff,
+        staged=staged,
+    )
+    sk = skeleton if skeleton is not None else extract_skeleton(resolved_root)
+    dep_graph = graph if graph is not None else build_dependency_graph(resolved_root, skeleton=sk)
+
+    all_files = {f.relative_path: f for f in sk.files}
+    changed_configs: list[str] = []
+    changed_test_files: list[str] = []
+    changed_boundary_docs: list[str] = []
+    matched_code_files: list[str] = []
+
+    for rel in changed_files:
+        lower = rel.lower()
+        if _is_shared_config_path(rel):
+            changed_configs.append(rel)
+        elif is_test_file_path(rel):
+            changed_test_files.append(rel)
+        elif lower.endswith((".md", ".rst", ".txt")):
+            changed_boundary_docs.append(rel)
+        else:
+            matched_code_files.append(rel)
+
+    seed_graph_files = [
+        rel
+        for rel in [*matched_code_files, *changed_test_files]
+        if rel in all_files
+    ]
+    seed_set = set(seed_graph_files)
+
+    direct_outbound = sorted({
+        dep
+        for src in seed_graph_files
+        for dep in dep_graph.outbound_files.get(src, [])
+        if dep not in seed_set
+    })
+
+    visited_dist: dict[str, int] = {f: 0 for f in seed_graph_files}
+    visited_via: dict[str, str] = {}
+    queue: deque[str] = deque(seed_graph_files)
+    while queue:
+        curr = queue.popleft()
+        curr_dist = visited_dist[curr]
+        if max_depth is not None and curr_dist >= max_depth:
+            continue
+        for caller in dep_graph.inbound_files.get(curr, []):
+            if caller not in visited_dist:
+                visited_dist[caller] = curr_dist + 1
+                visited_via[caller] = curr
+                queue.append(caller)
+
+    direct_inbound = sorted(
+        f for f, d in visited_dist.items() if d == 1 and not is_test_file_path(f)
+    )
+    transitive_records: list[dict[str, Any]] = [
+        {
+            "path": f,
+            "distance": d,
+            "via": visited_via[f],
+            "is_test": is_test_file_path(f),
+        }
+        for f, d in sorted(visited_dist.items(), key=lambda kv: (kv[1], kv[0]))
+        if d >= 1
+    ]
+
+    coupled_map: dict[str, dict[str, Any]] = {}
+    for t_rel in changed_test_files:
+        if t_rel in all_files:
+            coupled_map[t_rel] = {"path": t_rel, "distance": 0, "reason": "changed_test"}
+    for rec in transitive_records:
+        if rec["is_test"] and rec["path"] not in coupled_map:
+            coupled_map[rec["path"]] = {
+                "path": rec["path"],
+                "distance": rec["distance"],
+                "reason": "direct_import" if rec["distance"] == 1 else "transitive_import",
+            }
+
+    seed_stems = {
+        Path(f).stem.lower()
+        for f in matched_code_files
+        if Path(f).stem.lower() not in {"__init__", "index", "mod", "main", "lib"}
+    }
+    for f in sk.files:
+        if not is_test_file_path(f.relative_path) or f.relative_path in coupled_map:
+            continue
+        tname = Path(f.relative_path).stem.lower()
+        stripped_tname = (
+            tname.removeprefix("test_")
+            .removesuffix("_test")
+            .removesuffix(".test")
+            .removesuffix(".spec")
+        )
+        if stripped_tname in seed_stems or any(
+            re.search(rf"(?:^|[_.-]){re.escape(st)}(?:$|[_.-])", stripped_tname) is not None
+            for st in seed_stems
+            if len(st) >= 3
+        ):
+            coupled_map[f.relative_path] = {
+                "path": f.relative_path,
+                "distance": None,
+                "reason": "naming_convention",
+            }
+
+    reason_rank = {
+        "changed_test": 0,
+        "direct_import": 1,
+        "transitive_import": 2,
+        "naming_convention": 3,
+    }
+    coupled_tests = sorted(
+        coupled_map.values(),
+        key=lambda item: (
+            reason_rank.get(str(item["reason"]), 9),
+            item["distance"] if isinstance(item["distance"], int) else 999,
+            str(item["path"]),
+        ),
+    )
+
+    affected_prod_files = {f for f in visited_dist if not is_test_file_path(f)} | {
+        f for f in matched_code_files if f in all_files
+    }
+    affected_subsystems = sorted({
+        _subsystem_key_for_rel_path(f)
+        for f in affected_prod_files
+    })
+
+    ep_by_file = _resolve_entrypoint_files(resolved_root, sk)
+    affected_eps: set[str] = set()
+    for fpath in affected_prod_files:
+        affected_eps.update(ep_by_file.get(fpath, set()))
+    for surf in sk.operational_surfaces:
+        if surf.file in affected_prod_files and surf.kind in (
+            "cli_command",
+            "http_route",
+            "mcp_tool",
+            "mcp_resource",
+        ):
+            affected_eps.add(f"{surf.kind}:{surf.name} ({surf.file})")
+
+    governing_docs: list[str] = []
+    seed_parents = {
+        parent.as_posix()
+        for f in changed_files
+        for parent in [Path(f).parent, *Path(f).parents]
+    }
+    for doc in sk.boundary_docs:
+        if doc.kind not in ("authority", "architecture"):
+            continue
+        doc_parent = Path(doc.relative_path).parent.as_posix()
+        if (
+            doc_parent == "."
+            or doc.relative_path.lower().startswith(("docs/adr/", "adr/", "docs/designs/"))
+            or doc_parent in seed_parents
+        ):
+            governing_docs.append(doc.relative_path)
+
+    cycles_involving_changes = [
+        cyc for cyc in dep_graph.cycles if any(f in seed_set for f in cyc)
+    ]
+
+    repo_has_tests = any(is_test_file_path(f.relative_path) for f in sk.files)
+    escalation_reasons: list[str] = []
+    recommended_checks: list[str] = []
+
+    def _default_broad_runner() -> str:
+        if (resolved_root / "pyproject.toml").is_file() or sk.languages.get("Python"):
+            return "pytest"
+        if (resolved_root / "Cargo.toml").is_file():
+            return "cargo test"
+        if (resolved_root / "go.mod").is_file():
+            return "go test ./..."
+        if (resolved_root / "package.json").is_file():
+            return "npm test"
+        return "pytest"
+
+    doc_hygiene_test = "tests/test_doc_hygiene.py"
+    has_doc_hygiene = (resolved_root / doc_hygiene_test).is_file()
+    has_test_docs = (resolved_root / "tests" / "test_docs.py").is_file()
+
+    if not changed_files:
+        verification_scope = "none"
+    elif not matched_code_files and not changed_test_files and not changed_configs:
+        verification_scope = "docs_only"
+        if has_doc_hygiene:
+            recommended_checks.append(f"python -m unittest {doc_hygiene_test}")
+        if has_test_docs:
+            recommended_checks.append("pytest tests/test_docs.py")
+    else:
+        if changed_configs:
+            escalation_reasons.append(
+                f"Shared configuration/fixture modified: {', '.join(changed_configs[:5])}"
+            )
+        if len(coupled_tests) > 12:
+            escalation_reasons.append(
+                f"High blast-radius fan-out ({len(coupled_tests)} coupled test files > 12)"
+            )
+        if matched_code_files and not coupled_tests and repo_has_tests:
+            escalation_reasons.append(
+                "Modified code has zero statically coupled tests; escalating to suite"
+            )
+
+        if escalation_reasons:
+            verification_scope = "broad_suite"
+            recommended_checks.append(_default_broad_runner())
+        else:
+            verification_scope = "targeted_tests"
+            py_tests = [str(t["path"]) for t in coupled_tests if str(t["path"]).endswith(".py")]
+            other_tests = [str(t["path"]) for t in coupled_tests if not str(t["path"]).endswith(".py")]
+            if py_tests:
+                recommended_checks.append(f"pytest {' '.join(py_tests)}")
+            if other_tests:
+                recommended_checks.append(_default_broad_runner())
+
+        if changed_boundary_docs and has_doc_hygiene:
+            doc_cmd = f"python -m unittest {doc_hygiene_test}"
+            if doc_cmd not in recommended_checks:
+                recommended_checks.append(doc_cmd)
+
+    return DiffImpactResult(
+        diff_spec=spec_label,
+        changed_files=changed_files,
+        matched_code_files=matched_code_files,
+        changed_test_files=changed_test_files,
+        changed_boundary_docs=changed_boundary_docs,
+        changed_configs=changed_configs,
+        direct_outbound_deps=direct_outbound,
+        direct_inbound_dependents=direct_inbound,
+        transitive_inbound_dependents=transitive_records,
+        coupled_tests=coupled_tests,
+        affected_subsystems=affected_subsystems,
+        affected_entrypoints=sorted(affected_eps),
+        governing_docs=sorted(dict.fromkeys(governing_docs)),
+        cycles_involving_changes=cycles_involving_changes,
+        verification_scope=verification_scope,
+        recommended_checks=recommended_checks,
+        escalation_reasons=escalation_reasons,
     )

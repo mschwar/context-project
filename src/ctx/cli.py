@@ -522,77 +522,149 @@ def serve(ctx: click.Context, path: str, host: str, port: int, mcp: bool) -> Non
 
 
 @cli.command("impact")
-@click.argument("target")
+@click.argument("target", required=False, default=None)
 @click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, resolve_path=True))
 @click.option("--depth", type=int, default=None, help="Maximum reverse-dependency BFS depth (>= 1).")
+@click.option(
+    "--git-diff",
+    "git_diff",
+    default=None,
+    help="Compile blast radius & minimal test plan across a git diff (e.g. HEAD, origin/main...HEAD, WORKTREE).",
+)
+@click.option("--staged", is_flag=True, help="Compile blast radius & minimal test plan across staged git changes.")
 @_subcommand_output_option
 @click.pass_context
 def impact(
     ctx: click.Context,
-    target: str,
+    target: Optional[str],
     path: str,
     depth: Optional[int],
+    git_diff: Optional[str] = None,
+    staged: bool = False,
     sub_output_mode: Optional[str] = None,
 ) -> None:
     """Analyze reverse-dependency blast radius, coupled tests, and governing docs."""
     json_mode = _resolve_json_mode(ctx, sub_output_mode)
-    with OutputBroker(command="impact", json_mode=json_mode) as broker:
-        try:
-            result = api.analyze_impact(Path(path), target, max_depth=depth)
-        except ValueError as exc:
-            if json_mode:
-                broker.add_error("invalid_target", str(exc))
-            else:
-                raise click.ClickException(str(exc)) from exc
-            result = None
+    diff_mode = git_diff is not None or staged
 
-        if result is not None:
-            broker.set_data(asdict(result))
-            if not json_mode:
-                click.echo(f"Target: {result.target} ({result.target_kind})")
-                click.echo(f"Matched files ({len(result.matched_files)}): {', '.join(result.matched_files)}")
-                if result.matched_symbols:
-                    preview_syms = ", ".join(result.matched_symbols[:8])
-                    suffix = f" (+{len(result.matched_symbols) - 8} more)" if len(result.matched_symbols) > 8 else ""
-                    click.echo(f"Matched symbols ({len(result.matched_symbols)}): {preview_syms}{suffix}")
-                if result.layer_index is not None:
-                    click.echo(f"Topological layer: {result.layer_index + 1} / {result.total_layers}")
-                click.echo(
-                    f"Direct outbound deps ({len(result.direct_outbound_deps)}): "
-                    f"{', '.join(result.direct_outbound_deps) if result.direct_outbound_deps else 'none'}"
+    if diff_mode and git_diff is not None and staged:
+        raise click.UsageError("Pass either --git-diff or --staged, not both.")
+
+    default_dot = str(Path(".").resolve())
+    effective_path_str = path
+    if diff_mode:
+        if target is not None:
+            if path != default_dot:
+                raise click.UsageError("Cannot combine a positional <target> with --git-diff or --staged.")
+            cand = Path(target)
+            if not cand.exists() or not cand.is_dir():
+                raise click.UsageError(f"Invalid repository directory path: {target}")
+            effective_path_str = str(cand.resolve())
+    elif target is None:
+        raise click.UsageError("Missing argument 'TARGET' (or pass --git-diff / --staged).")
+
+    with OutputBroker(command="impact", json_mode=json_mode) as broker:
+        if diff_mode:
+            try:
+                diff_res = api.analyze_diff_impact(
+                    Path(effective_path_str),
+                    git_diff=git_diff,
+                    staged=staged,
+                    max_depth=depth,
                 )
-                click.echo(
-                    f"Direct inbound dependents ({len(result.direct_inbound_dependents)}): "
-                    f"{', '.join(result.direct_inbound_dependents) if result.direct_inbound_dependents else 'none'}"
-                )
-                click.echo(f"Transitive inbound dependents: {len(result.transitive_inbound_dependents)}")
-                for rec in result.transitive_inbound_dependents[:15]:
-                    tag = " [test]" if rec.get("is_test") else ""
-                    click.echo(f"  - [d={rec['distance']}] {rec['path']}{tag}")
-                if len(result.transitive_inbound_dependents) > 15:
-                    click.echo(f"  ... (+{len(result.transitive_inbound_dependents) - 15} more)")
-                click.echo(f"Coupled tests ({len(result.coupled_tests)}):")
-                for test_rec in result.coupled_tests[:15]:
-                    dist_part = f", d={test_rec['distance']}" if test_rec.get("distance") is not None else ""
-                    click.echo(f"  - {test_rec['path']} ({test_rec['reason']}{dist_part})")
-                if len(result.coupled_tests) > 15:
-                    click.echo(f"  ... (+{len(result.coupled_tests) - 15} more)")
-                click.echo(
-                    f"Affected subsystems ({len(result.affected_subsystems)}): "
-                    f"{', '.join(result.affected_subsystems) if result.affected_subsystems else 'none'}"
-                )
-                if result.affected_entrypoints:
-                    click.echo(f"Affected entrypoints & surfaces ({len(result.affected_entrypoints)}):")
-                    for ep in result.affected_entrypoints[:15]:
-                        click.echo(f"  - {ep}")
-                    if len(result.affected_entrypoints) > 15:
-                        click.echo(f"  ... (+{len(result.affected_entrypoints) - 15} more)")
-                if result.governing_docs:
-                    click.echo(f"Governing docs: {', '.join(result.governing_docs)}")
-                if result.cycles_involving_target:
-                    click.echo(f"Cycles involving target ({len(result.cycles_involving_target)}):")
-                    for cyc in result.cycles_involving_target:
-                        click.echo(f"  - {' -> '.join(cyc)}")
+            except ValueError as exc:
+                if json_mode:
+                    broker.add_error("invalid_target", str(exc))
+                else:
+                    raise click.ClickException(str(exc)) from exc
+                diff_res = None
+
+            if diff_res is not None:
+                broker.set_data(asdict(diff_res))
+                if not json_mode:
+                    click.echo(f"Diff spec: {diff_res.diff_spec}")
+                    click.echo(
+                        f"Changed files ({len(diff_res.changed_files)}): "
+                        f"{', '.join(diff_res.changed_files) if diff_res.changed_files else 'none'}"
+                    )
+                    click.echo(f"Verification scope: {diff_res.verification_scope}")
+                    if diff_res.escalation_reasons:
+                        for reason in diff_res.escalation_reasons:
+                            click.echo(f"  - escalation: {reason}")
+                    if diff_res.recommended_checks:
+                        click.echo("Recommended checks:")
+                        for cmd_str in diff_res.recommended_checks:
+                            click.echo(f"  $ {cmd_str}")
+                    click.echo(f"Coupled tests ({len(diff_res.coupled_tests)}):")
+                    for test_rec in diff_res.coupled_tests[:15]:
+                        dist_part = f", d={test_rec['distance']}" if test_rec.get("distance") is not None else ""
+                        click.echo(f"  - {test_rec['path']} ({test_rec['reason']}{dist_part})")
+                    if len(diff_res.coupled_tests) > 15:
+                        click.echo(f"  ... (+{len(diff_res.coupled_tests) - 15} more)")
+                    if diff_res.affected_entrypoints:
+                        click.echo(f"Affected entrypoints & surfaces ({len(diff_res.affected_entrypoints)}):")
+                        for ep in diff_res.affected_entrypoints[:15]:
+                            click.echo(f"  - {ep}")
+                    if diff_res.governing_docs:
+                        click.echo(f"Governing docs: {', '.join(diff_res.governing_docs)}")
+        else:
+            assert target is not None
+            try:
+                result = api.analyze_impact(Path(effective_path_str), target, max_depth=depth)
+            except ValueError as exc:
+                if json_mode:
+                    broker.add_error("invalid_target", str(exc))
+                else:
+                    raise click.ClickException(str(exc)) from exc
+                result = None
+
+            if result is not None:
+                broker.set_data(asdict(result))
+                if not json_mode:
+                    click.echo(f"Target: {result.target} ({result.target_kind})")
+                    click.echo(f"Matched files ({len(result.matched_files)}): {', '.join(result.matched_files)}")
+                    if result.matched_symbols:
+                        preview_syms = ", ".join(result.matched_symbols[:8])
+                        suffix = f" (+{len(result.matched_symbols) - 8} more)" if len(result.matched_symbols) > 8 else ""
+                        click.echo(f"Matched symbols ({len(result.matched_symbols)}): {preview_syms}{suffix}")
+                    if result.layer_index is not None:
+                        click.echo(f"Topological layer: {result.layer_index + 1} / {result.total_layers}")
+                    click.echo(
+                        f"Direct outbound deps ({len(result.direct_outbound_deps)}): "
+                        f"{', '.join(result.direct_outbound_deps) if result.direct_outbound_deps else 'none'}"
+                    )
+                    click.echo(
+                        f"Direct inbound dependents ({len(result.direct_inbound_dependents)}): "
+                        f"{', '.join(result.direct_inbound_dependents) if result.direct_inbound_dependents else 'none'}"
+                    )
+                    click.echo(f"Transitive inbound dependents: {len(result.transitive_inbound_dependents)}")
+                    for rec in result.transitive_inbound_dependents[:15]:
+                        tag = " [test]" if rec.get("is_test") else ""
+                        click.echo(f"  - [d={rec['distance']}] {rec['path']}{tag}")
+                    if len(result.transitive_inbound_dependents) > 15:
+                        click.echo(f"  ... (+{len(result.transitive_inbound_dependents) - 15} more)")
+                    click.echo(f"Coupled tests ({len(result.coupled_tests)}):")
+                    for test_rec in result.coupled_tests[:15]:
+                        dist_part = f", d={test_rec['distance']}" if test_rec.get("distance") is not None else ""
+                        click.echo(f"  - {test_rec['path']} ({test_rec['reason']}{dist_part})")
+                    if len(result.coupled_tests) > 15:
+                        click.echo(f"  ... (+{len(result.coupled_tests) - 15} more)")
+                    click.echo(
+                        f"Affected subsystems ({len(result.affected_subsystems)}): "
+                        f"{', '.join(result.affected_subsystems) if result.affected_subsystems else 'none'}"
+                    )
+                    if result.affected_entrypoints:
+                        click.echo(f"Affected entrypoints & surfaces ({len(result.affected_entrypoints)}):")
+                        for ep in result.affected_entrypoints[:15]:
+                            click.echo(f"  - {ep}")
+                        if len(result.affected_entrypoints) > 15:
+                            click.echo(f"  ... (+{len(result.affected_entrypoints) - 15} more)")
+                    if result.governing_docs:
+                        click.echo(f"Governing docs: {', '.join(result.governing_docs)}")
+                    if result.cycles_involving_target:
+                        click.echo(f"Cycles involving target ({len(result.cycles_involving_target)}):")
+                        for cyc in result.cycles_involving_target:
+                            click.echo(f"  - {' -> '.join(cyc)}")
     _exit_for_broker(broker, json_mode=json_mode)
 
 

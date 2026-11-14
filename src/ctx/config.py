@@ -66,6 +66,11 @@ def resolve_project_anchor(target_path: Path) -> Path:
     return start_dir
 
 
+def resolve_configured_max_depth(target_path: Path) -> Optional[int]:
+    """Resolve directory traversal max_depth from CTX_MAX_DEPTH or .ctxconfig."""
+    return load_config(target_path).max_depth
+
+
 def resolve_configured_extensions(target_path: Path) -> Optional[list[str]]:
     """Resolve file-extension allowlist from CTX_EXTENSIONS or .ctxconfig."""
     env_extensions = os.getenv("CTX_EXTENSIONS")

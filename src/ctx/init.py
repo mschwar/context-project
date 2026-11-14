@@ -10,15 +10,17 @@ zero LLM calls and zero background git hooks:
 
 from __future__ import annotations
 
+from dataclasses import asdict
+from datetime import datetime, timezone
 import getpass
 import hashlib
 import os
+from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
-from pathlib import Path
 
 from ctx import __version__
 from ctx.lock import (
@@ -95,6 +97,9 @@ def init_project(
             if not _other_worktrees_share_hooks(root):
                 _remove_legacy_hooks(root)
             skeleton = extract_skeleton(root)
+            from ctx.api import build_fleet_capsule
+
+            capsule = build_fleet_capsule(root, depth=1, skeleton=skeleton)
             fenced_mkdir(ctx_dir, parents=True, exist_ok=True)
             write_text_atomic(ctx_dir / ".gitignore", "*\n")
             rendered_c0 = render_context_0(skeleton)
@@ -103,6 +108,7 @@ def init_project(
             write_text_atomic(ctx_dir / "CONTEXT-0.md", rendered_c0)
             write_text_atomic(ctx_dir / "CONTEXT-1.md", rendered_c1)
             write_text_atomic(ctx_dir / "CONTEXT.md", rendered_full)
+            save_json_atomic(ctx_dir / "capsule.json", asdict(capsule))
             metadata["mode"] = "tier2"
             metadata["structural_hash"] = skeleton.structural_hash
             metadata["boundary_doc_hash"] = skeleton.boundary_doc_hash
@@ -164,16 +170,88 @@ def uninit_project(root: Path) -> dict:
     }
 
 
+_URL_SCHEME_REMOTE_RE = re.compile(r"^(?:https?|ssh|git)://(?:[^@/\s]+@)?([^/:\s]+)(?::\d+)?/(.+)$")
+_SCP_REMOTE_RE = re.compile(r"^(?:[^@/\s]+@)?([A-Za-z0-9.-]{2,}):([^/].*)$")
+
+
+def normalize_git_remote_url(raw_url: str) -> str | None:
+    """Normalize SSH/HTTPS/git remote URLs into canonical lowercase 'host/owner/repo'."""
+    cleaned = raw_url.strip()
+    if not cleaned:
+        return None
+    m_url = _URL_SCHEME_REMOTE_RE.match(cleaned)
+    if m_url:
+        host = m_url.group(1).lower()
+        repo_path = m_url.group(2).strip("/")
+        if repo_path.lower().endswith(".git"):
+            repo_path = repo_path[:-4]
+        repo_path = repo_path.strip("/").lower()
+        return f"{host}/{repo_path}" if repo_path else None
+
+    m_scp = _SCP_REMOTE_RE.match(cleaned)
+    if m_scp:
+        host = m_scp.group(1).lower()
+        repo_path = m_scp.group(2).strip("/")
+        if repo_path.lower().endswith(".git"):
+            repo_path = repo_path[:-4]
+        repo_path = repo_path.strip("/").lower()
+        return f"{host}/{repo_path}" if repo_path else None
+
+    return None
+
+
+def compute_repo_id(root: Path) -> str:
+    """Compute a cross-host deterministic repo_id from git remote origin, root commit, or path fallback."""
+    from ctx.config import resolve_project_anchor
+
+    resolved = root.resolve()
+    git_anchor = resolve_project_anchor(resolved) if resolved.exists() else resolved
+    if (git_anchor / ".git").exists():
+        try:
+            rem = subprocess.run(
+                ["git", "-C", str(git_anchor), "config", "--get", "remote.origin.url"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            if rem.returncode == 0 and rem.stdout.strip():
+                norm_remote = normalize_git_remote_url(rem.stdout.strip())
+                if norm_remote:
+                    digest = hashlib.sha256(f"git-remote:{norm_remote}".encode("utf-8")).hexdigest()
+                    return f"sha256:{digest}"
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        try:
+            rev = subprocess.run(
+                ["git", "-C", str(git_anchor), "rev-list", "--max-parents=0", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            if rev.returncode == 0 and rev.stdout.strip():
+                first_root = sorted(line.strip().lower() for line in rev.stdout.splitlines() if line.strip())[0]
+                digest = hashlib.sha256(f"git-root:{first_root}".encode("utf-8")).hexdigest()
+                return f"sha256:{digest}"
+        except (subprocess.SubprocessError, OSError, IndexError):
+            pass
+
+    digest = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
+
+
 def _build_metadata(root: Path) -> dict:
     """Build deterministic metadata.json content."""
-    repo_id = hashlib.sha256(str(root).encode()).hexdigest()
+    repo_id = compute_repo_id(root)
     now = datetime.now(timezone.utc).isoformat()
     return {
         "schema_version": 1,
         "initialized_at": now,
         "initialized_by": getpass.getuser(),
         "ctx_version": __version__,
-        "repo_id": f"sha256:{repo_id}",
+        "repo_id": repo_id,
         "last_refresh": now,
         "python_executable": sys.executable,
         "hooks_installed": [],

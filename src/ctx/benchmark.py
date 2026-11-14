@@ -69,7 +69,6 @@ _ORACLE_BOUNDARY_FILENAMES = frozenset({
     "gate_closeout.md",
     "architecture.md",
     "state.md",
-    "todos.md",
     "runbook.md",
     "schema.md",
     "current.md",
@@ -94,6 +93,7 @@ _ORACLE_ENTRYPOINT_NAMES = (
 _SOURCE_EXTS = frozenset({
     ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
     ".go", ".rs", ".rb", ".java", ".kt", ".cs", ".php", ".swift", ".ex", ".exs",
+    ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx",
 })
 
 _HTTP_METHODS = frozenset({"get", "post", "put", "delete", "patch", "options", "head", "route", "api_route"})
@@ -184,10 +184,13 @@ def _walk_repo_texts(root: Path) -> dict[str, str]:
 
 def _extract_oracle_boundary_docs(files: dict[str, str]) -> set[str]:
     docs: set[str] = set()
+    excluded_ancestors = {"archive", "archives", "tests", "test", "fixtures", "benchmarks"}
     for rel in files:
         p = Path(rel)
         lower_name = p.name.lower()
         lower_parts = {part.lower() for part in p.parts[:-1]}
+        if lower_parts & excluded_ancestors:
+            continue
         if lower_name in _ORACLE_BOUNDARY_FILENAMES:
             docs.add(rel)
         elif p.suffix.lower() in {".md", ".rst"} and (lower_parts & {"adr", "adrs", "decisions"}):
